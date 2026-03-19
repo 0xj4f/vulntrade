@@ -1,0 +1,100 @@
+# VulnTrade Application Configuration
+# VULN: Secrets in plaintext, debug enabled, everything exposed
+
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-stacktrace: always  # VULN: stack traces exposed
+
+spring:
+  application:
+    name: vulntrade
+
+  # PostgreSQL
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/vulntrade}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true  # VULN: SQL queries logged
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  # H2 Console - VULN: enabled and accessible
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true  # VULN: accessible from any host
+
+  # Redis
+  redis:
+    host: ${SPRING_REDIS_HOST:localhost}
+    port: ${SPRING_REDIS_PORT:6379}
+    # VULN: no password configured
+
+  # Jackson
+  jackson:
+    serialization:
+      fail-on-empty-beans: false
+    default-property-inclusion: non_null
+    # VULN: polymorphic type handling enabled
+    mapper:
+      default-view-inclusion: true
+
+# Spring Security - intentionally weak
+security:
+  ignored: /actuator/**,/h2-console/**
+
+# Actuator - VULN: everything exposed
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"  # VULN: ALL endpoints exposed
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+    env:
+      show-values: ALWAYS  # VULN: env values visible
+    configprops:
+      show-values: ALWAYS
+    shutdown:
+      enabled: true  # VULN: shutdown endpoint enabled
+
+# JWT Configuration - VULN: weak secret
+jwt:
+  secret: ${JWT_SECRET:vulntrade-secret}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# Admin - VULN: hardcoded credentials
+admin:
+  api-key: ${ADMIN_API_KEY:vt-api-key-12345-not-so-secret}
+
+# Flags
+flags:
+  flag1: ${FLAG_1:FLAG{4ctu4t0r_3xp0s3d_s3cr3ts}}
+  flag7: ${FLAG_7:FLAG{st0mp_4dm1n_ch4nn3l_l34k}}
+  flag8: ${FLAG_8:FLAG{h34pdump_m3m0ry_s3cr3ts}}
+  flag10: ${FLAG_10:FLAG{jwt_f0rg3d_4dm1n_m4st3r}}
+
+# Debug key - VULN: hardcoded
+debug:
+  key: vulntrade-debug-key-2024
+  enabled: true
+
+# Logging
+logging:
+  level:
+    com.vulntrade: DEBUG
+    org.springframework.security: DEBUG  # VULN: security debug logging
+    org.hibernate.SQL: DEBUG

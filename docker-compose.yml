@@ -1,0 +1,117 @@
+services:
+  # ============================================================
+  # PostgreSQL - VULN: default creds, exposed port
+  # ============================================================
+  postgres:
+    image: postgres:13
+    container_name: vulntrade-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"   # VULN: exposed to host
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./database/seed_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./database/flags.sql:/docker-entrypoint-initdb.d/03-flags.sql
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - vulntrade-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # Redis - VULN: no authentication, exposed port
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: vulntrade-redis
+    ports:
+      - "${REDIS_PORT}:6379"   # VULN: exposed to host
+    command: redis-server --save 60 1   # No --requirepass (intentional)
+    networks:
+      - vulntrade-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # Adminer - VULN: DB admin panel exposed
+  # ============================================================
+  adminer:
+    image: adminer:latest
+    container_name: vulntrade-adminer
+    ports:
+      - "8081:8080"   # VULN: exposed DB admin
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - vulntrade-net
+
+  # ============================================================
+  # Backend - Spring Boot (Java 11)
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vulntrade-backend
+    ports:
+      - "8085:8080"    # Main API (mapped to 8085 to avoid conflicts)
+      - "5005:5005"    # VULN: debug port exposed
+      - "9090:9090"    # VULN: JMX port exposed
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_REDIS_HOST: ${REDIS_HOST}
+      SPRING_REDIS_PORT: ${REDIS_PORT}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      FLAG_1: ${FLAG_1}
+      FLAG_7: ${FLAG_7}
+      FLAG_8: ${FLAG_8}
+      FLAG_10: ${FLAG_10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vulntrade-net
+    # VULN: no resource limits
+    volumes:
+      - ./flags:/opt/flags:ro   # Flag 5 for RCE challenge
+
+  # ============================================================
+  # Frontend - React + nginx
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vulntrade-frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    networks:
+      - vulntrade-net
+
+volumes:
+  pgdata:
+
+networks:
+  vulntrade-net:
+    driver: bridge
