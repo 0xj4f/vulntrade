@@ -108,7 +108,120 @@
 
 ## PHASE 3: WebSocket/STOMP Implementation
 **Goal:** Full WebSocket trading with STOMP vulnerabilities  
-**Status:** ⬜ Not Started
+**Status:** ✅ COMPLETE
+
+### 3.1 WebSocket Configuration
+| Task | Status | Notes |
+|------|--------|-------|
+| STOMP over WebSocket (/ws, /ws-sockjs) | ✅ | WebSocketConfig.java updated with full STOMP config |
+| No Origin header validation | ✅ | setAllowedOriginPatterns("*") |
+| CORS allows * | ✅ | CorsConfig.java + WebSocket endpoints |
+| SockJS fallback enabled | ✅ | /ws-sockjs with SockJS |
+| No message size limit | ✅ | Set to 10MB (way too high) |
+| No connection rate limiting | ✅ | No rate limiting anywhere |
+| STOMP channel interceptor | ✅ | StompChannelInterceptor.java - weak auth |
+| /topic/admin/* subscribable by any user | ✅ | No authorization check on subscribe |
+| Missing authorization on /app/ destinations | ✅ | Logs warning but doesn't block |
+
+### 3.2 Market Data Feed (/topic/prices)
+| Task | Status | Notes |
+|------|--------|-------|
+| Price simulation engine | ✅ | PriceSimulatorService.java - random walk every 1s |
+| Publishes to /topic/prices | ✅ | Broadcasts PriceUpdate DTO |
+| Price data format (bid/ask/last/volume) | ✅ | Full PriceUpdate DTO |
+| Internal fields not stripped | ✅ | costBasis, marketMakerId, spreadBps exposed |
+| No entitlement check | ✅ | All users get all symbols |
+| Fixed seed (predictable) | ✅ | new Random(42) |
+| VULN symbol predictable pattern | ✅ | Sinusoidal: 100 + 20*sin(tick*0.1) |
+| BTC-USD no decimal precision limit | ✅ | scale=8 for crypto |
+
+### 3.3 Order Management STOMP Endpoints
+| Task | Status | Notes |
+|------|--------|-------|
+| /app/trade.placeOrder | ✅ | TradeStompController.java |
+| No server-side quantity validation | ✅ | Accepts negative quantities |
+| No price band validation | ✅ | Can buy at $0.01 |
+| clientOrderId not unique-enforced | ✅ | Replay attacks possible |
+| Symbol not validated | ✅ | Non-existent symbols accepted |
+| Balance check race condition | ✅ | READ UNCOMMITTED, TOCTOU in RiskService |
+| /app/trade.cancelOrder | ✅ | IDOR - can cancel any user's order |
+| /app/trade.executeMarket | ✅ | No slippage protection, no halt check |
+| Market order during halt | ✅ | Halt check only for LIMIT orders |
+
+### 3.4 Portfolio & Account STOMP Endpoints
+| Task | Status | Notes |
+|------|--------|-------|
+| /app/trade.getPortfolio (IDOR) | ✅ | Accepts optional userId param |
+| /app/trade.getBalance | ✅ | Response includes apiKey, notes, role |
+| /app/trade.withdraw | ✅ | No 2FA, no rate limit, sign flip, race condition |
+| /app/trade.deposit | ✅ | No source verification - free money |
+| /app/trade.getHistory (SQLi) | ✅ | Raw SQL via CustomQueryRepository |
+| /app/trade.setAlert (XSS) | ✅ | Stored XSS via symbol field |
+| No alert limit | ✅ | Resource exhaustion possible |
+
+### 3.5 Admin STOMP Endpoints
+| Task | Status | Notes |
+|------|--------|-------|
+| /app/admin.adjustBalance | ✅ | JWT role from token body (modifiable) |
+| Log injection via reason field | ✅ | Unsanitized in AuditService |
+| /app/admin.haltTrading | ✅ | Same JWT role vuln, Flag 7 leaked |
+| /app/admin.resumeTrading | ✅ | AdminStompController.java |
+| /app/admin.setPrice | ✅ | Arbitrary prices, no audit trail |
+
+### 3.6 Broadcast Channels
+| Task | Status | Notes |
+|------|--------|-------|
+| /topic/orderbook | ✅ | Includes userId, username (info disclosure) |
+| /topic/trades | ✅ | Includes internal trade IDs, user IDs |
+| /topic/admin/alerts | ✅ | Subscribable by any user, leaks system metrics |
+| Flag 7 in admin alerts | ✅ | Leaked via haltTrading broadcast |
+
+### 3.7 Supporting Infrastructure
+| Task | Status | Notes |
+|------|--------|-------|
+| StompEventListener | ✅ | Tracks sessions, broadcasts to admin channel |
+| StompChannelInterceptor | ✅ | StompPrincipal, weak auth enforcement |
+| MatchingEngineService | ✅ | Self-matching, no circuit breaker, float errors |
+| RiskService | ✅ | TOCTOU, skipped for MARKET, no sell-side check |
+| OrderService | ✅ | No validation, IDOR on cancel |
+| AccountService | ✅ | Race condition withdraw, sign flip, no 2FA |
+| PortfolioService | ✅ | IDOR - any user's portfolio |
+| AlertService | ✅ | Stored XSS, no alert limit |
+| AdminService | ✅ | Broken auth, log injection, no audit |
+| AuditService | ✅ | Log injection, many actions not audited |
+| PriceSimulatorService | ✅ | Fixed seed, predictable VULN pattern |
+
+### 3.8 Frontend WebSocket Integration
+| Task | Status | Notes |
+|------|--------|-------|
+| websocketService.js | ✅ | STOMP/SockJS client, token in headers |
+| Live price feed on Dashboard | ✅ | /topic/prices subscription |
+| Order form via WebSocket | ✅ | /app/trade.placeOrder |
+| Trade broadcast display | ✅ | /topic/trades with user IDs shown |
+| Admin alerts subscription | ✅ | /topic/admin/alerts (any user) |
+| Client-side only order validation | ✅ | Max 10000 qty check in JS only |
+
+### DTOs Created
+| DTO | Notes |
+|-----|-------|
+| WithdrawRequest | No validation, sign flip |
+| DepositRequest | No source verification |
+| AdminBalanceRequest | Log injection via reason |
+| AlertRequest | Stored XSS via symbol |
+| TradeHistoryRequest | SQL injection in dates |
+| PriceUpdate | Internal fields exposed |
+| TradeNotification | User IDs, trade IDs exposed |
+| OrderBookEntry | User IDs, order IDs exposed |
+| HaltTradingRequest | No auth enforcement |
+| SetPriceRequest | Market manipulation |
+
+### Repositories Created
+| Repository | Notes |
+|------------|-------|
+| TradeRepository | Trade queries |
+| TransactionRepository | Transaction history |
+| PriceAlertRepository | Alert management |
+| AuditLogRepository | Audit log queries |
 
 ---
 
@@ -173,6 +286,15 @@
 | 2026-03-19 | P2 | Frontend: Login/Register/Reset pages | ✅ | All pages render, AuthContext works |
 | 2026-03-19 | P2 | Frontend: Account page with IDOR | ✅ | User lookup, password change, email change |
 | 2026-03-19 | P2 | Frontend: Admin panel | ✅ | User list, SQL executor, balance adjustment |
+| 2026-03-19 | P3 | Phase 3 code written | ✅ | 60 Java files, 3 frontend files, all STOMP endpoints |
+| 2026-03-19 | P3 | New files: 10 DTOs | ✅ | Withdraw, Deposit, AdminBalance, Alert, TradeHistory, PriceUpdate, TradeNotification, OrderBookEntry, HaltTrading, SetPrice |
+| 2026-03-19 | P3 | New files: 4 repositories | ✅ | Trade, Transaction, PriceAlert, AuditLog |
+| 2026-03-19 | P3 | New files: 9 services | ✅ | Audit, PriceSim, Risk, Matching, Order, Account, Portfolio, Alert, Admin |
+| 2026-03-19 | P3 | New files: 3 STOMP controllers | ✅ | TradeStompController, AdminStompController, MarketDataController |
+| 2026-03-19 | P3 | New files: 2 WS support | ✅ | StompChannelInterceptor, StompEventListener |
+| 2026-03-19 | P3 | Updated: WebSocketConfig | ✅ | Channel interceptor, message size limits |
+| 2026-03-19 | P3 | Frontend: websocketService.js | ✅ | STOMP/SockJS client service |
+| 2026-03-19 | P3 | Frontend: DashboardPage updated | ✅ | Live prices, order form, trade feed, admin alerts |
 
 ## Port Mapping
 | Service | Container Port | Host Port | URL |
@@ -232,3 +354,42 @@
 | 29 | WebSocket no JWT revalidation | /ws, /ws-sockjs | CWE-613 | ✅ Working |
 | 30 | Predictable WebSocket session ID | /ws handshake | CWE-330 | ✅ Working |
 | 31 | Anonymous WebSocket connections | /ws, /ws-sockjs | CWE-306 | ✅ Working |
+
+## Planned Vulnerabilities (Phase 3) — Needs Testing After Build
+| # | Vulnerability | Endpoint | CWE | Status |
+|---|--------------|----------|-----|--------|
+| 32 | No message size limit (10MB) | /ws, /ws-sockjs | CWE-400 | 🔄 Coded |
+| 33 | No connection rate limiting | /ws, /ws-sockjs | CWE-799 | 🔄 Coded |
+| 34 | /topic/admin/* subscribable by any user | /topic/admin/alerts | CWE-862 | 🔄 Coded (Flag 7) |
+| 35 | Missing authorization on /app/admin.* | /app/admin.adjustBalance etc | CWE-862 | 🔄 Coded |
+| 36 | Price feed includes internal fields | /topic/prices | CWE-200 | 🔄 Coded |
+| 37 | Fixed random seed (predictable prices) | PriceSimulatorService | CWE-330 | 🔄 Coded |
+| 38 | VULN symbol predictable pattern | PriceSimulatorService | CWE-330 | 🔄 Coded |
+| 39 | Negative quantity accepted | /app/trade.placeOrder | CWE-20 | 🔄 Coded |
+| 40 | No price band validation | /app/trade.placeOrder | CWE-20 | 🔄 Coded |
+| 41 | clientOrderId replay | /app/trade.placeOrder | CWE-294 | 🔄 Coded |
+| 42 | Non-existent symbol accepted | /app/trade.placeOrder | CWE-20 | 🔄 Coded |
+| 43 | Balance check race condition (TOCTOU) | RiskService | CWE-367 | 🔄 Coded |
+| 44 | IDOR - cancel any order | /app/trade.cancelOrder | CWE-639 | 🔄 Coded |
+| 45 | No slippage protection | /app/trade.executeMarket | CWE-20 | 🔄 Coded |
+| 46 | Market order during halt | /app/trade.executeMarket | CWE-862 | 🔄 Coded |
+| 47 | IDOR - view any portfolio | /app/trade.getPortfolio | CWE-639 | 🔄 Coded |
+| 48 | Internal account flags in balance | /app/trade.getBalance | CWE-200 | 🔄 Coded |
+| 49 | No 2FA on withdraw (backend) | /app/trade.withdraw | CWE-306 | 🔄 Coded |
+| 50 | Sign flip vulnerability (negative withdraw) | /app/trade.withdraw | CWE-20 | 🔄 Coded |
+| 51 | Race condition double-withdraw | /app/trade.withdraw | CWE-367 | 🔄 Coded |
+| 52 | No deposit source verification | /app/trade.deposit | CWE-345 | 🔄 Coded |
+| 53 | SQL injection in trade history | /app/trade.getHistory | CWE-89 | 🔄 Coded |
+| 54 | Stored XSS via alert symbol | /app/trade.setAlert | CWE-79 | 🔄 Coded |
+| 55 | No alert limit (resource exhaustion) | /app/trade.setAlert | CWE-400 | 🔄 Coded |
+| 56 | JWT role from token body (admin) | /app/admin.adjustBalance | CWE-862 | 🔄 Coded |
+| 57 | Log injection via reason field | /app/admin.adjustBalance | CWE-117 | 🔄 Coded |
+| 58 | Arbitrary price manipulation | /app/admin.setPrice | CWE-20 | 🔄 Coded |
+| 59 | No audit trail for price changes | /app/admin.setPrice | CWE-778 | 🔄 Coded |
+| 60 | Order book info disclosure (userId) | /topic/orderbook | CWE-200 | 🔄 Coded |
+| 61 | Trade broadcast info disclosure | /topic/trades | CWE-200 | 🔄 Coded |
+| 62 | Self-matching (wash trading) | MatchingEngineService | CWE-840 | 🔄 Coded |
+| 63 | Position can go negative (naked short) | MatchingEngineService | CWE-20 | 🔄 Coded |
+| 64 | Floating point P&L errors | MatchingEngineService | CWE-681 | 🔄 Coded |
+| 65 | Risk check skipped for MARKET | RiskService | CWE-862 | 🔄 Coded |
+| 66 | System metrics in admin alerts | AdminService | CWE-200 | 🔄 Coded |
