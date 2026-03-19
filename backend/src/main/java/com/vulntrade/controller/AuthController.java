@@ -1,8 +1,10 @@
 package com.vulntrade.controller;
 
+import com.vulntrade.model.PasswordResetToken;
 import com.vulntrade.model.User;
 import com.vulntrade.model.dto.LoginRequest;
 import com.vulntrade.model.dto.RegisterRequest;
+import com.vulntrade.repository.PasswordResetTokenRepository;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
 import org.springframework.http.HttpStatus;
@@ -10,8 +12,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+import javax.persistence.Query;
 import java.math.BigDecimal;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -22,24 +28,28 @@ public class AuthController {
     private final UserRepository userRepository;
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordEncoder passwordEncoder;
+    private final PasswordResetTokenRepository resetTokenRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public AuthController(UserRepository userRepository,
                           JwtTokenProvider jwtTokenProvider,
-                          PasswordEncoder passwordEncoder) {
+                          PasswordEncoder passwordEncoder,
+                          PasswordResetTokenRepository resetTokenRepository) {
         this.userRepository = userRepository;
         this.jwtTokenProvider = jwtTokenProvider;
         this.passwordEncoder = passwordEncoder;
+        this.resetTokenRepository = resetTokenRepository;
     }
 
     /**
      * Login endpoint.
      * VULN: User enumeration - different errors for "user not found" vs "wrong password".
      * VULN: No rate limiting.
-     * VULN: SQL injection in alternate login path.
      */
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {
-        // VULN: User enumeration
         Optional<User> userOpt = userRepository.findByUsername(request.getUsername());
         if (userOpt.isEmpty()) {
             Map<String, String> error = new HashMap<>();
@@ -54,6 +64,11 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
+        if (!user.getIsActive()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("error", "Account is disabled"));
+        }
+
         String token = jwtTokenProvider.generateToken(
                 user.getId(), user.getUsername(), user.getRole(), user.getEmail());
 
@@ -62,8 +77,9 @@ public class AuthController {
         response.put("userId", user.getId());
         response.put("username", user.getUsername());
         response.put("role", user.getRole());
+        response.put("email", user.getEmail());
         response.put("balance", user.getBalance());
-        // VULN: Returns too much info including role
+        response.put("apiKey", user.getApiKey());  // VULN: API key leaked in login response
 
         return ResponseEntity.ok(response);
     }
@@ -82,6 +98,48 @@ public class AuthController {
     }
 
     /**
+     * VULN: SQL injection login path.
+     * Uses raw SQL concatenation for "legacy compatibility".
+     */
+    @PostMapping("/login-legacy")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<?> loginLegacy(@RequestBody LoginRequest request) {
+        try {
+            // VULN: SQL injection - username concatenated directly into query
+            String sql = "SELECT * FROM users WHERE username = '" + request.getUsername() + "'";
+            Query query = entityManager.createNativeQuery(sql, User.class);
+            List<User> users = query.getResultList();
+
+            if (users.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "User not found"));
+            }
+
+            User user = users.get(0);
+            if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid password"));
+            }
+
+            String token = jwtTokenProvider.generateToken(
+                    user.getId(), user.getUsername(), user.getRole(), user.getEmail());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("token", token);
+            response.put("userId", user.getId());
+            response.put("username", user.getUsername());
+            response.put("role", user.getRole());
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            // VULN: Stack trace in error response aids SQL injection
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Login failed: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
      * Register endpoint.
      * VULN: Mass assignment - can set role=ADMIN.
      * VULN: No email verification.
@@ -93,10 +151,10 @@ public class AuthController {
         user.setUsername(request.getUsername());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setEmail(request.getEmail());
-        // VULN: Mass assignment - role comes directly from request
         user.setRole(request.getRole() != null ? request.getRole() : "TRADER");
-        user.setBalance(new BigDecimal("10000.00"));  // Starting balance
+        user.setBalance(new BigDecimal("10000.00"));
         user.setIsActive(true);
+        user.setApiKey("vt-api-" + System.currentTimeMillis());  // VULN: predictable API key
 
         User saved = userRepository.save(user);
 
@@ -108,14 +166,16 @@ public class AuthController {
         response.put("userId", saved.getId());
         response.put("username", saved.getUsername());
         response.put("role", saved.getRole());
+        response.put("apiKey", saved.getApiKey());  // VULN: API key in response
         response.put("message", "Registration successful");
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**
-     * Password reset.
+     * Password reset - request token.
      * VULN: Predictable reset token (timestamp-based).
+     * VULN: Token leaked in response.
      * VULN: Token doesn't expire.
      */
     @PostMapping("/reset")
@@ -123,12 +183,112 @@ public class AuthController {
         String email = request.get("email");
         Optional<User> userOpt = userRepository.findByEmail(email);
 
-        // VULN: Always returns success (but token is predictable)
-        String resetToken = String.valueOf(System.currentTimeMillis());  // VULN: predictable
-
-        Map<String, String> response = new HashMap<>();
+        Map<String, Object> response = new HashMap<>();
         response.put("message", "If the email exists, a reset link has been sent");
-        response.put("debug_token", resetToken);  // VULN: token leaked in response
+
+        if (userOpt.isPresent()) {
+            User user = userOpt.get();
+
+            // VULN: Predictable token based on timestamp
+            String resetToken = String.valueOf(System.currentTimeMillis());
+
+            PasswordResetToken prt = new PasswordResetToken();
+            prt.setUserId(user.getId());
+            prt.setToken(resetToken);
+            resetTokenRepository.save(prt);
+
+            // VULN: Token leaked in response body
+            response.put("debug_token", resetToken);
+            response.put("reset_url", "/api/auth/reset-confirm?token=" + resetToken);
+        }
+
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Password reset - apply token.
+     * VULN: Token never expires.
+     * VULN: Token not invalidated after use (can be reused).
+     */
+    @PostMapping("/reset-confirm")
+    public ResponseEntity<?> resetConfirm(@RequestBody Map<String, String> request) {
+        String token = request.get("token");
+        String newPassword = request.get("newPassword");
+
+        if (token == null || newPassword == null) {
+            return ResponseEntity.badRequest()
+                .body(Map.of("error", "Token and newPassword required"));
+        }
+
+        Optional<PasswordResetToken> tokenOpt = resetTokenRepository.findByToken(token);
+        if (tokenOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", "Invalid reset token"));
+        }
+
+        PasswordResetToken prt = tokenOpt.get();
+        // VULN: No expiry check
+        // VULN: Token not invalidated after use
+
+        Optional<User> userOpt = userRepository.findById(prt.getUserId());
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", "User not found"));
+        }
+
+        User user = userOpt.get();
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+        // VULN: Old JWT tokens are NOT invalidated
+
+        return ResponseEntity.ok(Map.of(
+            "message", "Password reset successful",
+            "username", user.getUsername()
+        ));
+    }
+
+    /**
+     * Change password endpoint.
+     * VULN: Old password NOT required.
+     * VULN: Old JWT tokens NOT invalidated.
+     */
+    @PutMapping("/change-password")
+    public ResponseEntity<?> changePassword(@RequestBody Map<String, String> request,
+                                             @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String newPassword = request.get("newPassword");
+        // VULN: "oldPassword" field is accepted but NEVER verified
+
+        if (newPassword == null) {
+            return ResponseEntity.badRequest()
+                .body(Map.of("error", "newPassword required"));
+        }
+
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "Authentication required"));
+        }
+
+        String token = authHeader.substring(7);
+        Long userId = jwtTokenProvider.getUserIdFromToken(token);
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "Invalid token"));
+        }
+
+        Optional<User> userOpt = userRepository.findById(userId);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", "User not found"));
+        }
+
+        User user = userOpt.get();
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+        // VULN: Old JWT still valid
+
+        return ResponseEntity.ok(Map.of(
+            "message", "Password changed successfully",
+            "warning", "You may want to re-login for a new token"
+        ));
     }
 }

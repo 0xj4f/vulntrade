@@ -1,5 +1,6 @@
 package com.vulntrade.config;
 
+import com.vulntrade.security.WebSocketAuthInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -9,6 +10,12 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    private final WebSocketAuthInterceptor authInterceptor;
+
+    public WebSocketConfig(WebSocketAuthInterceptor authInterceptor) {
+        this.authInterceptor = authInterceptor;
+    }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
@@ -24,11 +31,13 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // VULN: No origin check - allows any origin
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*");  // VULN: wildcard origin
+                .setAllowedOriginPatterns("*")
+                .addInterceptors(authInterceptor);  // VULN: weak auth, never revalidated
 
         // SockJS fallback - VULN: additional attack surface
         registry.addEndpoint("/ws-sockjs")
-                .setAllowedOriginPatterns("*")   // VULN: wildcard origin
+                .setAllowedOriginPatterns("*")
+                .addInterceptors(authInterceptor)
                 .withSockJS();
 
         // VULN: No message size limit configured

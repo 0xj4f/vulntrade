@@ -105,6 +105,15 @@ CREATE TABLE IF NOT EXISTS symbols (
     is_tradable BOOLEAN DEFAULT true
 );
 
+-- Password reset tokens
+-- VULN: No expiry column, token is predictable (timestamp-based)
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    token VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes (minimal - intentionally missing some for performance vuln)
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_symbol ON orders(symbol);

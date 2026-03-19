@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
 
-function DashboardPage({ user }) {
+function DashboardPage() {
+  const { user } = useAuth();
   const [prices, setPrices] = useState([]);
   const [health, setHealth] = useState(null);
 

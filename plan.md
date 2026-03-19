@@ -67,7 +67,42 @@
 
 ## PHASE 2: Authentication & User Management
 **Goal:** Working auth with intentional vulnerabilities  
-**Status:** ⬜ Not Started
+**Status:** ✅ COMPLETE
+
+### 2.1 Backend Auth Enhancements
+| Task | Status | Notes |
+|------|--------|-------|
+| SQL injection in login (native query path) | ✅ | POST /api/auth/login-legacy - raw SQL concat |
+| API Key authentication filter | ✅ | X-API-Key header + ?api_key= query param both work |
+| Password reset with predictable token | ✅ | Timestamp-based, stored in DB, leaked in response |
+| Password reset apply endpoint | ✅ | POST /api/auth/reset-confirm - no expiry, reusable |
+| Token NOT invalidated on password change | ✅ | Old JWT still works after pwd change |
+| Password change endpoint (no old pwd required) | ✅ | PUT /api/auth/change-password |
+| User profile endpoint with IDOR | ✅ | GET /api/users/{id} - any user's profile |
+| User portfolio with IDOR | ✅ | GET /api/users/{id}/portfolio - exposes notes/flags |
+| Admin user list | ✅ | GET /api/admin/users - role-restricted |
+| Admin SQL executor | ✅ | POST /api/admin/execute-query |
+| Admin balance adjustment | ✅ | POST /api/admin/adjust-balance |
+| Email change without verification | ✅ | PUT /api/users/{id} - no verification |
+
+### 2.2 Frontend Auth Enhancements
+| Task | Status | Notes |
+|------|--------|-------|
+| AuthContext with role in client state | ✅ | AuthContext.js stores everything in localStorage |
+| Registration page with client-only validation | ✅ | Min 6 char password - JS only, server accepts anything |
+| Login page with AuthContext | ✅ | User enumeration errors displayed |
+| Password reset page | ✅ | Request + confirm flow, debug token shown |
+| Account/Profile page | ✅ | Password change, email change, IDOR user lookup |
+| Admin panel with SQL executor | ✅ | User list, SQL query, balance adjustment |
+| Admin route hidden but not protected | ✅ | Conditional render only, any auth user can access /admin |
+
+### 2.3 Session Management
+| Task | Status | Notes |
+|------|--------|-------|
+| WebSocket auth interceptor (weak) | ✅ | JWT checked on connect, never revalidated |
+| Predictable session ID (sequential) | ✅ | AtomicLong counter starting at 1000 |
+| No concurrent session limit | ✅ | Unlimited logins per user |
+| Anonymous WS connections allowed | ✅ | Returns true even without valid token |
 
 ---
 
@@ -123,6 +158,21 @@
 | 2026-03-19 | P1 | Frontend proxy | ✅ | nginx proxies /api/* to backend |
 | 2026-03-19 | P1 | WebSocket SockJS | ✅ | /ws-sockjs/info returns 200 |
 | 2026-03-19 | P1 | Actuator health | ✅ | Shows PostgreSQL, Redis, disk status |
+| 2026-03-19 | P2 | docker compose build --no-cache | ✅ | Backend 31 Java files compiled, frontend rebuilt |
+| 2026-03-19 | P2 | docker compose up -d | ✅ | All 5 services healthy |
+| 2026-03-19 | P2 | API Key auth (X-API-Key header) | ✅ | Authenticated as admin, got IDOR profile |
+| 2026-03-19 | P2 | API Key auth (?api_key= URL param) | ✅ | Authenticated as trader2, exposed Flag 6 |
+| 2026-03-19 | P2 | IDOR: GET /api/users/1 | ✅ | trader1 views admin profile → Flag 2 exposed |
+| 2026-03-19 | P2 | IDOR: GET /api/users/3/portfolio | ✅ | trader1 views trader2 portfolio → Flag 6 exposed |
+| 2026-03-19 | P2 | Password reset (predictable token) | ✅ | Timestamp token leaked in response body |
+| 2026-03-19 | P2 | Password reset apply | ✅ | Token works, password changed, token reusable |
+| 2026-03-19 | P2 | Password change (no old pwd) | ✅ | PUT /api/auth/change-password - no old pwd check |
+| 2026-03-19 | P2 | Old JWT after pwd change | ✅ | Old token still works after password change |
+| 2026-03-19 | P2 | Email change without verification | ✅ | PUT /api/users/{id} - no email verification |
+| 2026-03-19 | P2 | SQLi in login-legacy | ✅ | Raw SQL concat, injection confirmed (blind) |
+| 2026-03-19 | P2 | Frontend: Login/Register/Reset pages | ✅ | All pages render, AuthContext works |
+| 2026-03-19 | P2 | Frontend: Account page with IDOR | ✅ | User lookup, password change, email change |
+| 2026-03-19 | P2 | Frontend: Admin panel | ✅ | User list, SQL executor, balance adjustment |
 
 ## Port Mapping
 | Service | Container Port | Host Port | URL |
@@ -160,3 +210,25 @@
 | 11 | WebSocket no origin check | /ws, /ws-sockjs | CWE-346 | ✅ Working |
 | 12 | H2 console enabled | /h2-console | CWE-749 | ✅ Configured |
 | 13 | Vulnerable dependencies | pom.xml | CWE-1104 | ✅ log4j 2.14.1, commons-collections 3.2.1 |
+
+## Verified Vulnerabilities (Phase 2)
+| # | Vulnerability | Endpoint | CWE | Status |
+|---|--------------|----------|-----|--------|
+| 14 | SQL injection (login-legacy) | POST /api/auth/login-legacy | CWE-89 | ✅ Working |
+| 15 | API key in URL parameter | ?api_key= on any endpoint | CWE-598 | ✅ Working |
+| 16 | API key in plaintext (DB + response) | POST /api/auth/login, /register | CWE-312 | ✅ Working |
+| 17 | IDOR - user profile | GET /api/users/{id} | CWE-639 | ✅ Working (Flag 2) |
+| 18 | IDOR - user portfolio | GET /api/users/{id}/portfolio | CWE-639 | ✅ Working (Flag 6) |
+| 19 | Predictable password reset token | POST /api/auth/reset | CWE-330 | ✅ Working |
+| 20 | Reset token leaked in response | POST /api/auth/reset | CWE-200 | ✅ Working |
+| 21 | Reset token never expires | POST /api/auth/reset-confirm | CWE-613 | ✅ Working |
+| 22 | Reset token reusable | POST /api/auth/reset-confirm | CWE-613 | ✅ Working |
+| 23 | Password change without old password | PUT /api/auth/change-password | CWE-620 | ✅ Working |
+| 24 | JWT not invalidated after pwd change | All JWT-auth endpoints | CWE-613 | ✅ Working |
+| 25 | Email change without verification | PUT /api/users/{id} | CWE-304 | ✅ Working |
+| 26 | Client-side only password validation | Frontend register | CWE-602 | ✅ Working |
+| 27 | Client-side only admin route guard | Frontend /admin | CWE-602 | ✅ Working |
+| 28 | JWT/user data in localStorage | Frontend | CWE-922 | ✅ Working |
+| 29 | WebSocket no JWT revalidation | /ws, /ws-sockjs | CWE-613 | ✅ Working |
+| 30 | Predictable WebSocket session ID | /ws handshake | CWE-330 | ✅ Working |
+| 31 | Anonymous WebSocket connections | /ws, /ws-sockjs | CWE-306 | ✅ Working |

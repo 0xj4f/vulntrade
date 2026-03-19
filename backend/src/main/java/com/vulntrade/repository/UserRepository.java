@@ -15,7 +15,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmail(String email);
 
-    Optional<User> findByApiKey(String apiKey);
+    Optional<User> findFirstByApiKey(String apiKey);
 
     // VULN: Raw SQL query - SQL injection possible if called with unsanitized input
     @Query(value = "SELECT * FROM users WHERE username = ?1", nativeQuery = true)
