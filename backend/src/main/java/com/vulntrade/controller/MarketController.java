@@ -56,7 +56,7 @@ public class MarketController {
 
         // VULN: Leaks userId and full order details for front-running
         List<Map<String, Object>> bids = buyOrders.stream()
-            .sorted(Comparator.comparing(Order::getPrice).reversed())
+            .sorted(Comparator.comparing(Order::getPrice, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
             .map(o -> {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("orderId", o.getId());       // VULN: order ID exposed
@@ -69,7 +69,7 @@ public class MarketController {
             }).collect(Collectors.toList());
 
         List<Map<String, Object>> asks = sellOrders.stream()
-            .sorted(Comparator.comparing(Order::getPrice))
+            .sorted(Comparator.comparing(Order::getPrice, Comparator.nullsLast(Comparator.naturalOrder())))
             .map(o -> {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("orderId", o.getId());

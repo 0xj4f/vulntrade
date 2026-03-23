@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
@@ -9,11 +9,39 @@ import HistoryPage from './pages/HistoryPage';
 import AccountPage from './pages/AccountPage';
 import AdminPage from './pages/AdminPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import { connectWebSocket, disconnectWebSocket, isConnected } from './services/websocketService';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
 function AppContent() {
   const { isAuthenticated, user, logout, isAdmin } = useAuth();
+  const wsConnectedRef = useRef(false);
+
+  // Connect WebSocket at app level so it persists across page navigations
+  useEffect(() => {
+    if (isAuthenticated && !wsConnectedRef.current) {
+      connectWebSocket(
+        (frame) => {
+          console.log('[App] WebSocket connected');
+          wsConnectedRef.current = true;
+        },
+        (error) => {
+          console.error('[App] WebSocket error:', error);
+          wsConnectedRef.current = false;
+        }
+      );
+    }
+    if (!isAuthenticated && wsConnectedRef.current) {
+      disconnectWebSocket();
+      wsConnectedRef.current = false;
+    }
+    return () => {
+      if (wsConnectedRef.current) {
+        disconnectWebSocket();
+        wsConnectedRef.current = false;
+      }
+    };
+  }, [isAuthenticated]);
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#0a0e17', color: '#e1e5ea' }}>

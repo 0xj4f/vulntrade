@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
-import { connectWebSocket, subscribe, sendMessage, disconnectWebSocket } from '../services/websocketService';
+import { subscribe, sendMessage, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 /**
@@ -46,78 +46,82 @@ function DashboardPage() {
       .then(res => setOrderBook({ bids: res.data.bids || [], asks: res.data.asks || [] }))
       .catch(err => console.error('Failed to fetch orderbook:', err));
 
-    // Connect to WebSocket for live prices
-    connectWebSocket(
-      (frame) => {
-        setWsConnected(true);
-        // Subscribe to live price feed
-        subscribe('/topic/prices', (priceUpdate) => {
-          if (priceUpdate.symbol) {
-            pricesRef.current[priceUpdate.symbol] = {
-              ...pricesRef.current[priceUpdate.symbol],
-              currentPrice: priceUpdate.last,
-              bid: priceUpdate.bid,
-              ask: priceUpdate.ask,
-              volume: priceUpdate.volume,
-              // VULN: Internal fields received and displayed - not stripped
-              marketMakerId: priceUpdate.marketMakerId,
-              costBasis: priceUpdate.costBasis,
-              spreadBps: priceUpdate.spreadBps,
-            };
-            setPrices(Object.values(pricesRef.current));
+    // Subscribe to WS topics (connection managed by App.js)
+    const setupSubscriptions = () => {
+      if (!isConnected()) return false;
+      setWsConnected(true);
+
+      // Subscribe to live price feed
+      subscribe('/topic/prices', (priceUpdate) => {
+        if (priceUpdate.symbol) {
+          pricesRef.current[priceUpdate.symbol] = {
+            ...pricesRef.current[priceUpdate.symbol],
+            currentPrice: priceUpdate.last,
+            bid: priceUpdate.bid,
+            ask: priceUpdate.ask,
+            volume: priceUpdate.volume,
+            // VULN: Internal fields received and displayed - not stripped
+            marketMakerId: priceUpdate.marketMakerId,
+            costBasis: priceUpdate.costBasis,
+            spreadBps: priceUpdate.spreadBps,
+          };
+          setPrices(Object.values(pricesRef.current));
+        }
+      });
+
+      // Subscribe to live order book - VULN: includes userId info
+      subscribe('/topic/orderbook', (entry) => {
+        setOrderBook(prev => {
+          const side = entry.side === 'BUY' ? 'bids' : 'asks';
+          const updated = [...prev[side]];
+          const idx = updated.findIndex(e => e.orderId === entry.orderId);
+          if (entry.status === 'CANCELLED' || entry.status === 'FILLED') {
+            return { ...prev, [side]: updated.filter(e => e.orderId !== entry.orderId) };
           }
+          if (idx >= 0) {
+            updated[idx] = entry;
+          } else {
+            updated.push(entry);
+          }
+          return { ...prev, [side]: updated.slice(0, 20) };
         });
+      });
 
-        // Subscribe to live order book - VULN: includes userId info
-        subscribe('/topic/orderbook', (entry) => {
-          setOrderBook(prev => {
-            const side = entry.side === 'BUY' ? 'bids' : 'asks';
-            const updated = [...prev[side]];
-            const idx = updated.findIndex(e => e.orderId === entry.orderId);
-            if (entry.status === 'CANCELLED' || entry.status === 'FILLED') {
-              return { ...prev, [side]: updated.filter(e => e.orderId !== entry.orderId) };
-            }
-            if (idx >= 0) {
-              updated[idx] = entry;
-            } else {
-              updated.push(entry);
-            }
-            return { ...prev, [side]: updated.slice(0, 20) };
-          });
-        });
+      // Subscribe to trade broadcasts - VULN: includes user IDs
+      subscribe('/topic/trades', (trade) => {
+        setRecentTrades(prev => [trade, ...prev].slice(0, 20));
+      });
 
-        // Subscribe to trade broadcasts - VULN: includes user IDs
-        subscribe('/topic/trades', (trade) => {
-          setRecentTrades(prev => [trade, ...prev].slice(0, 20));
-        });
+      // Subscribe to order updates for current user
+      subscribe('/user/queue/orders', (order) => {
+        setOrderStatus(order);
+        toast.info('Order update: ' + (order.type || order.status));
+      });
 
-        // Subscribe to order updates for current user
-        subscribe('/user/queue/orders', (order) => {
-          setOrderStatus(order);
-          toast.info('Order update: ' + (order.type || order.status));
-        });
+      // VULN: Subscribe to admin alerts (any user can do this)
+      subscribe('/topic/admin/alerts', (alert) => {
+        console.log('[ADMIN ALERT]', alert); // VULN: leaked to console
+        setAdminAlerts(prev => [alert, ...prev].slice(0, 10));
+        toast.warn('Admin Alert: ' + (alert.message || alert.type));
+      });
 
-        // VULN: Subscribe to admin alerts (any user can do this)
-        subscribe('/topic/admin/alerts', (alert) => {
-          console.log('[ADMIN ALERT]', alert); // VULN: leaked to console
-          setAdminAlerts(prev => [alert, ...prev].slice(0, 10));
-          toast.warn('Admin Alert: ' + (alert.message || alert.type));
-        });
+      // Subscribe to error queue
+      subscribe('/user/queue/errors', (error) => {
+        toast.error(error.message || 'Unknown error');
+      });
 
-        // Subscribe to error queue
-        subscribe('/user/queue/errors', (error) => {
-          toast.error(error.message || 'Unknown error');
-        });
-      },
-      (error) => {
-        console.error('WebSocket error:', error);
-        setWsConnected(false);
-      }
-    );
-
-    return () => {
-      disconnectWebSocket();
+      return true;
     };
+
+    // Poll for WS connection readiness (managed by App.js)
+    if (!setupSubscriptions()) {
+      const interval = setInterval(() => {
+        if (setupSubscriptions()) {
+          clearInterval(interval);
+        }
+      }, 500);
+      return () => clearInterval(interval);
+    }
   }, []);
 
   // Fetch order book when symbol changes
@@ -330,7 +334,7 @@ function DashboardPage() {
                   {/* VULN: Order ID exposed - enables targeted cancellation */}
                   <td style={{ padding: '4px', color: '#9ca3af' }}>#{b.orderId}</td>
                   <td style={{ padding: '4px', textAlign: 'right', color: '#10b981' }}>
-                    ${Number(b.price).toFixed(2)}
+                    {b.price != null ? `$${Number(b.price).toFixed(2)}` : 'MKT'}
                   </td>
                   <td style={{ padding: '4px', textAlign: 'right', color: '#e5e7eb' }}>{b.quantity}</td>
                   {/* VULN: userId exposed in order book */}
@@ -369,7 +373,7 @@ function DashboardPage() {
                 <tr key={i} style={{ borderBottom: '1px solid #1f2937' }}>
                   <td style={{ padding: '4px', color: '#9ca3af' }}>#{a.orderId}</td>
                   <td style={{ padding: '4px', textAlign: 'right', color: '#ef4444' }}>
-                    ${Number(a.price).toFixed(2)}
+                    {a.price != null ? `$${Number(a.price).toFixed(2)}` : 'MKT'}
                   </td>
                   <td style={{ padding: '4px', textAlign: 'right', color: '#e5e7eb' }}>{a.quantity}</td>
                   <td style={{ padding: '4px', color: '#6b7280' }}>
