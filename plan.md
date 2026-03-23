@@ -265,7 +265,7 @@
 
 ## PHASE 5: REST API Layer
 **Goal:** REST endpoints alongside WebSocket  
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ COMPLETE
 
 ### 5.1 REST Endpoints
 | Task | Status | Notes |
@@ -313,7 +313,71 @@
 
 ## PHASE 6: Frontend Vulnerabilities
 **Goal:** React frontend with client-side security issues  
-**Status:** ⬜ Not Started
+**Status:** ✅ COMPLETE
+
+### 6.1 Trading Dashboard
+| Task | Status | Notes |
+|------|--------|-------|
+| dangerouslySetInnerHTML for symbol names | ✅ | DashboardPage.js - `<span dangerouslySetInnerHTML={{ __html: p.symbol }} />` |
+| dangerouslySetInnerHTML for display names | ✅ | DashboardPage.js - name field also uses dangerouslySetInnerHTML |
+| Price display trusts server data | ✅ | Internal fields (marketMakerId, costBasis, spreadBps) displayed |
+| Client-side only validation (max 10000 qty) | ✅ | JS check only, backend accepts anything |
+| Hidden form field with user ID | ✅ | `<input type="hidden" id="order-user-id">` tamperable via DevTools |
+| Order book displays order IDs | ✅ | Bids/Asks table with orderId, userId, cancel buttons |
+| Cancel any order via order book | ✅ | IDOR - cancel button sends any orderId |
+| Admin alerts visible to any user | ✅ | /topic/admin/alerts subscription + display panel |
+
+### 6.2 Portfolio View
+| Task | Status | Notes |
+|------|--------|-------|
+| PortfolioPage.js created | ✅ | New page with holdings, transactions, P&L |
+| Holdings table with userId IDOR | ✅ | GET /api/users/{id}/portfolio - changeable userId |
+| P&L calculated client-side | ✅ | Float arithmetic in useEffect, manipulable via DevTools |
+| Balance and notes exposed | ✅ | Notes field (may contain flags) shown in UI |
+| Transaction history with IDOR | ✅ | GET /api/accounts/transactions?userId= |
+| Portfolio lookup (IDOR demo) | ✅ | Input field to view any user's portfolio |
+
+### 6.3 Account Management
+| Task | Status | Notes |
+|------|--------|-------|
+| Fake 2FA modal (decorative) | ✅ | Modal appears but code never sent to server |
+| Withdraw with sign flip vuln | ✅ | JS validation only; backend accepts negative |
+| Withdraw via WebSocket (no 2FA) | ✅ | Direct /app/trade.withdraw bypasses UI |
+| Deposit with no source verification | ✅ | Any amount, any source account |
+| Amount validation in JS only | ✅ | min/max checks in JS, server has none |
+| Email change without verification | ✅ | PUT /api/users/{id} - no email verification |
+| Password change without old password | ✅ | PUT /api/auth/change-password |
+| Balance display with internal fields | ✅ | apiKey, notes, role exposed |
+
+### 6.4 Admin Panel
+| Task | Status | Notes |
+|------|--------|-------|
+| Admin route hidden via conditional render | ✅ | `{isAdmin() && <Link>}` - any user can navigate to /admin |
+| All admin API calls work | ✅ | No server-side role enforcement on many endpoints |
+| User management (list + toggle) | ✅ | Load all users, toggle active/inactive |
+| Trading halt controls | ✅ | /app/admin.haltTrading + resumeTrading via WS |
+| Balance adjustment with log injection | ✅ | Reason field unsanitized in audit log |
+| Manual price override | ✅ | /app/admin.setPrice - market manipulation |
+| SQL query executor | ✅ | POST /api/admin/execute-query |
+
+### 6.5 Build & Deployment Vulnerabilities
+| Task | Status | Notes |
+|------|--------|-------|
+| Source maps in production build | ✅ | GENERATE_SOURCEMAP=true in package.json |
+| .env with secrets | ✅ | JWT_SECRET, DB_PASSWORD, DEBUG_KEY, feature flags |
+| .env accessible in production | ✅ | nginx serves /.env, Dockerfile copies it |
+| No CSP header | ✅ | nginx.conf has no Content-Security-Policy |
+| No CORS restriction | ✅ | Backend CORS *, no frontend restriction |
+| Directory listing enabled | ✅ | nginx autoindex on |
+| Service worker caches sensitive data | ✅ | public/sw.js caches /api/ and /actuator/ responses |
+
+### 6.6 New Pages & Routes
+| Task | Status | Notes |
+|------|--------|-------|
+| PortfolioPage.js | ✅ | Holdings, P&L, transactions, IDOR lookup |
+| HistoryPage.js | ✅ | Trade history, CSV export, SQLi via WS, export all |
+| App.js routes updated | ✅ | /portfolio, /history routes + nav links |
+| Nav bar updated | ✅ | Dashboard, Portfolio, History, Account, Admin links |
 
 ---
 
@@ -377,6 +441,16 @@
 | 2026-03-23 | P5 | Orderbook REST endpoint | ✅ | GET /api/market/orderbook/{symbol} - leaks userId |
 | 2026-03-23 | P5 | SecurityConfig updated | ✅ | /api/orders, /api/export, /api/accounts permitted |
 | 2026-03-23 | P5 | Swagger/OpenAPI added | ✅ | springdoc-openapi-ui at /swagger-ui.html |
+
+| 2026-03-23 | P6 | DashboardPage enhanced | ✅ | OrderBook with IDs, hidden userId, dangerouslySetInnerHTML, admin alerts |
+| 2026-03-23 | P6 | PortfolioPage.js created | ✅ | Holdings IDOR, client-side P&L, transaction history, portfolio lookup |
+| 2026-03-23 | P6 | HistoryPage.js created | ✅ | Trade history, CSV export, SQLi via WS, export all trades |
+| 2026-03-23 | P6 | AccountPage enhanced | ✅ | Fake 2FA modal, deposit/withdraw, sign flip, WS withdraw |
+| 2026-03-23 | P6 | AdminPage enhanced | ✅ | Trading halt, price override, user toggle, log injection reason |
+| 2026-03-23 | P6 | App.js routes updated | ✅ | /portfolio, /history routes + nav links |
+| 2026-03-23 | P6 | .env expanded | ✅ | JWT_SECRET, DB_PASSWORD, feature flags exposed |
+| 2026-03-23 | P6 | Service worker created | ✅ | public/sw.js caches /api/ and /actuator/ responses |
+| 2026-03-23 | P6 | index.js updated | ✅ | SW registration on page load |
 
 ## Port Mapping
 | Service | Container Port | Host Port | URL |
@@ -475,3 +549,32 @@
 | 64 | Floating point P&L errors | MatchingEngineService | CWE-681 | 🔄 Coded |
 | 65 | Risk check skipped for MARKET | RiskService | CWE-862 | 🔄 Coded |
 | 66 | System metrics in admin alerts | AdminService | CWE-200 | 🔄 Coded |
+
+## Planned Vulnerabilities (Phase 6) — Frontend
+| # | Vulnerability | Location | CWE | Status |
+|---|--------------|----------|-----|--------|
+| 67 | dangerouslySetInnerHTML for symbol (XSS) | DashboardPage.js | CWE-79 | ✅ Coded |
+| 68 | dangerouslySetInnerHTML for name (XSS) | DashboardPage.js | CWE-79 | ✅ Coded |
+| 69 | Internal price fields displayed | DashboardPage.js | CWE-200 | ✅ Coded |
+| 70 | Client-side only order validation | DashboardPage.js | CWE-602 | ✅ Coded |
+| 71 | Hidden userId field (tamperable) | DashboardPage.js | CWE-472 | ✅ Coded |
+| 72 | Order IDs in order book (IDOR cancel) | DashboardPage.js | CWE-639 | ✅ Coded |
+| 73 | Admin alerts visible to any user | DashboardPage.js | CWE-862 | ✅ Coded |
+| 74 | Portfolio IDOR via userId | PortfolioPage.js | CWE-639 | ✅ Coded |
+| 75 | P&L calculated client-side | PortfolioPage.js | CWE-602 | ✅ Coded |
+| 76 | Transaction history IDOR | PortfolioPage.js | CWE-639 | ✅ Coded |
+| 77 | Fake 2FA modal (decorative) | AccountPage.js | CWE-306 | ✅ Coded |
+| 78 | Withdraw sign flip (negative amount) | AccountPage.js | CWE-20 | ✅ Coded |
+| 79 | Deposit no source verification | AccountPage.js | CWE-345 | ✅ Coded |
+| 80 | JS-only amount validation | AccountPage.js | CWE-602 | ✅ Coded |
+| 81 | Admin route no server protection | AdminPage.js / App.js | CWE-862 | ✅ Coded |
+| 82 | Trading halt via WS (any user) | AdminPage.js | CWE-862 | ✅ Coded |
+| 83 | Price override (market manipulation) | AdminPage.js | CWE-20 | ✅ Coded |
+| 84 | Log injection via reason field | AdminPage.js | CWE-117 | ✅ Coded |
+| 85 | Source maps in production | package.json | CWE-540 | ✅ Coded |
+| 86 | .env with secrets accessible | .env / Dockerfile | CWE-312 | ✅ Coded |
+| 87 | No CSP header | nginx.conf | CWE-693 | ✅ Coded |
+| 88 | Service worker caches sensitive data | public/sw.js | CWE-922 | ✅ Coded |
+| 89 | Directory listing enabled | nginx.conf | CWE-548 | ✅ Coded |
+| 90 | SQLi via history WS endpoint | HistoryPage.js | CWE-89 | ✅ Coded |
+| 91 | CSV injection via export | HistoryPage.js | CWE-1236 | ✅ Coded |

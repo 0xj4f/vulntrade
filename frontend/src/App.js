@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
+import PortfolioPage from './pages/PortfolioPage';
+import HistoryPage from './pages/HistoryPage';
 import AccountPage from './pages/AccountPage';
 import AdminPage from './pages/AdminPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -30,6 +32,12 @@ function AppContent() {
             </span>
             <Link to="/dashboard" style={{ color: '#9ca3af', textDecoration: 'none' }}>
               Dashboard
+            </Link>
+            <Link to="/portfolio" style={{ color: '#9ca3af', textDecoration: 'none' }}>
+              Portfolio
+            </Link>
+            <Link to="/history" style={{ color: '#9ca3af', textDecoration: 'none' }}>
+              History
             </Link>
             <Link to="/account" style={{ color: '#9ca3af', textDecoration: 'none' }}>
               Account
@@ -65,6 +73,12 @@ function AppContent() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/dashboard" element={
           isAuthenticated ? <DashboardPage /> : <Navigate to="/login" />
+        } />
+        <Route path="/portfolio" element={
+          isAuthenticated ? <PortfolioPage /> : <Navigate to="/login" />
+        } />
+        <Route path="/history" element={
+          isAuthenticated ? <HistoryPage /> : <Navigate to="/login" />
         } />
         <Route path="/account" element={
           isAuthenticated ? <AccountPage /> : <Navigate to="/login" />
