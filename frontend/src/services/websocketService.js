@@ -2,7 +2,8 @@ import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 
 // VULN: WebSocket URL hardcoded and exposed
-const WS_URL = process.env.REACT_APP_WS_URL || 'http://localhost:8080/ws-sockjs';
+// SockJS requires http:// not ws:// - uses nginx proxy path
+const WS_URL = process.env.REACT_APP_WS_SOCKJS_URL || '/ws-sockjs';
 
 let stompClient = null;
 let subscriptions = {};
