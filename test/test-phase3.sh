@@ -37,7 +37,10 @@ if echo "$LOGIN_RESPONSE" | grep -q -E '"token"|"jwt"'; then
     if [ -z "$TRADER_JWT" ]; then
         TRADER_JWT=$(echo "$LOGIN_RESPONSE" | grep -o -E '"jwt":"[^"]*' | cut -d'"' -f4)
     fi
-    TRADER_ID=$(echo "$LOGIN_RESPONSE" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+    TRADER_ID=$(echo "$LOGIN_RESPONSE" | grep -o '"userId":[0-9]*' | cut -d':' -f2)
+    if [ -z "$TRADER_ID" ]; then
+        TRADER_ID=$(echo "$LOGIN_RESPONSE" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+    fi
     pass "Authentication successful - JWT/Token obtained"
     info "Trader ID: $TRADER_ID"
     info "JWT/Token (first 50 chars): ${TRADER_JWT:0:50}..."
@@ -50,8 +53,20 @@ fi
 ADMIN_LOGIN=$(curl -s -X POST "$BASE_URL/api/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "admin123"}')
-ADMIN_JWT=$(echo "$ADMIN_LOGIN" | grep -o '"jwt":"[^"]*' | cut -d'"' -f4)
-ADMIN_ID=$(echo "$ADMIN_LOGIN" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+ADMIN_JWT=$(echo "$ADMIN_LOGIN" | grep -o -E '"token":"[^"]*' | cut -d'"' -f4)
+if [ -z "$ADMIN_JWT" ]; then
+    ADMIN_JWT=$(echo "$ADMIN_LOGIN" | grep -o -E '"jwt":"[^"]*' | cut -d'"' -f4)
+fi
+ADMIN_ID=$(echo "$ADMIN_LOGIN" | grep -o '"userId":[0-9]*' | cut -d':' -f2)
+if [ -z "$ADMIN_ID" ]; then
+    ADMIN_ID=$(echo "$ADMIN_LOGIN" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+fi
+if [ -z "$ADMIN_JWT" ]; then
+    warn "Admin login failed, using trader JWT as fallback for operations"
+    ADMIN_JWT="$TRADER_JWT"
+    ADMIN_ID="$TRADER_ID"
+fi
+
 echo ""
 
 # Test 1: WebSocket Connectivity

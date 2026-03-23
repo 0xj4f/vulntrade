@@ -60,38 +60,6 @@ wait_for_host "Backend" "$BACKEND_HOST" "$BACKEND_PORT" || exit 1
 wait_for_host "Frontend" "$FRONTEND_HOST" "$FRONTEND_PORT"
 wait_for_host "PostgreSQL" "localhost" "5432"
 wait_for_host "Redis" "localhost" "6379"
-    case $host in
-        backend)
-            if timeout 2 bash -c "echo >/dev/tcp/$BACKEND_HOST" 2>/dev/null; then
-                pass "Backend is running on $BACKEND_HOST"
-            else
-                fail "Backend not accessible on $BACKEND_HOST"
-                exit 1
-            fi
-            ;;
-        frontend)
-            if timeout 2 bash -c "echo >/dev/tcp/$FRONTEND_HOST" 2>/dev/null; then
-                pass "Frontend is running on $FRONTEND_HOST"
-            else
-                fail "Frontend not accessible on $FRONTEND_HOST"
-            fi
-            ;;
-        postgres)
-            if timeout 2 bash -c "echo >/dev/tcp/localhost:5432" 2>/dev/null; then
-                pass "PostgreSQL is running on localhost:5432"
-            else
-                fail "PostgreSQL not accessible on localhost:5432"
-            fi
-            ;;
-        redis)
-            if timeout 2 bash -c "echo >/dev/tcp/localhost:6379" 2>/dev/null; then
-                pass "Redis is running on localhost:6379"
-            else
-                fail "Redis not accessible on localhost:6379"
-            fi
-            ;;
-    esac
-done
 echo ""
 
 # Test 2: API Health Check
