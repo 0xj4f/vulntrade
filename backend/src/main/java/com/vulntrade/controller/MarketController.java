@@ -1,20 +1,26 @@
 package com.vulntrade.controller;
 
+import com.vulntrade.model.Order;
 import com.vulntrade.model.Symbol;
+import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.SymbolRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/market")
 public class MarketController {
 
     private final SymbolRepository symbolRepository;
+    private final OrderRepository orderRepository;
 
-    public MarketController(SymbolRepository symbolRepository) {
+    public MarketController(SymbolRepository symbolRepository,
+                            OrderRepository orderRepository) {
         this.symbolRepository = symbolRepository;
+        this.orderRepository = orderRepository;
     }
 
     /**
@@ -27,12 +33,62 @@ public class MarketController {
 
     /**
      * Get price for specific symbol.
-     * VULN: Path traversal in symbol parameter (in later phase).
+     * VULN: Path traversal in symbol parameter.
      */
     @GetMapping("/prices/{symbol}")
     public ResponseEntity<?> getPrice(@PathVariable String symbol) {
         return symbolRepository.findById(symbol)
                 .map(s -> ResponseEntity.ok((Object) s))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Get order book for a symbol.
+     * VULN: Exposes userId of each order (information disclosure / front-running).
+     * VULN: Path traversal in symbol parameter.
+     * VULN: Shows all pending orders enabling front-running.
+     */
+    @GetMapping("/orderbook/{symbol}")
+    public ResponseEntity<?> getOrderBook(@PathVariable String symbol) {
+        // VULN: symbol not sanitized — path traversal possible
+        List<Order> buyOrders = orderRepository.findBySymbolAndSideAndStatus(symbol, "BUY", "NEW");
+        List<Order> sellOrders = orderRepository.findBySymbolAndSideAndStatus(symbol, "SELL", "NEW");
+
+        // VULN: Leaks userId and full order details for front-running
+        List<Map<String, Object>> bids = buyOrders.stream()
+            .sorted(Comparator.comparing(Order::getPrice).reversed())
+            .map(o -> {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("orderId", o.getId());       // VULN: order ID exposed
+                entry.put("userId", o.getUserId());     // VULN: user ID exposed
+                entry.put("price", o.getPrice());
+                entry.put("quantity", o.getQuantity());
+                entry.put("clientOrderId", o.getClientOrderId());
+                entry.put("createdAt", o.getCreatedAt());
+                return entry;
+            }).collect(Collectors.toList());
+
+        List<Map<String, Object>> asks = sellOrders.stream()
+            .sorted(Comparator.comparing(Order::getPrice))
+            .map(o -> {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("orderId", o.getId());
+                entry.put("userId", o.getUserId());
+                entry.put("price", o.getPrice());
+                entry.put("quantity", o.getQuantity());
+                entry.put("clientOrderId", o.getClientOrderId());
+                entry.put("createdAt", o.getCreatedAt());
+                return entry;
+            }).collect(Collectors.toList());
+
+        Map<String, Object> orderBook = new LinkedHashMap<>();
+        orderBook.put("symbol", symbol);
+        orderBook.put("bids", bids);
+        orderBook.put("asks", asks);
+        orderBook.put("bidCount", bids.size());
+        orderBook.put("askCount", asks.size());
+        orderBook.put("timestamp", System.currentTimeMillis());
+
+        return ResponseEntity.ok(orderBook);
     }
 }

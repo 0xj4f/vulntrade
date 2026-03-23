@@ -40,6 +40,11 @@ public class SecurityConfig {
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             .and()
             .authorizeRequests()
+                // Swagger / OpenAPI documentation - permit all
+                .antMatchers("/swagger-ui/**").permitAll()
+                .antMatchers("/swagger-ui.html").permitAll()
+                .antMatchers("/v3/api-docs/**").permitAll()
+                .antMatchers("/v3/api-docs").permitAll()
                 // Public endpoints
                 .antMatchers("/api/auth/**").permitAll()
                 .antMatchers("/api/health").permitAll()
@@ -56,6 +61,12 @@ public class SecurityConfig {
                 // VULN: Admin endpoints - "restricted" but bypassable
                 // The method override header can change POST→GET to bypass method-based rules
                 .antMatchers("/api/admin/**").hasRole("ADMIN")
+                // Orders require auth (but IDOR exists)
+                .antMatchers("/api/orders/**").authenticated()
+                // Export requires auth (but IDOR + CSV injection exists)
+                .antMatchers("/api/export/**").authenticated()
+                // Account operations require auth
+                .antMatchers("/api/accounts/**").authenticated()
                 // User endpoints require auth (but IDOR exists)
                 .antMatchers("/api/users/**").authenticated()
                 // Everything else requires auth

@@ -227,13 +227,87 @@
 
 ## PHASE 4: Trading Engine & Business Logic
 **Goal:** Functional matching engine with business logic vulns  
-**Status:** ⬜ Not Started
+**Status:** ✅ COMPLETE
+
+### 4.1 Order Matching Engine
+| Task | Status | Notes |
+|------|--------|-------|
+| Simple price-time priority matching | ✅ | MatchingEngineService.java |
+| Match buy orders with sell orders | ✅ | tryMatch() method |
+| Partial fills support | ✅ | Handles partial quantity fills |
+| VULN: Synchronous processing (timing attacks) | ✅ | Single-threaded matching |
+| VULN: Self-matching allowed (wash trading) | ✅ | No buyer==seller check |
+| VULN: No circuit breaker on rapid price movement | ✅ | No price change limits |
+
+### 4.2 Risk Engine (Intentionally Weak)
+| Task | Status | Notes |
+|------|--------|-------|
+| Balance check: balance >= order_value | ✅ | RiskService.checkPreTrade() |
+| VULN: Check and deduction not atomic (TOCTOU) | ✅ | READ UNCOMMITTED isolation |
+| VULN: Risk check skipped for MARKET order type | ✅ | Explicit skip in code |
+| VULN: Max order size only checked on frontend | ✅ | No backend limit |
+| VULN: No position concentration limit | ✅ | No checks |
+| VULN: No notional value limit | ✅ | No checks |
+| Post-trade position update | ✅ | MatchingEngineService updates positions |
+| VULN: Position can go negative (naked short) | ✅ | No sell-side position check |
+| VULN: P&L uses floating point (precision errors) | ✅ | double arithmetic in P&L |
+
+### 4.3 Price Simulation
+| Task | Status | Notes |
+|------|--------|-------|
+| Brownian motion price model | ✅ | PriceSimulatorService @Scheduled 1s |
+| All symbols supported | ✅ | AAPL, GOOGL, MSFT, TSLA, AMZN, BTC-USD, ETH-USD |
+| Special "VULN" symbol predictable pattern | ✅ | 100 + 20*sin(tick*0.1) |
+| VULN: Fixed seed (predictable) | ✅ | new Random(42) |
+| VULN: BTC-USD no decimal precision limit | ✅ | scale=8 for crypto |
 
 ---
 
 ## PHASE 5: REST API Layer
 **Goal:** REST endpoints alongside WebSocket  
-**Status:** ⬜ Not Started
+**Status:** 🔄 IN PROGRESS
+
+### 5.1 REST Endpoints
+| Task | Status | Notes |
+|------|--------|-------|
+| GET /api/market/prices | ✅ | MarketController - public |
+| GET /api/market/prices/{symbol} | ✅ | MarketController - path traversal vuln |
+| GET /api/market/orderbook/{symbol} | ✅ | MarketController - leaks userId, front-running |
+| POST /api/orders | ✅ | OrderController - no validation, CSRF disabled |
+| GET /api/orders/{orderId} | ✅ | OrderController - IDOR, no ownership check |
+| GET /api/orders?userId= | ✅ | OrderController - IDOR via query param |
+| POST /api/orders/{orderId}/cancel | ✅ | OrderController - IDOR cancel |
+| DELETE /api/orders/{orderId} | ✅ | OrderController - IDOR hard delete |
+| GET /api/accounts/balance | ✅ | AccountController - leaks apiKey, notes |
+| POST /api/accounts/withdraw | ✅ | AccountController - sign flip, race condition |
+| POST /api/accounts/deposit | ✅ | AccountController - no source verification |
+| GET /api/accounts/transactions | ✅ | AccountController - IDOR via userId param |
+| GET /api/users/{userId}/portfolio | ✅ | UserController - IDOR |
+| GET /api/admin/users | ✅ | AdminController - method override bypass |
+| POST /api/admin/execute-query | ✅ | AdminController - raw SQL execution |
+| POST /api/admin/adjust-balance | ✅ | AdminController - log injection |
+| GET /api/export/trades | ✅ | ExportController - CSV injection, IDOR, no pagination |
+| GET /api/export/all-trades | ✅ | ExportController - SQL injection via symbol param |
+| GET /api/export/portfolio | ✅ | ExportController - IDOR |
+
+### 5.2 Spring Actuator (Intentionally Exposed)
+| Task | Status | Notes |
+|------|--------|-------|
+| /actuator/health | ✅ | Public |
+| /actuator/env | ✅ | Exposes secrets and flags |
+| /actuator/beans | ✅ | Exposed |
+| /actuator/mappings | ✅ | Reveals all routes |
+| /actuator/heapdump | ✅ | Leaks memory contents |
+| /actuator/configprops | ✅ | Exposed |
+| /actuator/loggers | ✅ | Allows log level change |
+
+### 5.3 Hidden/Debug Endpoints
+| Task | Status | Notes |
+|------|--------|-------|
+| /api/debug/user-info | ✅ | Full user objects with password hashes |
+| /api/debug/execute | ✅ | RCE via Runtime.exec() |
+| /api/debug/query | ✅ | SQL injection playground |
+| /h2-console | ✅ | H2 console enabled, no auth |
 
 ---
 
@@ -295,6 +369,14 @@
 | 2026-03-19 | P3 | Updated: WebSocketConfig | ✅ | Channel interceptor, message size limits |
 | 2026-03-19 | P3 | Frontend: websocketService.js | ✅ | STOMP/SockJS client service |
 | 2026-03-19 | P3 | Frontend: DashboardPage updated | ✅ | Live prices, order form, trade feed, admin alerts |
+
+| 2026-03-23 | P4 | Phase 4 audit | ✅ | All matching engine, risk, price sim fully implemented |
+| 2026-03-23 | P5 | OrderController created | ✅ | POST/GET/DELETE /api/orders with IDOR vulns |
+| 2026-03-23 | P5 | AccountController created | ✅ | Balance, withdraw (sign flip), deposit (free money) |
+| 2026-03-23 | P5 | ExportController created | ✅ | CSV injection, SQL injection, IDOR, no pagination |
+| 2026-03-23 | P5 | Orderbook REST endpoint | ✅ | GET /api/market/orderbook/{symbol} - leaks userId |
+| 2026-03-23 | P5 | SecurityConfig updated | ✅ | /api/orders, /api/export, /api/accounts permitted |
+| 2026-03-23 | P5 | Swagger/OpenAPI added | ✅ | springdoc-openapi-ui at /swagger-ui.html |
 
 ## Port Mapping
 | Service | Container Port | Host Port | URL |

