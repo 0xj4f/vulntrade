@@ -173,7 +173,13 @@ function HistoryPage() {
                     {t.quantity || t.Quantity || '—'}
                   </td>
                   <td style={{ padding: '6px', textAlign: 'right', color: '#10b981' }}>
-                    ${Number(t.price || t.Price || 0).toFixed(2)}
+                    {(t.price != null && t.price !== '' && !isNaN(Number(t.price)))
+                      ? `$${Number(t.price).toFixed(2)}`
+                      : ((t.Price != null && t.Price !== '' && !isNaN(Number(t.Price)))
+                        ? `$${Number(t.Price).toFixed(2)}`
+                        : (t.filledPrice != null && !isNaN(Number(t.filledPrice))
+                          ? `$${Number(t.filledPrice).toFixed(2)}`
+                          : 'MKT'))}
                   </td>
                   <td style={{ padding: '6px', color: '#9ca3af' }}>{t.status || t.Status || '—'}</td>
                   <td style={{ padding: '6px', color: '#6b7280' }}>

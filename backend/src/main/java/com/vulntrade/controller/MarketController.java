@@ -4,6 +4,7 @@ import com.vulntrade.model.Order;
 import com.vulntrade.model.Symbol;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.SymbolRepository;
+import com.vulntrade.repository.UserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,11 +17,14 @@ public class MarketController {
 
     private final SymbolRepository symbolRepository;
     private final OrderRepository orderRepository;
+    private final UserRepository userRepository;
 
     public MarketController(SymbolRepository symbolRepository,
-                            OrderRepository orderRepository) {
+                            OrderRepository orderRepository,
+                            UserRepository userRepository) {
         this.symbolRepository = symbolRepository;
         this.orderRepository = orderRepository;
+        this.userRepository = userRepository;
     }
 
     /**
@@ -65,6 +69,9 @@ public class MarketController {
                 entry.put("quantity", o.getQuantity());
                 entry.put("clientOrderId", o.getClientOrderId());
                 entry.put("createdAt", o.getCreatedAt());
+                // Include username for display
+                userRepository.findById(o.getUserId()).ifPresent(u ->
+                    entry.put("username", u.getUsername()));
                 return entry;
             }).collect(Collectors.toList());
 
@@ -78,6 +85,9 @@ public class MarketController {
                 entry.put("quantity", o.getQuantity());
                 entry.put("clientOrderId", o.getClientOrderId());
                 entry.put("createdAt", o.getCreatedAt());
+                // Include username for display
+                userRepository.findById(o.getUserId()).ifPresent(u ->
+                    entry.put("username", u.getUsername()));
                 return entry;
             }).collect(Collectors.toList());
 

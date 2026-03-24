@@ -3,11 +3,13 @@ package com.vulntrade.controller;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import com.vulntrade.service.PortfolioService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -22,11 +24,14 @@ public class UserController {
 
     private final UserRepository userRepository;
     private final JwtTokenProvider jwtTokenProvider;
+    private final PortfolioService portfolioService;
 
     public UserController(UserRepository userRepository,
-                          JwtTokenProvider jwtTokenProvider) {
+                          JwtTokenProvider jwtTokenProvider,
+                          PortfolioService portfolioService) {
         this.userRepository = userRepository;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.portfolioService = portfolioService;
     }
 
     /**
@@ -135,6 +140,10 @@ public class UserController {
         portfolio.put("username", userOpt.get().getUsername());
         portfolio.put("balance", userOpt.get().getBalance());
         portfolio.put("notes", userOpt.get().getNotes());  // VULN: leaks notes with flags
+
+        // Include positions from PortfolioService
+        List<Map<String, Object>> positions = portfolioService.getPortfolio(userId);
+        portfolio.put("positions", positions);
 
         return ResponseEntity.ok(portfolio);
     }

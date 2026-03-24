@@ -238,8 +238,20 @@ function DashboardPage() {
           <div>
             <label style={{ color: '#6b7280', fontSize: '12px', display: 'block' }}>Symbol</label>
             <select value={orderForm.symbol} onChange={e => {
-              setOrderForm({...orderForm, symbol: e.target.value});
-              fetchOrderBook(e.target.value);
+              const newSymbol = e.target.value;
+              const newForm = {...orderForm, symbol: newSymbol};
+              // If MARKET type, auto-update price to new symbol's market price
+              if (orderForm.type === 'MARKET') {
+                const symbolData = pricesRef.current[newSymbol];
+                if (symbolData) {
+                  const marketPrice = orderForm.side === 'BUY'
+                    ? Number(symbolData.ask || symbolData.currentPrice)
+                    : Number(symbolData.bid || symbolData.currentPrice);
+                  newForm.price = marketPrice.toFixed(2);
+                }
+              }
+              setOrderForm(newForm);
+              fetchOrderBook(newSymbol);
             }}
               style={{ background: '#1f2937', color: '#e5e7eb', border: '1px solid #374151', padding: '8px', borderRadius: '4px' }}>
               {prices.map(p => <option key={p.symbol} value={p.symbol}>{p.symbol}</option>)}
@@ -247,7 +259,21 @@ function DashboardPage() {
           </div>
           <div>
             <label style={{ color: '#6b7280', fontSize: '12px', display: 'block' }}>Side</label>
-            <select value={orderForm.side} onChange={e => setOrderForm({...orderForm, side: e.target.value})}
+            <select value={orderForm.side} onChange={e => {
+              const newSide = e.target.value;
+              const newForm = {...orderForm, side: newSide};
+              // If MARKET type, update price for new side (ask for BUY, bid for SELL)
+              if (orderForm.type === 'MARKET') {
+                const symbolData = pricesRef.current[orderForm.symbol];
+                if (symbolData) {
+                  const marketPrice = newSide === 'BUY'
+                    ? Number(symbolData.ask || symbolData.currentPrice)
+                    : Number(symbolData.bid || symbolData.currentPrice);
+                  newForm.price = marketPrice.toFixed(2);
+                }
+              }
+              setOrderForm(newForm);
+            }}
               style={{ background: '#1f2937', color: '#e5e7eb', border: '1px solid #374151', padding: '8px', borderRadius: '4px' }}>
               <option value="BUY">BUY</option>
               <option value="SELL">SELL</option>
@@ -255,7 +281,21 @@ function DashboardPage() {
           </div>
           <div>
             <label style={{ color: '#6b7280', fontSize: '12px', display: 'block' }}>Type</label>
-            <select value={orderForm.type} onChange={e => setOrderForm({...orderForm, type: e.target.value})}
+            <select value={orderForm.type} onChange={e => {
+              const newType = e.target.value;
+              if (newType === 'MARKET') {
+                // Auto-fill with current market price
+                const symbolData = pricesRef.current[orderForm.symbol];
+                const marketPrice = symbolData
+                  ? (orderForm.side === 'BUY'
+                    ? Number(symbolData.ask || symbolData.currentPrice)
+                    : Number(symbolData.bid || symbolData.currentPrice))
+                  : '';
+                setOrderForm({...orderForm, type: newType, price: marketPrice ? marketPrice.toFixed(2) : orderForm.price});
+              } else {
+                setOrderForm({...orderForm, type: newType});
+              }
+            }}
               style={{ background: '#1f2937', color: '#e5e7eb', border: '1px solid #374151', padding: '8px', borderRadius: '4px' }}>
               <option value="LIMIT">LIMIT</option>
               <option value="MARKET">MARKET</option>
@@ -273,8 +313,8 @@ function DashboardPage() {
             <label style={{ color: '#6b7280', fontSize: '12px', display: 'block' }}>Price</label>
             <input type="number" step="0.01" value={orderForm.price}
               onChange={e => setOrderForm({...orderForm, price: e.target.value})}
-              disabled={orderForm.type === 'MARKET'}
-              style={{ background: '#1f2937', color: '#e5e7eb', border: '1px solid #374151', padding: '8px', borderRadius: '4px', width: '120px' }} />
+              readOnly={orderForm.type === 'MARKET'}
+              style={{ background: orderForm.type === 'MARKET' ? '#0f172a' : '#1f2937', color: '#e5e7eb', border: '1px solid #374151', padding: '8px', borderRadius: '4px', width: '120px' }} />
           </div>
           <button onClick={() => {
             // VULN: Client-side only validation - bypass by modifying JS or sending direct WS message
@@ -287,6 +327,25 @@ function DashboardPage() {
               toast.error('Price must be positive');
               return;
             }
+
+            // For MARKET orders, resolve the price from live market data
+            let orderPrice = null;
+            if (orderForm.type === 'MARKET') {
+              const symbolData = pricesRef.current[orderForm.symbol];
+              if (symbolData) {
+                // BUY at ask price, SELL at bid price
+                orderPrice = orderForm.side === 'BUY'
+                  ? Number(symbolData.ask || symbolData.currentPrice)
+                  : Number(symbolData.bid || symbolData.currentPrice);
+              }
+              if (!orderPrice || isNaN(orderPrice)) {
+                toast.error('Market price not available for ' + orderForm.symbol);
+                return;
+              }
+            } else {
+              orderPrice = Number(orderForm.price);
+            }
+
             // VULN: userId from hidden field (tamperable)
             const hiddenUserId = document.getElementById('order-user-id')?.value;
             sendMessage('/app/trade.placeOrder', {
@@ -294,7 +353,7 @@ function DashboardPage() {
               side: orderForm.side,
               type: orderForm.type,
               quantity: qty,
-              price: orderForm.type === 'MARKET' ? null : Number(orderForm.price),
+              price: orderPrice,
               clientOrderId: 'web-' + Date.now(),
               userId: hiddenUserId ? parseInt(hiddenUserId) : undefined
             });
