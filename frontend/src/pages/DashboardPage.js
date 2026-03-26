@@ -1,20 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
 import { subscribe, sendMessage, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 /**
- * PHASE 6 VULNS:
- * - dangerouslySetInnerHTML for symbol names AND display names (XSS)
- * - Price display trusts server data without sanitization
- * - Client-side only validation for max order size (10000)
- * - Hidden form field contains user ID (tamperable via DevTools)
- * - Order book displays order IDs enabling targeted cancellation
- * - Internal price fields (costBasis, marketMakerId) displayed
+ * Trading Dashboard — market prices, order form, positions with P&L, order history.
  */
 function DashboardPage() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [prices, setPrices] = useState([]);
   const [health, setHealth] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
@@ -25,7 +19,31 @@ function DashboardPage() {
   });
   const [orderStatus, setOrderStatus] = useState(null);
   const [adminAlerts, setAdminAlerts] = useState([]);
+  const [positions, setPositions] = useState([]);
+  const [myOrders, setMyOrders] = useState([]);
+  const [orderError, setOrderError] = useState(null);
+  const [sellModal, setSellModal] = useState(null); // { symbol, qty, price }
   const pricesRef = useRef({});
+
+  // Fetch positions & orders
+  const fetchPositions = useCallback(() => {
+    if (!user?.userId) return;
+    api.get(`/api/users/${user.userId}/portfolio`)
+      .then(res => setPositions(res.data?.positions || []))
+      .catch(err => console.error('Failed to fetch positions:', err));
+  }, [user?.userId]);
+
+  const fetchOrders = useCallback(() => {
+    if (!user?.userId) return;
+    api.get(`/api/orders`)
+      .then(res => setMyOrders(Array.isArray(res.data) ? res.data : []))
+      .catch(err => console.error('Failed to fetch orders:', err));
+  }, [user?.userId]);
+
+  // Refresh user balance from stored auth
+  const refreshBalance = useCallback(() => {
+    if (refreshUser) refreshUser();
+  }, [refreshUser]);
 
   useEffect(() => {
     // Fetch initial market prices via REST
@@ -95,19 +113,37 @@ function DashboardPage() {
       // Subscribe to order updates for current user
       subscribe('/user/queue/orders', (order) => {
         setOrderStatus(order);
-        toast.info('Order update: ' + (order.type || order.status));
+        setOrderError(null);
+        const status = order.status || order.type || 'UPDATED';
+        if (status === 'FILLED' || status === 'ORDER_PLACED' || status === 'MARKET_ORDER_EXECUTED') {
+          toast.success(`✅ Order ${status}: ${order.symbol || ''} ${order.side || ''} — ID #${order.orderId || order.id || '?'}`);
+        } else if (status === 'PARTIAL') {
+          toast.info(`📊 Partial fill: ${order.symbol || ''} — filled ${order.filledQty || '?'}`);
+        } else if (status === 'ORDER_CANCELLED') {
+          toast.info(`🚫 Order cancelled: #${order.orderId || order.id || '?'}`);
+        } else {
+          toast.info(`Order ${status}: #${order.orderId || order.id || '?'}`);
+        }
+        // Refresh positions and balance after any order update
+        setTimeout(() => {
+          fetchPositions();
+          fetchOrders();
+          refreshBalance();
+        }, 500);
       });
 
       // VULN: Subscribe to admin alerts (any user can do this)
       subscribe('/topic/admin/alerts', (alert) => {
-        console.log('[ADMIN ALERT]', alert); // VULN: leaked to console
+        console.log('[ADMIN ALERT]', alert);
         setAdminAlerts(prev => [alert, ...prev].slice(0, 10));
         toast.warn('Admin Alert: ' + (alert.message || alert.type));
       });
 
-      // Subscribe to error queue
+      // Subscribe to error queue — show errors prominently
       subscribe('/user/queue/errors', (error) => {
-        toast.error(error.message || 'Unknown error');
+        const msg = error.message || 'Unknown error';
+        setOrderError(msg);
+        toast.error(`❌ ${msg}`, { autoClose: 8000 });
       });
 
       return true;
@@ -122,7 +158,13 @@ function DashboardPage() {
       }, 500);
       return () => clearInterval(interval);
     }
-  }, []);
+  }, [fetchPositions, fetchOrders, refreshBalance]);
+
+  // Fetch positions & orders on mount
+  useEffect(() => {
+    fetchPositions();
+    fetchOrders();
+  }, [fetchPositions, fetchOrders]);
 
   // Fetch order book when symbol changes
   const fetchOrderBook = (symbol) => {
@@ -135,6 +177,39 @@ function DashboardPage() {
   const cancelOrder = (orderId) => {
     sendMessage('/app/trade.cancelOrder', { orderId });
     toast.info(`Cancel request sent for order #${orderId}`);
+  };
+
+  // Sell position — opens sell modal or sends market sell directly
+  const sellPosition = (symbol, quantity) => {
+    const symbolData = pricesRef.current[symbol];
+    const bidPrice = symbolData ? Number(symbolData.bid || symbolData.currentPrice) : 0;
+    setSellModal({ symbol, quantity: Number(quantity), price: bidPrice, sellQty: String(quantity) });
+  };
+
+  const executeSell = () => {
+    if (!sellModal) return;
+    const qty = Number(sellModal.sellQty);
+    if (qty <= 0 || qty > sellModal.quantity) {
+      toast.error(`Quantity must be between 0 and ${sellModal.quantity}`);
+      return;
+    }
+    setOrderError(null);
+    sendMessage('/app/trade.placeOrder', {
+      symbol: sellModal.symbol,
+      side: 'SELL',
+      type: 'MARKET',
+      quantity: qty,
+      price: sellModal.price,
+      clientOrderId: 'sell-' + Date.now(),
+    });
+    toast.info(`Sell order submitted: ${qty} ${sellModal.symbol}`);
+    setSellModal(null);
+  };
+
+  // Helper: get current price for a symbol
+  const getCurrentPrice = (symbol) => {
+    const p = pricesRef.current[symbol];
+    return p ? Number(p.currentPrice || p.ask || 0) : 0;
   };
 
   const cardStyle = {
@@ -358,6 +433,7 @@ function DashboardPage() {
               userId: hiddenUserId ? parseInt(hiddenUserId) : undefined
             });
             toast.info('Order submitted via WebSocket');
+            setOrderError(null);
           }} style={{
             background: orderForm.side === 'BUY' ? '#10b981' : '#ef4444',
             color: '#fff', border: 'none', padding: '8px 24px', borderRadius: '4px',
@@ -366,11 +442,256 @@ function DashboardPage() {
             {orderForm.side} {orderForm.symbol}
           </button>
         </div>
-        {orderStatus && (
-          <div style={{ marginTop: '12px', padding: '8px', background: '#1f2937', borderRadius: '4px', fontSize: '13px' }}>
-            <strong>Last Order:</strong> {orderStatus.type || orderStatus.status} — ID: {orderStatus.orderId}
+
+        {/* Order Error Banner */}
+        {orderError && (
+          <div style={{
+            marginTop: '12px', padding: '12px 16px', background: '#7f1d1d',
+            border: '1px solid #ef4444', borderRadius: '6px', fontSize: '14px',
+            color: '#fca5a5', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+          }}>
+            <span>❌ <strong>Order Error:</strong> {orderError}</span>
+            <button onClick={() => setOrderError(null)} style={{
+              background: 'transparent', border: 'none', color: '#fca5a5',
+              cursor: 'pointer', fontSize: '16px'
+            }}>✕</button>
           </div>
         )}
+
+        {/* Order Status */}
+        {orderStatus && !orderError && (
+          <div style={{
+            marginTop: '12px', padding: '10px 16px',
+            background: orderStatus.status === 'FILLED' ? '#064e3b' : '#1f2937',
+            border: orderStatus.status === 'FILLED' ? '1px solid #10b981' : '1px solid #374151',
+            borderRadius: '6px', fontSize: '13px', color: '#e5e7eb'
+          }}>
+            <strong>Last Order:</strong> {orderStatus.type || orderStatus.status} — ID: #{orderStatus.orderId || orderStatus.id || '?'}
+            {orderStatus.filledQty && ` — Filled: ${orderStatus.filledQty}`}
+            {orderStatus.filledPrice && ` @ $${Number(orderStatus.filledPrice).toFixed(2)}`}
+          </div>
+        )}
+      </div>
+
+      {/* ======================== ACTIVE POSITIONS ======================== */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ color: '#9ca3af', margin: 0 }}>📊 Active Positions</h3>
+          <button onClick={fetchPositions} style={{
+            background: '#1f2937', border: '1px solid #374151', color: '#9ca3af',
+            padding: '4px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
+          }}>↻ Refresh</button>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #374151' }}>
+              <th style={{ textAlign: 'left', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>Symbol</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>Quantity</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>Avg Cost</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>Current</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>Mkt Value</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>P&L ($)</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>P&L (%)</th>
+              <th style={{ textAlign: 'center', padding: '10px 8px', color: '#6b7280', fontSize: '12px' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {positions.filter(p => Number(p.quantity) > 0).map((pos, i) => {
+              const qty = Number(pos.quantity || 0);
+              const avgPrice = Number(pos.avgPrice || pos.avg_price || 0);
+              const curPrice = getCurrentPrice(pos.symbol) || avgPrice;
+              const mktValue = curPrice * qty;
+              const pnl = (curPrice - avgPrice) * qty;
+              const pnlPct = avgPrice > 0 ? ((curPrice - avgPrice) / avgPrice * 100) : 0;
+              return (
+                <tr key={pos.symbol || i} style={{ borderBottom: '1px solid #1f2937' }}>
+                  <td style={{ padding: '10px 8px', fontWeight: 'bold', color: '#e5e7eb', fontSize: '14px' }}>
+                    {pos.symbol}
+                  </td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', color: '#e5e7eb' }}>
+                    {qty.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                  </td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', color: '#9ca3af' }}>
+                    ${avgPrice.toFixed(2)}
+                  </td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', color: '#e5e7eb' }}>
+                    ${curPrice.toFixed(2)}
+                  </td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', color: '#e5e7eb' }}>
+                    ${mktValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td style={{
+                    padding: '10px 8px', textAlign: 'right', fontWeight: 'bold',
+                    color: pnl >= 0 ? '#10b981' : '#ef4444'
+                  }}>
+                    {pnl >= 0 ? '+' : ''}{pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                  </td>
+                  <td style={{
+                    padding: '10px 8px', textAlign: 'right',
+                    color: pnlPct >= 0 ? '#10b981' : '#ef4444'
+                  }}>
+                    {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+                  </td>
+                  <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                    <button onClick={() => sellPosition(pos.symbol, qty)} style={{
+                      background: '#dc2626', color: '#fff', border: 'none',
+                      padding: '6px 14px', borderRadius: '4px', cursor: 'pointer',
+                      fontWeight: 'bold', fontSize: '12px'
+                    }}>
+                      SELL
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {positions.filter(p => Number(p.quantity) > 0).length === 0 && (
+              <tr>
+                <td colSpan="8" style={{ padding: '24px', textAlign: 'center', color: '#4b5563' }}>
+                  No active positions — buy something to get started!
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ======================== SELL MODAL ======================== */}
+      {sellModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 1000
+        }} onClick={() => setSellModal(null)}>
+          <div style={{
+            background: '#111827', border: '1px solid #374151', borderRadius: '12px',
+            padding: '24px', width: '400px', maxWidth: '90vw'
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ color: '#ef4444', marginBottom: '16px' }}>
+              Sell {sellModal.symbol}
+            </h3>
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ color: '#6b7280', fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                Available: {sellModal.quantity} {sellModal.symbol}
+              </label>
+              <label style={{ color: '#6b7280', fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                Market Bid: ${sellModal.price.toFixed(2)}
+              </label>
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ color: '#6b7280', fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                Quantity to Sell
+              </label>
+              <input
+                type="number"
+                value={sellModal.sellQty}
+                onChange={e => setSellModal({ ...sellModal, sellQty: e.target.value })}
+                max={sellModal.quantity}
+                min="0.00000001"
+                step="any"
+                style={{
+                  width: '100%', padding: '10px', background: '#1f2937',
+                  border: '1px solid #374151', borderRadius: '6px', color: '#e5e7eb',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: '16px', padding: '12px', background: '#0f172a', borderRadius: '6px' }}>
+              <div style={{ color: '#6b7280', fontSize: '12px' }}>Estimated Proceeds</div>
+              <div style={{ color: '#10b981', fontSize: '20px', fontWeight: 'bold' }}>
+                ${(Number(sellModal.sellQty || 0) * sellModal.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={executeSell} style={{
+                flex: 1, background: '#dc2626', color: '#fff', border: 'none',
+                padding: '12px', borderRadius: '6px', cursor: 'pointer',
+                fontWeight: 'bold', fontSize: '14px'
+              }}>
+                Confirm Sell
+              </button>
+              <button onClick={() => setSellModal(null)} style={{
+                flex: 1, background: '#374151', color: '#e5e7eb', border: 'none',
+                padding: '12px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px'
+              }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================== MY ORDERS ======================== */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ color: '#9ca3af', margin: 0 }}>📋 My Orders</h3>
+          <button onClick={fetchOrders} style={{
+            background: '#1f2937', border: '1px solid #374151', color: '#9ca3af',
+            padding: '4px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
+          }}>↻ Refresh</button>
+        </div>
+        <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #374151' }}>
+                <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280' }}>ID</th>
+                <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280' }}>Symbol</th>
+                <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280' }}>Side</th>
+                <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280' }}>Type</th>
+                <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280' }}>Qty</th>
+                <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280' }}>Price</th>
+                <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280' }}>Filled</th>
+                <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280' }}>Status</th>
+                <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280' }}>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {myOrders.slice().sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 30).map((o, i) => {
+                const statusColor = o.status === 'FILLED' ? '#10b981'
+                  : o.status === 'CANCELLED' ? '#6b7280'
+                  : o.status === 'PARTIAL' ? '#f59e0b'
+                  : '#3b82f6';
+                return (
+                  <tr key={o.id || i} style={{ borderBottom: '1px solid #1f2937' }}>
+                    <td style={{ padding: '6px 8px', color: '#9ca3af' }}>#{o.id}</td>
+                    <td style={{ padding: '6px 8px', color: '#e5e7eb', fontWeight: 'bold' }}>{o.symbol}</td>
+                    <td style={{
+                      padding: '6px 8px', fontWeight: 'bold',
+                      color: o.side === 'BUY' ? '#10b981' : '#ef4444'
+                    }}>{o.side}</td>
+                    <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{o.orderType || o.type}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', color: '#e5e7eb' }}>
+                      {Number(o.quantity || 0).toLocaleString()}
+                    </td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', color: '#e5e7eb' }}>
+                      ${Number(o.price || 0).toFixed(2)}
+                    </td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', color: '#9ca3af' }}>
+                      {Number(o.filledQty || 0).toLocaleString()}
+                      {o.filledPrice ? ` @ $${Number(o.filledPrice).toFixed(2)}` : ''}
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <span style={{
+                        color: statusColor, fontWeight: 'bold',
+                        padding: '2px 8px', borderRadius: '4px',
+                        background: statusColor + '20', fontSize: '11px'
+                      }}>{o.status}</span>
+                    </td>
+                    <td style={{ padding: '6px 8px', color: '#6b7280', fontSize: '11px' }}>
+                      {o.createdAt ? new Date(o.createdAt).toLocaleString() : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+              {myOrders.length === 0 && (
+                <tr>
+                  <td colSpan="9" style={{ padding: '16px', textAlign: 'center', color: '#4b5563' }}>
+                    No orders yet
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Order Book - VULN: Displays order IDs enabling targeted cancellation */}
