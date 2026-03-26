@@ -38,19 +38,22 @@ public class MatchingEngineService {
     private final UserRepository userRepository;
     private final TransactionRepository transactionRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final LiquidityProviderService liquidityProvider;
 
     public MatchingEngineService(OrderRepository orderRepository,
                                   TradeRepository tradeRepository,
                                   PositionRepository positionRepository,
                                   UserRepository userRepository,
                                   TransactionRepository transactionRepository,
-                                  SimpMessagingTemplate messagingTemplate) {
+                                  SimpMessagingTemplate messagingTemplate,
+                                  LiquidityProviderService liquidityProvider) {
         this.orderRepository = orderRepository;
         this.tradeRepository = tradeRepository;
         this.positionRepository = positionRepository;
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
         this.messagingTemplate = messagingTemplate;
+        this.liquidityProvider = liquidityProvider;
     }
 
     /**
@@ -109,6 +112,17 @@ public class MatchingEngineService {
             executeTrade(incomingOrder, opposing, fillQty, fillPrice);
 
             remainingQty = remainingQty.subtract(fillQty);
+        }
+
+        // If MARKET order still has unfilled quantity, use the liquidity provider
+        if (remainingQty.compareTo(BigDecimal.ZERO) > 0
+                && "MARKET".equalsIgnoreCase(incomingOrder.getOrderType())) {
+            Order houseOrder = liquidityProvider.fillMarketOrder(incomingOrder, remainingQty);
+            if (houseOrder != null) {
+                BigDecimal fillPrice = houseOrder.getPrice();
+                executeTrade(incomingOrder, houseOrder, remainingQty, fillPrice);
+                remainingQty = BigDecimal.ZERO;
+            }
         }
 
         // Update incoming order status
