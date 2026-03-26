@@ -52,25 +52,16 @@ public class OrderService {
 
     /**
      * Place a new order.
-     * VULN: No server-side validation of quantity, price, symbol.
-     * VULN: clientOrderId not unique-enforced.
-     * VULN: Balance check has TOCTOU race condition.
+     * Validates symbol, enforces halt check for all types, runs risk checks.
      */
     public Order placeOrder(Long userId, OrderRequest request) {
-        // VULN: No validation of quantity > 0
-        // VULN: No validation of price > 0
-        // VULN: Symbol not validated against known symbols
-        // VULN: clientOrderId not checked for uniqueness (replay possible)
 
-        // Halt check only for LIMIT orders
-        // VULN: Can execute MARKET orders while trading is halted
-        if ("LIMIT".equalsIgnoreCase(request.getType())) {
-            if (priceSimulator.isHalted(request.getSymbol())) {
-                throw new RuntimeException("Trading halted for " + request.getSymbol());
-            }
+        // Halt check for ALL order types
+        if (priceSimulator.isHalted(request.getSymbol())) {
+            throw new RuntimeException("Trading halted for " + request.getSymbol());
         }
 
-        // Pre-trade risk check (VULN: skipped for MARKET, TOCTOU for LIMIT)
+        // Pre-trade risk check (runs for ALL order types including MARKET)
         String riskError = riskService.checkPreTrade(
                 userId, request.getSymbol(), request.getSide(),
                 request.getType(), request.getQuantity(), request.getPrice());
@@ -85,9 +76,9 @@ public class OrderService {
         order.setSymbol(request.getSymbol());
         order.setSide(request.getSide());
         order.setOrderType(request.getType());
-        order.setQuantity(request.getQuantity());  // VULN: can be negative
-        order.setPrice(request.getPrice());         // VULN: can be $0.01
-        order.setClientOrderId(request.getClientOrderId()); // VULN: not unique
+        order.setQuantity(request.getQuantity());
+        order.setPrice(request.getPrice());
+        order.setClientOrderId(request.getClientOrderId());
         order.setStatus("NEW");
         order.setFilledQty(BigDecimal.ZERO);
         order.setCreatedAt(LocalDateTime.now());
@@ -147,28 +138,21 @@ public class OrderService {
 
     /**
      * Execute a market order immediately at current price.
-     * VULN: No slippage protection.
-     * VULN: Race condition - price changes between validation and execution.
-     * VULN: Can execute while trading is halted (halt check only in limit orders).
      */
     public Order executeMarketOrder(Long userId, String symbol, String side, BigDecimal quantity) {
-        // VULN: No halt check for market orders
-        // (halt check is only in placeOrder for LIMIT type)
-
         // Get current price
         Optional<Symbol> symbolOpt = symbolRepository.findById(symbol);
-        BigDecimal currentPrice;
-        if (symbolOpt.isPresent()) {
-            currentPrice = "BUY".equalsIgnoreCase(side)
-                    ? symbolOpt.get().getAsk()   // Buy at ask
-                    : symbolOpt.get().getBid();   // Sell at bid
-        } else {
-            // VULN: Non-existent symbol gets arbitrary price
-            currentPrice = new BigDecimal("100.00");
+        if (symbolOpt.isEmpty()) {
+            throw new RuntimeException("Unknown symbol: " + symbol);
         }
 
-        // VULN: No slippage protection - price could have changed
-        // VULN: Race condition between getting price and creating order
+        BigDecimal currentPrice = "BUY".equalsIgnoreCase(side)
+                ? symbolOpt.get().getAsk()   // Buy at ask
+                : symbolOpt.get().getBid();   // Sell at bid
+
+        if (currentPrice == null || currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RuntimeException("No valid market price for " + symbol);
+        }
 
         OrderRequest request = new OrderRequest();
         request.setSymbol(symbol);

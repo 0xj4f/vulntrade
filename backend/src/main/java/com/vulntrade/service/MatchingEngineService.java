@@ -238,8 +238,7 @@ public class MatchingEngineService {
 
     /**
      * Update user position.
-     * VULN: Position can go negative (unauthorized short selling).
-     * VULN: P&L calculation uses floating point (precision errors).
+     * Prevents negative positions (no naked shorts).
      */
     private void updatePosition(Long userId, String symbol, BigDecimal quantity,
                                  BigDecimal price, boolean isBuy) {
@@ -253,12 +252,16 @@ public class MatchingEngineService {
                 BigDecimal totalCost = position.getAvgPrice().multiply(position.getQuantity())
                         .add(price.multiply(quantity));
                 BigDecimal newQty = position.getQuantity().add(quantity);
-                // VULN: floating point division for avg price
                 position.setAvgPrice(totalCost.divide(newQty, 8, RoundingMode.HALF_UP));
                 position.setQuantity(newQty);
             } else {
-                // VULN: Position can go negative - no check
-                position.setQuantity(position.getQuantity().subtract(quantity));
+                // Subtract from position — floor at zero (safety net)
+                BigDecimal newQty = position.getQuantity().subtract(quantity);
+                if (newQty.compareTo(BigDecimal.ZERO) < 0) {
+                    logger.warn("Position would go negative for userId={}, symbol={}, setting to 0", userId, symbol);
+                    newQty = BigDecimal.ZERO;
+                }
+                position.setQuantity(newQty);
             }
         } else {
             position = new Position();
@@ -268,8 +271,10 @@ public class MatchingEngineService {
                 position.setQuantity(quantity);
                 position.setAvgPrice(price);
             } else {
-                // VULN: Creating a negative position (naked short)
-                position.setQuantity(quantity.negate());
+                // No existing position and selling — should not happen with risk checks,
+                // but safety net: set to zero instead of negative
+                logger.warn("Sell with no existing position for userId={}, symbol={}", userId, symbol);
+                position.setQuantity(BigDecimal.ZERO);
                 position.setAvgPrice(price);
             }
         }
