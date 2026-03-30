@@ -28,9 +28,9 @@ function LoginPage() {
   };
 
   return (
-    <AuthLayout subtitle="Sign In to Trade" error={error}>
+    <AuthLayout subtitle="Sign in to your trading account" error={error}>
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '16px' }}>
+        <div style={{ marginBottom: '20px' }}>
           <label style={formLabel}>Username</label>
           {/* VULN: Error message from server displayed directly (user enumeration) */}
           <InputFull
@@ -41,7 +41,7 @@ function LoginPage() {
           />
         </div>
 
-        <div style={{ marginBottom: '24px' }}>
+        <div style={{ marginBottom: '28px' }}>
           <label style={formLabel}>Password</label>
           <InputFull
             type="password"
@@ -52,17 +52,23 @@ function LoginPage() {
         </div>
 
         <Button type="submit" variant="green" size="large">
-          Login
+          Sign In
         </Button>
       </form>
 
-      <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px' }}>
-        <Link to="/register" style={{ color: colors.green }}>
+      <div style={{
+        borderTop: `1px solid ${colors.borderDefault}`,
+        marginTop: '28px',
+        paddingTop: '20px',
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+      }}>
+        <Link to="/register" style={{ color: colors.green, fontSize: '14px', textDecoration: 'none', fontWeight: '500' }}>
           Don't have an account? Register
         </Link>
-      </div>
-      <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '14px' }}>
-        <Link to="/reset-password" style={{ color: colors.textMuted }}>
+        <Link to="/reset-password" style={{ color: colors.textMuted, fontSize: '13px', textDecoration: 'none' }}>
           Forgot password?
         </Link>
       </div>

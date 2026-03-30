@@ -246,57 +246,92 @@ function DashboardPage() {
   return (
     <PageLayout title="Trading Dashboard" maxWidth="1400px">
 
-      {health && (
-        <Card title="System Status">
-          <span style={{ color: health.status === 'UP' ? colors.green : colors.red, fontWeight: 'bold' }}>
-            {health.status} — DB: {health.database} | Users: {health.users} | Symbols: {health.symbols}
-          </span>
-          <span style={{ marginLeft: '16px', color: wsConnected ? colors.green : colors.red }}>
-            WS: {wsConnected ? '● LIVE' : '● OFFLINE'}
-          </span>
-        </Card>
-      )}
+      {/* ── Status Bar + Account ── */}
+      <div style={{ display: 'flex', gap: '16px', marginBottom: '4px', flexWrap: 'wrap' }}>
+        {health && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '12px',
+            padding: '10px 18px', borderRadius: '12px',
+            backgroundColor: colors.bgCard, border: `1px solid ${colors.borderDefault}`,
+            flex: '1 1 auto',
+          }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '6px',
+              padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+              backgroundColor: health.status === 'UP' ? colors.greenDark : colors.redDark,
+              color: health.status === 'UP' ? colors.greenLight : colors.redLight,
+              border: `1px solid ${health.status === 'UP' ? 'rgba(0,214,143,0.2)' : 'rgba(255,61,113,0.2)'}`,
+            }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: health.status === 'UP' ? colors.green : colors.red }} />
+              {health.status}
+            </span>
+            <span style={{ color: colors.textMuted, fontSize: '12px' }}>
+              DB: {health.database} · Users: {health.users} · Symbols: {health.symbols}
+            </span>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600',
+              backgroundColor: wsConnected ? colors.greenDark : colors.redDark,
+              color: wsConnected ? colors.greenLight : colors.redLight,
+              border: `1px solid ${wsConnected ? 'rgba(0,214,143,0.2)' : 'rgba(255,61,113,0.2)'}`,
+              marginLeft: 'auto',
+            }}>
+              <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: wsConnected ? colors.green : colors.red }} />
+              {wsConnected ? 'LIVE' : 'OFFLINE'}
+            </span>
+          </div>
+        )}
+      </div>
 
-      <Card title="Account">
-        <p>Username: <strong>{user?.username}</strong></p>
-        <p>Role: <strong>{user?.role}</strong></p>
-        <p>Balance: <strong style={{ color: colors.green }}>
-          ${user?.balance ? Number(user.balance).toLocaleString() : '—'}
-        </strong></p>
-        <p style={{ fontSize: '11px', color: colors.textMuted }}>
-          API Key: <code>{user?.apiKey || '—'}</code>
-        </p>
-      </Card>
+      {/* ── Account Summary ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+        <StatCard label="Balance" valueColor={colors.green} valueSize="22px"
+          value={`$${user?.balance ? Number(user.balance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}`} />
+        <StatCard label="Username" value={user?.username || '—'} valueSize="18px" />
+        <StatCard label="Role" valueSize="18px"
+          value={user?.role || '—'}
+          valueColor={user?.role === 'ADMIN' ? colors.red : colors.blue} />
+        <StatCard label="API Key" valueSize="11px"
+          value={<code style={{ fontFamily: "'SF Mono', monospace", color: colors.amber, wordBreak: 'break-all' }}>{user?.apiKey || '—'}</code>} />
+      </div>
 
       {/* ── Market Prices ── */}
-      <Card title={<>Market Prices {wsConnected
-        ? <span style={{ color: colors.green, fontSize: '12px' }}> ● LIVE</span>
-        : <span style={{ color: colors.red, fontSize: '12px' }}> ● OFFLINE</span>}
-      </>}>
+      <Card title={<span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        Live Prices
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '4px',
+          padding: '2px 8px', borderRadius: '20px', fontSize: '10px', fontWeight: '600',
+          backgroundColor: wsConnected ? colors.greenDark : colors.redDark,
+          color: wsConnected ? colors.greenLight : colors.redLight,
+        }}>
+          <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: wsConnected ? colors.green : colors.red }} />
+          {wsConnected ? 'LIVE' : 'OFF'}
+        </span>
+      </span>}>
         <DataTable
           columns={[
             { key: 'symbol', label: 'Symbol', render: p => (
-              <span style={{ fontWeight: 'bold', color: colors.textPrimary }}
+              <span style={{ fontWeight: '700', color: colors.textPrimary, fontSize: '14px' }}
                 dangerouslySetInnerHTML={{ __html: p.symbol }} />
             )},
             { key: 'name', label: 'Name', render: p => (
-              <span style={{ color: colors.textSecondary }}
+              <span style={{ color: colors.textMuted, fontSize: '13px' }}
                 dangerouslySetInnerHTML={{ __html: p.name || '' }} />
             )},
             { key: 'price', label: 'Price', align: 'right', render: p => (
-              <span style={{ color: colors.green }}>${Number(p.currentPrice).toFixed(2)}</span>
+              <span style={{ color: colors.green, fontWeight: '600', fontSize: '14px' }}>${Number(p.currentPrice).toFixed(2)}</span>
             )},
             { key: 'bid', label: 'Bid', align: 'right', render: p => (
-              <span style={{ color: colors.textMuted }}>{p.bid ? `$${Number(p.bid).toFixed(2)}` : '—'}</span>
+              <span style={{ color: colors.textSecondary, fontSize: '13px' }}>{p.bid ? `$${Number(p.bid).toFixed(2)}` : '—'}</span>
             )},
             { key: 'ask', label: 'Ask', align: 'right', render: p => (
-              <span style={{ color: colors.textMuted }}>{p.ask ? `$${Number(p.ask).toFixed(2)}` : '—'}</span>
+              <span style={{ color: colors.textSecondary, fontSize: '13px' }}>{p.ask ? `$${Number(p.ask).toFixed(2)}` : '—'}</span>
             )},
             { key: 'volume', label: 'Volume', align: 'right', render: p => (
-              <span style={{ color: colors.textMuted }}>{p.volume ? Number(p.volume).toLocaleString() : '—'}</span>
+              <span style={{ color: colors.textMuted, fontSize: '13px' }}>{p.volume ? Number(p.volume).toLocaleString() : '—'}</span>
             )},
             { key: 'internal', label: 'Internal', align: 'right', render: p => (
-              <span style={{ color: colors.textDim, fontSize: '10px' }}>
+              <span style={{ color: colors.textDim, fontSize: '10px', fontFamily: "'SF Mono', monospace" }}>
                 {p.marketMakerId && `MM:${p.marketMakerId}`}
                 {p.costBasis && ` CB:$${Number(p.costBasis).toFixed(2)}`}
               </span>
@@ -314,11 +349,39 @@ function DashboardPage() {
         <div style={flexRowWrap('12px')}>
           <input type="hidden" id="order-user-id" value={user?.userId || user?.id || ''} />
 
+          {/* BUY/SELL toggle */}
+          <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: `1px solid ${colors.borderMedium}` }}>
+            {['BUY', 'SELL'].map(side => (
+              <button key={side} onClick={() => {
+                const newForm = { ...orderForm, side };
+                if (orderForm.type === 'MARKET') {
+                  const symbolData = pricesRef.current[orderForm.symbol];
+                  if (symbolData) {
+                    const marketPrice = side === 'BUY'
+                      ? Number(symbolData.ask || symbolData.currentPrice)
+                      : Number(symbolData.bid || symbolData.currentPrice);
+                    newForm.price = marketPrice.toFixed(2);
+                  }
+                }
+                setOrderForm(newForm);
+              }} style={{
+                padding: '9px 22px', border: 'none', cursor: 'pointer',
+                fontWeight: '600', fontSize: '13px', letterSpacing: '0.03em',
+                transition: 'all 0.15s ease',
+                backgroundColor: orderForm.side === side
+                  ? (side === 'BUY' ? colors.green : colors.red)
+                  : colors.bgInput,
+                color: orderForm.side === side ? '#fff' : colors.textMuted,
+              }}>
+                {side}
+              </button>
+            ))}
+          </div>
+
           <FormField label="Symbol">
             <select value={orderForm.symbol} onChange={e => {
               const newSymbol = e.target.value;
               const newForm = { ...orderForm, symbol: newSymbol };
-              // Always update price to new symbol's market price
               const symbolData = pricesRef.current[newSymbol];
               if (symbolData) {
                 const marketPrice = orderForm.side === 'BUY'
@@ -330,26 +393,6 @@ function DashboardPage() {
               fetchOrderBook(newSymbol);
             }} style={selectStyle}>
               {prices.map(p => <option key={p.symbol} value={p.symbol}>{p.symbol}</option>)}
-            </select>
-          </FormField>
-
-          <FormField label="Side">
-            <select value={orderForm.side} onChange={e => {
-              const newSide = e.target.value;
-              const newForm = { ...orderForm, side: newSide };
-              if (orderForm.type === 'MARKET') {
-                const symbolData = pricesRef.current[orderForm.symbol];
-                if (symbolData) {
-                  const marketPrice = newSide === 'BUY'
-                    ? Number(symbolData.ask || symbolData.currentPrice)
-                    : Number(symbolData.bid || symbolData.currentPrice);
-                  newForm.price = marketPrice.toFixed(2);
-                }
-              }
-              setOrderForm(newForm);
-            }} style={selectStyle}>
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL</option>
             </select>
           </FormField>
 
@@ -383,12 +426,15 @@ function DashboardPage() {
             <Input type="number" step="0.01" value={orderForm.price}
               onChange={e => setOrderForm({ ...orderForm, price: e.target.value })}
               readOnly={orderForm.type === 'MARKET'} width="120px"
-              style={{ background: orderForm.type === 'MARKET' ? colors.bgStat : colors.bgInput }} />
+              style={{
+                background: orderForm.type === 'MARKET' ? colors.bgStat : colors.bgInput,
+                opacity: orderForm.type === 'MARKET' ? 0.7 : 1,
+              }} />
           </FormField>
 
           <Button
             variant={orderForm.side === 'BUY' ? 'green' : 'red'}
-            style={{ padding: '8px 24px' }}
+            style={{ padding: '10px 28px', fontSize: '14px', letterSpacing: '0.02em' }}
             onClick={() => {
               const qty = Number(orderForm.quantity);
               if (qty <= 0 || qty > 10000) {
@@ -455,10 +501,10 @@ function DashboardPage() {
 
       {/* ── Active Positions ── */}
       <Card
-        title="📊 Active Positions"
+        title="Active Positions"
         headerRight={
           <Button variant="gray" size="small"
-            style={{ padding: '4px 12px', fontSize: '12px', border: `1px solid ${colors.borderMedium}` }}
+            style={{ padding: '5px 14px', fontSize: '11px', border: `1px solid ${colors.borderMedium}`, borderRadius: '8px' }}
             onClick={fetchPositions}>↻ Refresh</Button>
         }
       >
@@ -521,19 +567,25 @@ function DashboardPage() {
       {/* ── Sell Modal ── */}
       {sellModal && (
         <Modal open={true} onClose={() => setSellModal(null)}>
-          <h3 style={{ color: colors.red, marginBottom: '16px', textAlign: 'left' }}>
+          <h3 style={{ color: colors.red, marginBottom: '20px', textAlign: 'left', fontSize: '18px', fontWeight: '700' }}>
             Sell {sellModal.symbol}
           </h3>
-          <div style={{ marginBottom: '12px', textAlign: 'left' }}>
-            <label style={{ color: colors.textMuted, fontSize: '12px', display: 'block', marginBottom: '4px' }}>
-              Available: {sellModal.quantity} {sellModal.symbol}
-            </label>
-            <label style={{ color: colors.textMuted, fontSize: '12px', display: 'block', marginBottom: '4px' }}>
-              Market Bid: ${sellModal.price.toFixed(2)}
-            </label>
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px',
+            marginBottom: '16px', padding: '14px', borderRadius: '10px',
+            backgroundColor: colors.bgStat, border: `1px solid ${colors.borderDefault}`,
+          }}>
+            <div>
+              <div style={{ color: colors.textMuted, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Available</div>
+              <div style={{ color: colors.textPrimary, fontWeight: '600' }}>{sellModal.quantity} {sellModal.symbol}</div>
+            </div>
+            <div>
+              <div style={{ color: colors.textMuted, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Market Bid</div>
+              <div style={{ color: colors.green, fontWeight: '600' }}>${sellModal.price.toFixed(2)}</div>
+            </div>
           </div>
           <div style={{ marginBottom: '16px', textAlign: 'left' }}>
-            <label style={{ color: colors.textMuted, fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+            <label style={{ color: colors.textMuted, fontSize: '11px', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600' }}>
               Quantity to Sell
             </label>
             <input
@@ -544,27 +596,28 @@ function DashboardPage() {
               min="0.00000001"
               step="any"
               style={{
-                width: '100%', padding: '10px', background: colors.bgInput,
-                border: `1px solid ${colors.borderMedium}`, borderRadius: '6px',
-                color: colors.textPrimary, boxSizing: 'border-box'
+                width: '100%', padding: '11px 14px', background: colors.bgInput,
+                border: `1px solid ${colors.borderMedium}`, borderRadius: '10px',
+                color: colors.textPrimary, boxSizing: 'border-box', fontSize: '16px',
+                outline: 'none',
               }}
             />
           </div>
           <StatCard label="Estimated Proceeds" valueColor={colors.green} valueSize="20px"
             value={`$${(Number(sellModal.sellQty || 0) * sellModal.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-            style={{ marginBottom: '16px' }} />
+            style={{ marginBottom: '20px' }} />
           <div style={{ display: 'flex', gap: '12px' }}>
             <button onClick={executeSell} style={{
-              flex: 1, background: '#dc2626', color: '#fff', border: 'none',
-              padding: '12px', borderRadius: '6px', cursor: 'pointer',
-              fontWeight: 'bold', fontSize: '14px'
+              flex: 1, background: `linear-gradient(135deg, ${colors.red}, #E0284F)`, color: '#fff', border: 'none',
+              padding: '12px', borderRadius: '10px', cursor: 'pointer',
+              fontWeight: '600', fontSize: '14px', transition: 'all 0.15s ease',
             }}>
               Confirm Sell
             </button>
             <button onClick={() => setSellModal(null)} style={{
-              flex: 1, background: colors.borderMedium, color: colors.textPrimary,
-              border: 'none', padding: '12px', borderRadius: '6px',
-              cursor: 'pointer', fontSize: '14px'
+              flex: 1, background: colors.bgInput, color: colors.textSecondary,
+              border: `1px solid ${colors.borderMedium}`, padding: '12px', borderRadius: '10px',
+              cursor: 'pointer', fontSize: '14px', transition: 'all 0.15s ease',
             }}>
               Cancel
             </button>
@@ -574,10 +627,10 @@ function DashboardPage() {
 
       {/* ── My Orders ── */}
       <Card
-        title="📋 My Orders"
+        title="My Orders"
         headerRight={
           <Button variant="gray" size="small"
-            style={{ padding: '4px 12px', fontSize: '12px', border: `1px solid ${colors.borderMedium}` }}
+            style={{ padding: '5px 14px', fontSize: '11px', border: `1px solid ${colors.borderMedium}`, borderRadius: '8px' }}
             onClick={fetchOrders}>↻ Refresh</Button>
         }
       >
@@ -645,13 +698,13 @@ function DashboardPage() {
 
       {/* ── Recent Trades ── */}
       {recentTrades.length > 0 && (
-        <Card title="Recent Trades (Live)">
+        <Card title="Recent Trades">
           <DataTable
             columns={[
-              { key: 'tradeId', label: 'Trade ID', render: t => <span style={{ color: colors.textSecondary, fontSize: '12px' }}>{t.tradeId}</span> },
-              { key: 'symbol', label: 'Symbol', render: t => <span style={{ color: colors.textPrimary, fontSize: '12px' }}>{t.symbol}</span> },
-              { key: 'quantity', label: 'Qty', align: 'right', render: t => <span style={{ fontSize: '12px' }}>{t.quantity}</span> },
-              { key: 'price', label: 'Price', align: 'right', render: t => <span style={{ color: colors.green, fontSize: '12px' }}>${Number(t.price).toFixed(2)}</span> },
+              { key: 'tradeId', label: 'Trade ID', render: t => <span style={{ color: colors.textMuted, fontSize: '12px', fontFamily: "'SF Mono', monospace" }}>{t.tradeId}</span> },
+              { key: 'symbol', label: 'Symbol', render: t => <span style={{ color: colors.textPrimary, fontSize: '13px', fontWeight: '600' }}>{t.symbol}</span> },
+              { key: 'quantity', label: 'Qty', align: 'right', render: t => <span style={{ fontSize: '13px' }}>{t.quantity}</span> },
+              { key: 'price', label: 'Price', align: 'right', render: t => <span style={{ color: colors.green, fontSize: '13px', fontWeight: '500' }}>${Number(t.price).toFixed(2)}</span> },
               { key: 'buyer', label: 'Buyer', align: 'right', render: t => <span style={{ color: colors.textMuted, fontSize: '12px' }}>User#{t.buyUserId}</span> },
               { key: 'seller', label: 'Seller', align: 'right', render: t => <span style={{ color: colors.textMuted, fontSize: '12px' }}>User#{t.sellUserId}</span> },
             ]}
@@ -665,13 +718,18 @@ function DashboardPage() {
 
       {/* ── Admin Alerts ── */}
       {adminAlerts.length > 0 && (
-        <Card variant="warning" title="⚠️ Admin Alerts (leaked)" titleColor={colors.amber}>
+        <Card variant="warning" title="Admin Alerts (leaked)" titleColor={colors.amber}>
           {adminAlerts.map((a, i) => (
             <div key={i} style={{
-              padding: '6px', borderBottom: `1px solid ${colors.borderDefault}`,
-              fontSize: '12px', color: colors.amberLight,
+              padding: '10px 12px', borderBottom: `1px solid ${colors.borderDefault}`,
+              fontSize: '12px', color: colors.amberLight, lineHeight: '1.5',
             }}>
-              [{a.type || 'ALERT'}] {a.message || JSON.stringify(a)}
+              <span style={{
+                display: 'inline-block', padding: '1px 6px', borderRadius: '4px',
+                backgroundColor: colors.amberDark, fontSize: '10px', fontWeight: '600',
+                marginRight: '8px', color: colors.amber,
+              }}>{a.type || 'ALERT'}</span>
+              {a.message || JSON.stringify(a)}
             </div>
           ))}
         </Card>

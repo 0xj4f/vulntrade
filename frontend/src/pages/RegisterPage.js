@@ -50,9 +50,9 @@ function RegisterPage() {
   };
 
   return (
-    <AuthLayout subtitle="Create Account" error={error}>
+    <AuthLayout subtitle="Create your trading account" error={error}>
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '16px' }}>
+        <div style={{ marginBottom: '20px' }}>
           <label style={formLabel}>Username</label>
           <InputFull
             type="text"
@@ -63,7 +63,7 @@ function RegisterPage() {
           />
         </div>
 
-        <div style={{ marginBottom: '16px' }}>
+        <div style={{ marginBottom: '20px' }}>
           <label style={formLabel}>Email</label>
           <InputFull
             type="email"
@@ -74,9 +74,9 @@ function RegisterPage() {
           />
         </div>
 
-        <div style={{ marginBottom: '16px' }}>
+        <div style={{ marginBottom: '20px' }}>
           <label style={formLabel}>
-            Password <span style={{ color: colors.textMuted }}>(min 6 chars)</span>
+            Password <span style={{ color: colors.textMuted, fontSize: '12px' }}>(min 6 chars)</span>
           </label>
           <InputFull
             type="password"
@@ -88,7 +88,7 @@ function RegisterPage() {
           />
         </div>
 
-        <div style={{ marginBottom: '24px' }}>
+        <div style={{ marginBottom: '28px' }}>
           <label style={formLabel}>Confirm Password</label>
           <InputFull
             type="password"
@@ -103,13 +103,18 @@ function RegisterPage() {
         {/* An attacker can add role=ADMIN via DevTools or API call */}
 
         <Button type="submit" variant="green" size="large">
-          Register
+          Create Account
         </Button>
       </form>
 
-      <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px' }}>
-        <Link to="/login" style={{ color: colors.green }}>
-          Already have an account? Login
+      <div style={{
+        borderTop: `1px solid ${colors.borderDefault}`,
+        marginTop: '28px',
+        paddingTop: '20px',
+        textAlign: 'center',
+      }}>
+        <Link to="/login" style={{ color: colors.green, fontSize: '14px', textDecoration: 'none', fontWeight: '500' }}>
+          Already have an account? Sign in
         </Link>
       </div>
     </AuthLayout>

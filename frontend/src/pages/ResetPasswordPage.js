@@ -61,7 +61,7 @@ function ResetPasswordPage() {
 
   return (
     <AuthLayout
-      subtitle={step === 'request' ? 'Reset Password' : 'Set New Password'}
+      subtitle={step === 'request' ? 'Reset your password' : 'Set a new password'}
       error={error}
       success={message}
       width="440px"
@@ -73,7 +73,7 @@ function ResetPasswordPage() {
 
       {step === 'request' ? (
         <form onSubmit={handleRequestReset}>
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '28px' }}>
             <label style={formLabel}>Email Address</label>
             <InputFull
               type="email"
@@ -90,19 +90,19 @@ function ResetPasswordPage() {
         </form>
       ) : (
         <form onSubmit={handleConfirmReset}>
-          <div style={{ marginBottom: '16px' }}>
+          <div style={{ marginBottom: '20px' }}>
             <label style={formLabel}>Reset Token</label>
             <InputFull
               type="text"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               required
-              style={{ fontFamily: 'monospace' }}
+              style={{ fontFamily: "'SF Mono', 'Fira Code', monospace", letterSpacing: '0.05em' }}
               placeholder="Enter reset token"
             />
           </div>
 
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '28px' }}>
             <label style={formLabel}>New Password</label>
             <InputFull
               type="password"
@@ -121,16 +121,21 @@ function ResetPasswordPage() {
             variant="gray"
             size="large"
             onClick={() => setStep('request')}
-            style={{ marginTop: '8px', fontSize: '14px' }}
+            style={{ marginTop: '10px', fontSize: '14px' }}
           >
             Back to Request
           </Button>
         </form>
       )}
 
-      <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px' }}>
-        <Link to="/login" style={{ color: colors.green }}>
-          Back to Login
+      <div style={{
+        borderTop: `1px solid ${colors.borderDefault}`,
+        marginTop: '28px',
+        paddingTop: '20px',
+        textAlign: 'center',
+      }}>
+        <Link to="/login" style={{ color: colors.green, fontSize: '14px', textDecoration: 'none', fontWeight: '500' }}>
+          Back to Sign In
         </Link>
       </div>
     </AuthLayout>
