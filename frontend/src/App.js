@@ -9,6 +9,7 @@ import HistoryPage from './pages/HistoryPage';
 import AccountPage from './pages/AccountPage';
 import AdminPage from './pages/AdminPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import SymbolDetailPage from './pages/SymbolDetailPage';
 import { connectWebSocket, disconnectWebSocket, isConnected } from './services/websocketService';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -167,6 +168,9 @@ function AppContent() {
         {/* VULN: Admin route only protected client-side */}
         <Route path="/admin" element={
           isAuthenticated ? <AdminPage /> : <Navigate to="/login" />
+        } />
+        <Route path="/symbol/:symbol" element={
+          isAuthenticated ? <SymbolDetailPage /> : <Navigate to="/login" />
         } />
         <Route path="*" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
       </Routes>

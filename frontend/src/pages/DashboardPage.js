@@ -13,6 +13,7 @@ import Button from '../components/Button';
 import Modal from '../components/Modal';
 import FormField, { Input } from '../components/FormField';
 import StatusBadge from '../components/StatusBadge';
+import SparkLine from '../components/SparkLine';
 import {
   colors, selectStyle, flexRowWrap, gridCols,
   orderErrorBanner, orderStatusBanner,
@@ -35,6 +36,8 @@ function DashboardPage() {
   const [orderError, setOrderError] = useState(null);
   const [sellModal, setSellModal] = useState(null);
   const pricesRef = useRef({});
+  const priceHistoryRef = useRef({}); // { symbol: [price1, price2, ...] } for sparklines
+  const [priceHistory, setPriceHistory] = useState({}); // triggers re-render for sparklines
 
   // ── Fetchers (unchanged) ─────────────────────────────
   const fetchPositions = useCallback(() => {
@@ -138,6 +141,14 @@ function DashboardPage() {
             spreadBps: priceUpdate.spreadBps,
           };
           setPrices(Object.values(pricesRef.current));
+          // Accumulate for sparklines (last 30 ticks per symbol)
+          const sym = priceUpdate.symbol;
+          const last = Number(priceUpdate.last || priceUpdate.bid || 0);
+          if (last > 0) {
+            const prev = priceHistoryRef.current[sym] || [];
+            priceHistoryRef.current[sym] = [...prev.slice(-29), last];
+            setPriceHistory({ ...priceHistoryRef.current });
+          }
         }
       });
 
@@ -330,6 +341,9 @@ function DashboardPage() {
             )},
             { key: 'volume', label: 'Volume', align: 'right', render: p => (
               <span style={{ color: colors.textMuted, fontSize: '13px' }}>{p.volume ? Number(p.volume).toLocaleString() : '—'}</span>
+            )},
+            { key: 'spark', label: 'Trend', align: 'center', render: p => (
+              <SparkLine data={priceHistory[p.symbol] || []} width={72} height={24} />
             )},
             { key: 'internal', label: 'Internal', align: 'right', render: p => (
               <span style={{ color: colors.textDim, fontSize: '10px', fontFamily: "'SF Mono', monospace" }}>
