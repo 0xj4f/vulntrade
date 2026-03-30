@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -12,6 +12,35 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import { connectWebSocket, disconnectWebSocket, isConnected } from './services/websocketService';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+
+/* ── Nav link with active state ─────────────────────────── */
+function NavItem({ to, label, danger = false }) {
+  const location = useLocation();
+  const isActive = location.pathname === to;
+  const baseColor = danger ? '#FF3D71' : '#8F9BB3';
+  const activeColor = danger ? '#FF3D71' : '#FFFFFF';
+
+  return (
+    <Link
+      to={to}
+      style={{
+        color: isActive ? activeColor : baseColor,
+        textDecoration: 'none',
+        padding: '7px 16px',
+        borderRadius: '8px',
+        fontSize: '13px',
+        fontWeight: isActive ? '600' : '500',
+        transition: 'all 0.15s ease',
+        backgroundColor: isActive
+          ? (danger ? 'rgba(255,61,113,0.12)' : 'rgba(79,139,255,0.10)')
+          : 'transparent',
+        letterSpacing: '0.01em',
+      }}
+    >
+      {label}
+    </Link>
+  );
+}
 
 function AppContent() {
   const { isAuthenticated, user, logout, isAdmin } = useAuth();
@@ -48,52 +77,66 @@ function AppContent() {
       {isAuthenticated && (
         <nav style={{
           backgroundColor: '#0E1A2E',
-          padding: '0 24px',
+          padding: '0 28px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           borderBottom: '1px solid #1E2D45',
           height: '56px',
+          position: 'sticky',
+          top: 0,
+          zIndex: 900,
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
         }}>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ fontSize: '18px', fontWeight: '700', color: '#00D68F', marginRight: '20px', letterSpacing: '-0.02em' }}>
-              ⚡ VulnTrade
-            </span>
-            <Link to="/dashboard" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
-              Dashboard
+          {/* Left: Logo + Nav Links */}
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <Link to="/dashboard" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', marginRight: '16px' }}>
+              <div style={{
+                width: '30px', height: '30px', borderRadius: '8px',
+                background: 'linear-gradient(135deg, #00D68F, #00B87A)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '15px',
+                boxShadow: '0 2px 8px rgba(0,214,143,0.25)',
+              }}>⚡</div>
+              <span style={{ fontSize: '16px', fontWeight: '700', color: '#FFFFFF', letterSpacing: '-0.02em' }}>
+                VulnTrade
+              </span>
             </Link>
-            <Link to="/portfolio" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
-              Portfolio
-            </Link>
-            <Link to="/history" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
-              History
-            </Link>
-            <Link to="/account" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
-              Account
-            </Link>
+
+            <NavItem to="/dashboard" label="Dashboard" />
+            <NavItem to="/portfolio" label="Portfolio" />
+            <NavItem to="/history" label="History" />
+            <NavItem to="/account" label="Account" />
             {/* VULN: Admin link only hidden by client-side check */}
-            {isAdmin() && (
-              <Link to="/admin" style={{ color: '#FF3D71', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500' }}>
-                Admin
-              </Link>
-            )}
+            {isAdmin() && <NavItem to="/admin" label="Admin" danger />}
           </div>
-          <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+
+          {/* Right: User info + Logout */}
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <div style={{
-              width: '32px', height: '32px', borderRadius: '50%',
-              background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '13px', fontWeight: '700', color: '#fff',
+              display: 'flex', alignItems: 'center', gap: '10px',
+              padding: '4px 12px 4px 4px',
+              borderRadius: '24px',
+              backgroundColor: 'rgba(30,45,69,0.6)',
+              border: '1px solid #1E2D45',
             }}>
-              {user?.username?.charAt(0)?.toUpperCase() || '?'}
+              <div style={{
+                width: '28px', height: '28px', borderRadius: '50%',
+                background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '12px', fontWeight: '700', color: '#fff',
+              }}>
+                {user?.username?.charAt(0)?.toUpperCase() || '?'}
+              </div>
+              <span style={{ color: '#8F9BB3', fontSize: '13px', fontWeight: '500' }}>
+                {user?.username}
+              </span>
             </div>
-            <span style={{ color: '#5E6B82', fontSize: '13px' }}>
-              {user?.username}
-            </span>
             <button onClick={logout} style={{
-              background: '#1E2D45', border: '1px solid #263A56', color: '#8F9BB3',
+              background: 'transparent', border: '1px solid #263A56', color: '#5E6B82',
               padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
-              fontSize: '13px', fontWeight: '500',
+              fontSize: '12px', fontWeight: '500', transition: 'all 0.15s ease',
             }}>
               Logout
             </button>
