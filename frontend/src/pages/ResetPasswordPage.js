@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/apiService';
 import { toast } from 'react-toastify';
+import AuthLayout from '../components/AuthLayout';
+import { InputFull } from '../components/FormField';
+import Button from '../components/Button';
+import { colors, formLabel, debugBanner } from '../styles/shared';
 
 /**
  * Password reset page.
@@ -56,145 +60,80 @@ function ResetPasswordPage() {
   };
 
   return (
-    <div style={{
-      display: 'flex', justifyContent: 'center', alignItems: 'center',
-      minHeight: '100vh', backgroundColor: '#0a0e17'
-    }}>
-      <div style={{
-        backgroundColor: '#111827', padding: '40px', borderRadius: '12px',
-        width: '440px', border: '1px solid #1f2937'
-      }}>
-        <h1 style={{ textAlign: 'center', color: '#10b981', marginBottom: '8px' }}>
-          ⚡ VulnTrade
-        </h1>
-        <p style={{ textAlign: 'center', color: '#6b7280', marginBottom: '24px' }}>
-          {step === 'request' ? 'Reset Password' : 'Set New Password'}
-        </p>
+    <AuthLayout
+      subtitle={step === 'request' ? 'Reset Password' : 'Set New Password'}
+      error={error}
+      success={message}
+      width="440px"
+    >
+      {/* VULN: Debug token shown in UI */}
+      {debugToken && (
+        <div style={debugBanner}>Debug Token: {debugToken}</div>
+      )}
 
-        {error && (
-          <div style={{
-            backgroundColor: '#7f1d1d', color: '#fca5a5', padding: '10px',
-            borderRadius: '6px', marginBottom: '16px', fontSize: '14px'
-          }}>
-            {error}
+      {step === 'request' ? (
+        <form onSubmit={handleRequestReset}>
+          <div style={{ marginBottom: '24px' }}>
+            <label style={formLabel}>Email Address</label>
+            <InputFull
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              placeholder="your@email.com"
+            />
           </div>
-        )}
 
-        {message && (
-          <div style={{
-            backgroundColor: '#064e3b', color: '#6ee7b7', padding: '10px',
-            borderRadius: '6px', marginBottom: '16px', fontSize: '14px'
-          }}>
-            {message}
+          <Button type="submit" variant="green" size="large">
+            Send Reset Token
+          </Button>
+        </form>
+      ) : (
+        <form onSubmit={handleConfirmReset}>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={formLabel}>Reset Token</label>
+            <InputFull
+              type="text"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              required
+              style={{ fontFamily: 'monospace' }}
+              placeholder="Enter reset token"
+            />
           </div>
-        )}
 
-        {/* VULN: Debug token shown in UI */}
-        {debugToken && (
-          <div style={{
-            backgroundColor: '#1e1b4b', color: '#a5b4fc', padding: '10px',
-            borderRadius: '6px', marginBottom: '16px', fontSize: '12px',
-            fontFamily: 'monospace'
-          }}>
-            Debug Token: {debugToken}
+          <div style={{ marginBottom: '24px' }}>
+            <label style={formLabel}>New Password</label>
+            <InputFull
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              placeholder="Enter new password"
+            />
           </div>
-        )}
 
-        {step === 'request' ? (
-          <form onSubmit={handleRequestReset}>
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', color: '#9ca3af', marginBottom: '4px', fontSize: '14px' }}>
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                style={{
-                  width: '100%', padding: '10px', backgroundColor: '#1f2937',
-                  border: '1px solid #374151', borderRadius: '6px', color: '#e5e7eb',
-                  boxSizing: 'border-box'
-                }}
-                placeholder="your@email.com"
-              />
-            </div>
+          <Button type="submit" variant="green" size="large">
+            Reset Password
+          </Button>
 
-            <button type="submit" style={{
-              width: '100%', padding: '12px', backgroundColor: '#10b981',
-              border: 'none', borderRadius: '6px', color: 'white',
-              fontSize: '16px', fontWeight: 'bold', cursor: 'pointer'
-            }}>
-              Send Reset Token
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleConfirmReset}>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', color: '#9ca3af', marginBottom: '4px', fontSize: '14px' }}>
-                Reset Token
-              </label>
-              <input
-                type="text"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                required
-                style={{
-                  width: '100%', padding: '10px', backgroundColor: '#1f2937',
-                  border: '1px solid #374151', borderRadius: '6px', color: '#e5e7eb',
-                  boxSizing: 'border-box', fontFamily: 'monospace'
-                }}
-                placeholder="Enter reset token"
-              />
-            </div>
+          <Button
+            variant="gray"
+            size="large"
+            onClick={() => setStep('request')}
+            style={{ marginTop: '8px', fontSize: '14px' }}
+          >
+            Back to Request
+          </Button>
+        </form>
+      )}
 
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', color: '#9ca3af', marginBottom: '4px', fontSize: '14px' }}>
-                New Password
-              </label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                style={{
-                  width: '100%', padding: '10px', backgroundColor: '#1f2937',
-                  border: '1px solid #374151', borderRadius: '6px', color: '#e5e7eb',
-                  boxSizing: 'border-box'
-                }}
-                placeholder="Enter new password"
-              />
-            </div>
-
-            <button type="submit" style={{
-              width: '100%', padding: '12px', backgroundColor: '#10b981',
-              border: 'none', borderRadius: '6px', color: 'white',
-              fontSize: '16px', fontWeight: 'bold', cursor: 'pointer'
-            }}>
-              Reset Password
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setStep('request')}
-              style={{
-                width: '100%', padding: '12px', backgroundColor: '#374151',
-                border: 'none', borderRadius: '6px', color: '#9ca3af',
-                fontSize: '14px', cursor: 'pointer', marginTop: '8px'
-              }}
-            >
-              Back to Request
-            </button>
-          </form>
-        )}
-
-        <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px' }}>
-          <Link to="/login" style={{ color: '#10b981' }}>
-            Back to Login
-          </Link>
-        </div>
+      <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px' }}>
+        <Link to="/login" style={{ color: colors.green }}>
+          Back to Login
+        </Link>
       </div>
-    </div>
+    </AuthLayout>
   );
 }
 
