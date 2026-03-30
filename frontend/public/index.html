@@ -5,6 +5,108 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VulnTrade - Trading Platform</title>
     <!-- VULN: No CSP meta tag -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      /* ── Global Reset & Theme ─────────────────────────── */
+      *, *::before, *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html {
+        font-size: 14px;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                     Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background-color: #0B1426;
+        color: #FFFFFF;
+        line-height: 1.5;
+        overflow-x: hidden;
+      }
+
+      /* ── Scrollbar ────────────────────────────────────── */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0B1426;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #263A56;
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #2E4468;
+      }
+
+      /* ── Focus Ring ───────────────────────────────────── */
+      input:focus, select:focus, textarea:focus {
+        border-color: #4F8BFF !important;
+        box-shadow: 0 0 0 3px rgba(79,139,255,0.15) !important;
+        outline: none;
+      }
+
+      /* ── Button Hover ─────────────────────────────────── */
+      button {
+        font-family: inherit;
+      }
+      button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      }
+      button:active:not(:disabled) {
+        transform: translateY(0);
+      }
+
+      /* ── Links ────────────────────────────────────────── */
+      a {
+        transition: color 0.15s ease, opacity 0.15s ease;
+      }
+      a:hover {
+        opacity: 0.85;
+      }
+
+      /* ── Table Row Hover ──────────────────────────────── */
+      tbody tr {
+        transition: background-color 0.15s ease;
+      }
+      tbody tr:hover {
+        background-color: rgba(79,139,255,0.04);
+      }
+
+      /* ── Selections ───────────────────────────────────── */
+      ::selection {
+        background: rgba(79,139,255,0.3);
+        color: #FFFFFF;
+      }
+
+      /* ── Card Hover (via class) ───────────────────────── */
+      .card-hover:hover {
+        border-color: #263A56 !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.25) !important;
+      }
+
+      /* ── Transitions ──────────────────────────────────── */
+      input, select, textarea {
+        font-family: inherit;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      /* ── Toast Override ───────────────────────────────── */
+      .Toastify__toast-theme--dark {
+        background: #111D35 !important;
+        border: 1px solid #1E2D45 !important;
+        border-radius: 10px !important;
+      }
+    </style>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

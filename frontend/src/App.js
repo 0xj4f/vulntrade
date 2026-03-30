@@ -44,46 +44,56 @@ function AppContent() {
   }, [isAuthenticated]);
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#0a0e17', color: '#e1e5ea' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: '#0B1426', color: '#FFFFFF' }}>
       {isAuthenticated && (
         <nav style={{
-          backgroundColor: '#111827',
-          padding: '12px 24px',
+          backgroundColor: '#0E1A2E',
+          padding: '0 24px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          borderBottom: '1px solid #1f2937'
+          borderBottom: '1px solid #1E2D45',
+          height: '56px',
         }}>
-          <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-            <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ fontSize: '18px', fontWeight: '700', color: '#00D68F', marginRight: '20px', letterSpacing: '-0.02em' }}>
               ⚡ VulnTrade
             </span>
-            <Link to="/dashboard" style={{ color: '#9ca3af', textDecoration: 'none' }}>
+            <Link to="/dashboard" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
               Dashboard
             </Link>
-            <Link to="/portfolio" style={{ color: '#9ca3af', textDecoration: 'none' }}>
+            <Link to="/portfolio" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
               Portfolio
             </Link>
-            <Link to="/history" style={{ color: '#9ca3af', textDecoration: 'none' }}>
+            <Link to="/history" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
               History
             </Link>
-            <Link to="/account" style={{ color: '#9ca3af', textDecoration: 'none' }}>
+            <Link to="/account" style={{ color: '#8F9BB3', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500', transition: 'all 0.15s ease' }}>
               Account
             </Link>
             {/* VULN: Admin link only hidden by client-side check */}
             {isAdmin() && (
-              <Link to="/admin" style={{ color: '#ef4444', textDecoration: 'none' }}>
+              <Link to="/admin" style={{ color: '#FF3D71', textDecoration: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '14px', fontWeight: '500' }}>
                 Admin
               </Link>
             )}
           </div>
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-            <span style={{ color: '#6b7280', fontSize: '14px' }}>
-              {user?.username} ({user?.role})
+          <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+            <div style={{
+              width: '32px', height: '32px', borderRadius: '50%',
+              background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '13px', fontWeight: '700', color: '#fff',
+            }}>
+              {user?.username?.charAt(0)?.toUpperCase() || '?'}
+            </div>
+            <span style={{ color: '#5E6B82', fontSize: '13px' }}>
+              {user?.username}
             </span>
             <button onClick={logout} style={{
-              background: '#374151', border: 'none', color: '#e5e7eb',
-              padding: '6px 12px', borderRadius: '4px', cursor: 'pointer'
+              background: '#1E2D45', border: '1px solid #263A56', color: '#8F9BB3',
+              padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
+              fontSize: '13px', fontWeight: '500',
             }}>
               Logout
             </button>
