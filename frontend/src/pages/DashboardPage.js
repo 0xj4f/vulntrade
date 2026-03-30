@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
 import { subscribe, sendMessage, isConnected } from '../services/websocketService';
@@ -311,7 +312,7 @@ function DashboardPage() {
         <DataTable
           columns={[
             { key: 'symbol', label: 'Symbol', render: p => (
-              <span style={{ fontWeight: '700', color: colors.textPrimary, fontSize: '14px' }}
+              <Link to={`/symbol/${p.symbol}`} style={{ fontWeight: '700', color: colors.textPrimary, fontSize: '14px', textDecoration: 'none' }}
                 dangerouslySetInnerHTML={{ __html: p.symbol }} />
             )},
             { key: 'name', label: 'Name', render: p => (
