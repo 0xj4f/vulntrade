@@ -153,17 +153,25 @@ function AccountPage() {
       {/* Profile Info */}
       <Card title="Profile">
         {profile && (
-          <div style={lineHeight2}>
-            <p>User ID: <strong>{profile.id}</strong></p>
-            <p>Username: <strong>{profile.username}</strong></p>
-            <p>Email: <strong>{profile.email}</strong></p>
-            <p>Role: <strong>{profile.role}</strong></p>
-            <p>Balance: <strong style={{ color: colors.green }}>
-              ${Number(profile.balance).toLocaleString()}
-            </strong></p>
-            <p>API Key: <code style={codeInline()}>{profile.apiKey}</code></p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            {[
+              { label: 'User ID', value: profile.id, color: colors.textPrimary },
+              { label: 'Username', value: profile.username, color: colors.textPrimary },
+              { label: 'Email', value: profile.email, color: colors.textSecondary },
+              { label: 'Role', value: profile.role, color: profile.role === 'ADMIN' ? colors.red : colors.blue },
+              { label: 'Balance', value: `$${Number(profile.balance).toLocaleString()}`, color: colors.green },
+              { label: 'API Key', value: profile.apiKey, color: colors.amber, mono: true },
+            ].map(({ label, value, color, mono }) => (
+              <div key={label} style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: colors.bgStat, border: `1px solid ${colors.borderDefault}` }}>
+                <div style={{ fontSize: '11px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', marginBottom: '4px' }}>{label}</div>
+                <div style={{ color, fontWeight: '600', fontSize: mono ? '12px' : '14px', fontFamily: mono ? "'SF Mono', monospace" : 'inherit', wordBreak: 'break-all' }}>{value}</div>
+              </div>
+            ))}
             {profile.notes && (
-              <p>Notes: <span style={{ color: colors.textMuted }}>{profile.notes}</span></p>
+              <div style={{ gridColumn: '1 / -1', padding: '12px 16px', borderRadius: '10px', backgroundColor: colors.purpleDark, border: '1px solid rgba(139,92,246,0.2)' }}>
+                <div style={{ fontSize: '11px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', marginBottom: '4px' }}>Notes</div>
+                <div style={{ color: colors.purpleLight, fontSize: '13px' }}>{profile.notes}</div>
+              </div>
             )}
           </div>
         )}
@@ -171,7 +179,7 @@ function AccountPage() {
 
       {/* Change Password - VULN: no old password required */}
       <Card title="Change Password" hint="⚠️ No old password verification required">
-        <form onSubmit={handleChangePassword} style={flexRow()}>
+        <form onSubmit={handleChangePassword} style={{ display: 'flex', gap: '10px' }}>
           <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
             placeholder="New password" style={{ flex: 1 }} />
           <Button type="submit" variant="green">Change</Button>
@@ -180,7 +188,7 @@ function AccountPage() {
 
       {/* Change Email - VULN: no verification */}
       <Card title="Change Email" hint="⚠️ No email verification required">
-        <form onSubmit={handleUpdateEmail} style={flexRow()}>
+        <form onSubmit={handleUpdateEmail} style={{ display: 'flex', gap: '10px' }}>
           <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
             placeholder="New email address" style={{ flex: 1 }} />
           <Button type="submit" variant="blue">Update</Button>
@@ -188,11 +196,11 @@ function AccountPage() {
       </Card>
 
       {/* VULN: User Lookup (IDOR demonstration) */}
-      <Card variant="danger" title="🔍 User Lookup (IDOR Test)" titleColor={colors.red}
+      <Card variant="danger" title="User Lookup (IDOR Test)" titleColor={colors.red}
         hint="Try looking up other user IDs (1 = admin, 2 = trader1, 3 = trader2)">
-        <form onSubmit={handleLookupUser} style={flexRow()}>
+        <form onSubmit={handleLookupUser} style={{ display: 'flex', gap: '10px' }}>
           <Input type="number" value={lookupUserId} onChange={(e) => setLookupUserId(e.target.value)}
-            placeholder="User ID" min="1" style={{ flex: 1 }} />
+            placeholder="Enter User ID" min="1" style={{ flex: 1 }} />
           <Button type="submit" variant="red">Lookup</Button>
         </form>
         <JsonPreview data={lookupResult} />
@@ -204,8 +212,19 @@ function AccountPage() {
           <div style={gridCols()}>
             <StatCard label="Available Balance"
               value={`$${Number(balance.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
-              valueColor={colors.green} valueSize="28px" />
-            <StatCard label="Account Status" value={balance.isActive ? '✅ Active' : '❌ Inactive'} valueSize="16px">
+              valueColor={colors.green} valueSize="26px" />
+            <StatCard label="Account Status" valueSize="16px"
+              value={
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  padding: '3px 10px', borderRadius: '20px', fontSize: '13px', fontWeight: '600',
+                  backgroundColor: balance.isActive ? colors.greenDark : colors.redDark,
+                  color: balance.isActive ? colors.greenLight : colors.redLight,
+                }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: balance.isActive ? colors.green : colors.red }} />
+                  {balance.isActive ? 'Active' : 'Inactive'}
+                </span>
+              }>
               {/* VULN: Internal fields exposed */}
               <div style={smallText(colors.textDim)}>Role: {balance.role} | API Key: {balance.apiKey}</div>
               {balance.notes && <div style={smallText(colors.amber)}>Notes: {balance.notes}</div>}
@@ -215,8 +234,8 @@ function AccountPage() {
       )}
 
       {/* Withdraw - VULN: fake 2FA, sign flip, JS-only validation */}
-      <Card title="💸 Withdraw Funds" hint="⚠️ 2FA is decorative only. Try negative amounts (sign flip vuln).">
-        <div style={flexRowWrap()}>
+      <Card title="Withdraw Funds" hint="⚠️ 2FA is decorative only. Try negative amounts (sign flip vuln).">
+        <div style={flexRowWrap('10px')}>
           <FormField label="Amount">
             <Input type="number" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)}
               placeholder="Amount to withdraw" min="0.01" step="0.01" width="180px" />
@@ -237,8 +256,8 @@ function AccountPage() {
       </Card>
 
       {/* Deposit - VULN: no source verification */}
-      <Card title="💰 Deposit Funds" hint='⚠️ No source verification - deposit any amount from any "account"'>
-        <div style={flexRowWrap()}>
+      <Card title="Deposit Funds" hint='⚠️ No source verification — deposit any amount from any "account"'>
+        <div style={flexRowWrap('10px')}>
           <FormField label="Amount">
             <Input type="number" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)}
               placeholder="Amount to deposit" min="0.01" step="0.01" width="180px" />
@@ -253,17 +272,28 @@ function AccountPage() {
 
       {/* VULN: Fake 2FA Modal - purely decorative */}
       <Modal open={show2FA} onClose={close2FA}>
-        <h3 style={{ color: colors.amber, marginBottom: '16px' }}>🔐 Two-Factor Authentication</h3>
-        <p style={{ color: colors.textSecondary, fontSize: '14px', marginBottom: '16px' }}>
+        <div style={{
+          width: '48px', height: '48px', borderRadius: '14px',
+          background: `linear-gradient(135deg, ${colors.amber}, #E09500)`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '22px', margin: '0 auto 16px',
+          boxShadow: '0 4px 16px rgba(255,170,0,0.25)',
+        }}>🔐</div>
+        <h3 style={{ color: colors.textPrimary, marginBottom: '8px', fontSize: '18px', fontWeight: '700' }}>Two-Factor Authentication</h3>
+        <p style={{ color: colors.textSecondary, fontSize: '14px', marginBottom: '8px' }}>
           Enter the 6-digit code from your authenticator app
         </p>
-        <p style={{ color: colors.red, fontSize: '11px', marginBottom: '16px' }}>
+        <p style={{ color: colors.red, fontSize: '11px', marginBottom: '20px' }}>
           (VULN: This is decorative - any value is accepted, code never sent to server)
         </p>
         <Input type="text" value={twoFACode} onChange={(e) => setTwoFACode(e.target.value)}
-          placeholder="Enter 2FA code" maxLength="6"
-          style={{ width: '200px', textAlign: 'center', fontSize: '24px', letterSpacing: '8px', margin: '0 auto', display: 'block' }} />
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '20px' }}>
+          placeholder="000000" maxLength="6"
+          style={{
+            width: '200px', textAlign: 'center', fontSize: '28px', letterSpacing: '10px',
+            margin: '0 auto', display: 'block', fontFamily: "'SF Mono', monospace",
+            padding: '14px',
+          }} />
+        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px' }}>
           <Button variant="green" onClick={handleFake2FA}>Verify & Proceed</Button>
           <Button variant="gray" onClick={close2FA}>Cancel</Button>
         </div>

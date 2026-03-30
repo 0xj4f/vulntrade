@@ -85,35 +85,40 @@ function HistoryPage() {
 
   /* -- Column definitions for the trades table -- */
   const tradeColumns = [
-    { key: 'id', label: 'ID', render: (t, i) => t.id || t['Trade ID'] || i },
-    { key: 'symbol', label: 'Symbol', render: (t) => <span style={{ color: colors.textPrimary }}>{t.symbol || t.Symbol}</span> },
+    { key: 'id', label: 'ID', render: (t, i) => <span style={{ color: colors.textMuted, fontFamily: "'SF Mono', monospace", fontSize: '12px' }}>{t.id || t['Trade ID'] || i}</span> },
+    { key: 'symbol', label: 'Symbol', render: (t) => <span style={{ color: colors.textPrimary, fontWeight: '700', fontSize: '14px' }}>{t.symbol || t.Symbol}</span> },
     {
       key: 'side', label: 'Side',
       render: (t) => {
         const side = t.side || t.Side || '\u2014';
-        return <span style={{ color: side === 'BUY' ? colors.green : colors.red }}>{side}</span>;
+        return <span style={{
+          color: side === 'BUY' ? colors.green : colors.red,
+          fontWeight: '600', fontSize: '12px',
+          padding: '2px 8px', borderRadius: '6px',
+          backgroundColor: side === 'BUY' ? 'rgba(0,214,143,0.1)' : 'rgba(255,61,113,0.1)',
+        }}>{side}</span>;
       },
     },
-    { key: 'quantity', label: 'Qty', align: 'right', render: (t) => t.quantity || t.Quantity || '\u2014' },
+    { key: 'quantity', label: 'Qty', align: 'right', render: (t) => <span style={{ fontWeight: '500' }}>{t.quantity || t.Quantity || '\u2014'}</span> },
     {
       key: 'price', label: 'Price', align: 'right',
       render: (t) => {
         const raw = t.price ?? t.Price ?? t.filledPrice;
         return (raw != null && raw !== '' && !isNaN(Number(raw)))
-          ? <span style={{ color: colors.green }}>${Number(raw).toFixed(2)}</span>
-          : 'MKT';
+          ? <span style={{ color: colors.green, fontWeight: '500' }}>${Number(raw).toFixed(2)}</span>
+          : <span style={{ color: colors.textMuted }}>MKT</span>;
       },
     },
-    { key: 'status', label: 'Status', render: (t) => <span style={{ color: colors.textSecondary }}>{t.status || t.Status || '\u2014'}</span> },
-    { key: 'date', label: 'Date', render: (t) => <span style={{ color: colors.textMuted }}>{t.executedAt || t['Executed At'] || t.createdAt || '\u2014'}</span> },
+    { key: 'status', label: 'Status', render: (t) => <span style={{ color: colors.textSecondary, fontSize: '12px' }}>{t.status || t.Status || '\u2014'}</span> },
+    { key: 'date', label: 'Date', render: (t) => <span style={{ color: colors.textMuted, fontSize: '12px' }}>{t.executedAt || t['Executed At'] || t.createdAt || '\u2014'}</span> },
   ];
 
   return (
     <PageLayout title="Trade History">
 
       {/* Filters */}
-      <Card title="Filters">
-        <div style={flexRowWrap('12px')}>
+      <Card title="Filters & Export">
+        <div style={flexRowWrap('10px')}>
           <FormField label="Start Date">
             {/* VULN: Date sent to SQL injection-vulnerable endpoint */}
             <Input type="text" value={startDate} onChange={e => setStartDate(e.target.value)}
@@ -127,6 +132,8 @@ function HistoryPage() {
             <Input type="text" value={symbol} onChange={e => setSymbol(e.target.value)}
               placeholder="AAPL (or SQL injection)" width="150px" />
           </FormField>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
           <Button variant="blue" onClick={fetchTrades}>Load Trades (REST)</Button>
           <Button variant="purple" onClick={fetchViaWebSocket}>Load via WS (SQLi)</Button>
           <Button variant="amber" onClick={exportCSV}>Export CSV</Button>
@@ -135,13 +142,14 @@ function HistoryPage() {
       </Card>
 
       {/* Trades Table */}
-      <Card title={`Trades (${trades.length})`}>
+      <Card title={<span>Trades <span style={{ color: colors.textMuted, fontWeight: '400', fontSize: '14px' }}>({trades.length})</span></span>}>
         <DataTable
           columns={tradeColumns}
           data={trades}
           small
           maxHeight="500px"
-          emptyText='No trades loaded. Click "Load Trades" to fetch.'
+          emptyText='No trades loaded — click "Load Trades" to fetch.'
+          headerBorder="heavy"
         />
       </Card>
     </PageLayout>

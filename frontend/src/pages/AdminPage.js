@@ -105,34 +105,48 @@ function AdminPage() {
 
   /* -- Column definitions for the users table -- */
   const userColumns = [
-    { key: 'id', label: 'ID' },
-    { key: 'username', label: 'Username', render: (u) => <span style={{ fontWeight: 'bold' }}>{u.username}</span> },
+    { key: 'id', label: 'ID', render: (u) => <span style={{ color: colors.textMuted, fontFamily: "'SF Mono', monospace", fontSize: '12px' }}>{u.id}</span> },
+    { key: 'username', label: 'Username', render: (u) => <span style={{ fontWeight: '700', color: colors.textPrimary }}>{u.username}</span> },
     {
       key: 'role', label: 'Role',
-      render: (u) => <span style={{ color: u.role === 'ADMIN' ? colors.red : colors.textSecondary }}>{u.role}</span>,
+      render: (u) => <span style={{
+        color: u.role === 'ADMIN' ? colors.red : colors.blue,
+        fontWeight: '600', fontSize: '11px',
+        padding: '2px 8px', borderRadius: '6px',
+        backgroundColor: u.role === 'ADMIN' ? 'rgba(255,61,113,0.1)' : 'rgba(79,139,255,0.1)',
+      }}>{u.role}</span>,
     },
     {
       key: 'balance', label: 'Balance', align: 'right',
-      render: (u) => <span style={{ color: colors.green }}>${Number(u.balance).toLocaleString()}</span>,
+      render: (u) => <span style={{ color: colors.green, fontWeight: '600' }}>${Number(u.balance).toLocaleString()}</span>,
     },
     {
       key: 'apiKey', label: 'API Key',
-      render: (u) => <span style={{ fontFamily: 'monospace', fontSize: '11px', color: colors.amber }}>{u.apiKey}</span>,
+      render: (u) => <span style={{ fontFamily: "'SF Mono', monospace", fontSize: '11px', color: colors.amber }}>{u.apiKey}</span>,
     },
     {
       key: 'notes', label: 'Notes',
-      cellStyle: { color: colors.textMuted, fontSize: '11px', maxWidth: '200px', overflow: 'hidden' },
+      cellStyle: { color: colors.textMuted, fontSize: '11px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' },
     },
   ];
 
   return (
-    <PageLayout title="⚠️ Admin Panel" titleColor={colors.red}>
+    <PageLayout title="Admin Panel" titleColor={colors.red}>
 
       <Card variant="danger">
-        <p style={{ color: colors.redLight }}>
-          Logged in as: <strong>{user?.username}</strong> (Role: {user?.role})
-        </p>
-        <p style={{ color: colors.textMuted, marginTop: '8px', fontSize: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{
+            padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+            backgroundColor: colors.redDark, color: colors.redLight,
+            border: '1px solid rgba(255,61,113,0.2)',
+          }}>
+            {user?.role}
+          </span>
+          <span style={{ color: colors.redLight }}>
+            Logged in as <strong>{user?.username}</strong>
+          </span>
+        </div>
+        <p style={{ color: colors.textMuted, marginTop: '10px', fontSize: '13px', lineHeight: '1.5' }}>
           VULN: This page is only hidden via client-side conditional render.
           Any authenticated user can navigate to /admin.
         </p>
@@ -140,7 +154,7 @@ function AdminPage() {
 
       {/* User Management */}
       <Card title="User Management">
-        <Button variant="blue" onClick={loadUsers} style={{ marginBottom: '12px' }}>Load All Users</Button>
+        <Button variant="blue" onClick={loadUsers} style={{ marginBottom: '16px' }}>Load All Users</Button>
         {users.length > 0 && (
           <DataTable
             columns={userColumns}
@@ -148,6 +162,7 @@ function AdminPage() {
             rowKey={(u) => u.id}
             small
             maxHeight="300px"
+            headerBorder="heavy"
           />
         )}
       </Card>
@@ -159,7 +174,7 @@ function AdminPage() {
             value={sqlQuery}
             onChange={(e) => setSqlQuery(e.target.value)}
             rows={3}
-            style={{ ...textareaStyle, marginBottom: '8px' }}
+            style={{ ...textareaStyle, marginBottom: '10px' }}
           />
           <Button type="submit" variant="amber">Execute SQL</Button>
         </form>
@@ -168,7 +183,7 @@ function AdminPage() {
 
       {/* Balance Adjustment - VULN: log injection via reason */}
       <Card title="Balance Adjustment">
-        <form onSubmit={adjustBalance} style={flexRowWrap()}>
+        <form onSubmit={adjustBalance} style={flexRowWrap('10px')}>
           <FormField label="User ID">
             <Input type="number" value={adjustUserId} onChange={(e) => setAdjustUserId(e.target.value)}
               width="100px" placeholder="User ID" />
@@ -177,7 +192,7 @@ function AdminPage() {
             <Input type="number" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)}
               width="150px" placeholder="Amount" step="0.01" />
           </FormField>
-          <FormField label="Reason (VULN: log injection)">
+          <FormField label="Reason (log injection)">
             {/* VULN: Reason field logged without sanitization */}
             <Input type="text" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)}
               width="250px" placeholder="Reason (try: test\nFAKE_LOG_ENTRY)" />
@@ -187,24 +202,24 @@ function AdminPage() {
       </Card>
 
       {/* Trading Halt Controls - VULN: accessible by any user via WS */}
-      <Card variant="warning" title="⚡ Trading Halt Controls" titleColor={colors.amber}
+      <Card variant="warning" title="Trading Halt Controls" titleColor={colors.amber}
         hint="VULN: Uses JWT role from token body (modifiable). Sends via WebSocket.">
-        <div style={flexRowWrap()}>
+        <div style={flexRowWrap('10px')}>
           <FormField label="Symbol">
             <Input type="text" value={haltSymbol} onChange={(e) => setHaltSymbol(e.target.value)} width="120px" />
           </FormField>
           <FormField label="Reason">
             <Input type="text" value={haltReason} onChange={(e) => setHaltReason(e.target.value)} width="250px" />
           </FormField>
-          <Button variant="red" onClick={haltTrading}>🛑 Halt Trading</Button>
-          <Button variant="green" onClick={resumeTrading}>▶️ Resume Trading</Button>
+          <Button variant="red" onClick={haltTrading}>Halt Trading</Button>
+          <Button variant="green" onClick={resumeTrading}>Resume Trading</Button>
         </div>
       </Card>
 
       {/* Price Override - VULN: market manipulation */}
-      <Card variant="danger" title="💰 Manual Price Override" titleColor={colors.red}
+      <Card variant="danger" title="Manual Price Override" titleColor={colors.red}
         hint="VULN: Set arbitrary prices. No audit trail. Market manipulation.">
-        <div style={flexRowWrap()}>
+        <div style={flexRowWrap('10px')}>
           <FormField label="Symbol">
             <Input type="text" value={priceSymbol} onChange={(e) => setPriceSymbol(e.target.value)} width="120px" />
           </FormField>
@@ -218,7 +233,7 @@ function AdminPage() {
 
       {/* User Toggle - activate/deactivate */}
       <Card title="User Account Toggle">
-        <div style={flexRowWrap()}>
+        <div style={flexRowWrap('10px')}>
           <FormField label="User ID">
             <Input type="number" value={toggleUserId} onChange={(e) => setToggleUserId(e.target.value)}
               width="100px" placeholder="User ID" />
@@ -229,15 +244,32 @@ function AdminPage() {
 
       {/* Endpoint Reference */}
       <Card title="Vulnerable Endpoints Reference">
-        <ul style={{ color: colors.textMuted, lineHeight: '2', fontSize: '13px' }}>
-          <li>GET /actuator/env — Environment variables (secrets, flags)</li>
-          <li>GET /actuator/heapdump — JVM heap dump (Flag 8)</li>
-          <li>POST /api/auth/login-legacy — SQL injection in username</li>
-          <li>GET /api/users/1 — IDOR: admin profile (Flag 2 in notes)</li>
-          <li>GET /api/users/3/portfolio — IDOR: trader2 portfolio (Flag 6)</li>
-          <li>POST /api/debug/execute — RCE (X-Debug-Key: vulntrade-debug-key-2024)</li>
-          <li>redis-cli -h localhost -p 6379 GET flag3 — Redis no auth (Flag 3)</li>
-        </ul>
+        <div style={{ display: 'grid', gap: '6px' }}>
+          {[
+            { method: 'GET', path: '/actuator/env', desc: 'Environment variables (secrets, flags)' },
+            { method: 'GET', path: '/actuator/heapdump', desc: 'JVM heap dump (Flag 8)' },
+            { method: 'POST', path: '/api/auth/login-legacy', desc: 'SQL injection in username' },
+            { method: 'GET', path: '/api/users/1', desc: 'IDOR: admin profile (Flag 2 in notes)' },
+            { method: 'GET', path: '/api/users/3/portfolio', desc: 'IDOR: trader2 portfolio (Flag 6)' },
+            { method: 'POST', path: '/api/debug/execute', desc: 'RCE (X-Debug-Key: vulntrade-debug-key-2024)' },
+            { method: 'CLI', path: 'redis-cli GET flag3', desc: 'Redis no auth (Flag 3)' },
+          ].map(({ method, path, desc }) => (
+            <div key={path} style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              padding: '8px 12px', borderRadius: '8px',
+              backgroundColor: colors.bgStat, fontSize: '13px',
+            }}>
+              <span style={{
+                padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700',
+                backgroundColor: method === 'GET' ? colors.blueDark : method === 'POST' ? colors.greenDark : colors.purpleDark,
+                color: method === 'GET' ? colors.blueLight : method === 'POST' ? colors.greenLight : colors.purpleLight,
+                fontFamily: "'SF Mono', monospace", minWidth: '36px', textAlign: 'center',
+              }}>{method}</span>
+              <code style={{ color: colors.amber, fontFamily: "'SF Mono', monospace", fontSize: '12px' }}>{path}</code>
+              <span style={{ color: colors.textMuted, marginLeft: 'auto', fontSize: '12px' }}>{desc}</span>
+            </div>
+          ))}
+        </div>
       </Card>
     </PageLayout>
   );
