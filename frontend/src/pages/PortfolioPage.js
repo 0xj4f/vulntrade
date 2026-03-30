@@ -91,21 +91,21 @@ function PortfolioPage() {
 
   /* -- Column definitions for the holdings table -- */
   const holdingColumns = [
-    { key: 'symbol', label: 'Symbol', render: (pos) => <span style={{ fontWeight: 'bold', color: colors.textPrimary }}>{pos.symbol}</span> },
-    { key: 'quantity', label: 'Quantity', align: 'right', render: (pos) => Number(pos.quantity || 0).toLocaleString() },
+    { key: 'symbol', label: 'Symbol', render: (pos) => <span style={{ fontWeight: '700', color: colors.textPrimary, fontSize: '14px' }}>{pos.symbol}</span> },
+    { key: 'quantity', label: 'Quantity', align: 'right', render: (pos) => <span style={{ fontWeight: '500' }}>{Number(pos.quantity || 0).toLocaleString()}</span> },
     {
       key: 'avgPrice', label: 'Avg Price', align: 'right',
       render: (pos) => <span style={{ color: colors.textSecondary }}>${Number(pos.avgPrice || pos.avg_price || 0).toFixed(2)}</span>,
     },
     {
-      key: 'currentPrice', label: 'Current Price', align: 'right',
-      render: (pos) => `$${Number(currentPrices[pos.symbol] || 0).toFixed(2)}`,
+      key: 'currentPrice', label: 'Current', align: 'right',
+      render: (pos) => <span style={{ color: colors.textPrimary, fontWeight: '500' }}>${Number(currentPrices[pos.symbol] || 0).toFixed(2)}</span>,
     },
     {
-      key: 'marketValue', label: 'Market Value', align: 'right',
+      key: 'marketValue', label: 'Mkt Value', align: 'right',
       render: (pos) => {
         const cur = currentPrices[pos.symbol] || 0;
-        return `$${(cur * (pos.quantity || 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        return <span style={{ fontWeight: '500' }}>${(cur * (pos.quantity || 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>;
       },
     },
     {
@@ -114,7 +114,7 @@ function PortfolioPage() {
         const cur = currentPrices[pos.symbol] || 0;
         const avg = pos.avgPrice || pos.avg_price || 0;
         const pnl = (cur - avg) * (pos.quantity || 0);
-        return <span style={{ color: pnl >= 0 ? colors.green : colors.red }}>
+        return <span style={{ color: pnl >= 0 ? colors.green : colors.red, fontWeight: '600' }}>
           {pnl >= 0 ? '+' : ''}{pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
         </span>;
       },
@@ -125,7 +125,12 @@ function PortfolioPage() {
         const cur = currentPrices[pos.symbol] || 0;
         const avg = pos.avgPrice || pos.avg_price || 0;
         const pct = avg > 0 ? ((cur - avg) / avg * 100) : 0;
-        return <span style={{ color: pct >= 0 ? colors.green : colors.red }}>
+        return <span style={{
+          color: pct >= 0 ? colors.green : colors.red,
+          fontWeight: '600',
+          padding: '2px 8px', borderRadius: '6px', fontSize: '12px',
+          backgroundColor: pct >= 0 ? 'rgba(0,214,143,0.1)' : 'rgba(255,61,113,0.1)',
+        }}>
           {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
         </span>;
       },
@@ -134,11 +139,16 @@ function PortfolioPage() {
 
   /* -- Column definitions for the transactions table -- */
   const txColumns = [
-    { key: 'id', label: 'ID' },
-    { key: 'type', label: 'Type' },
+    { key: 'id', label: 'ID', render: (tx) => <span style={{ color: colors.textMuted, fontFamily: "'SF Mono', monospace", fontSize: '12px' }}>{tx.id}</span> },
+    { key: 'type', label: 'Type', render: (tx) => (
+      <span style={{
+        padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '600',
+        backgroundColor: colors.blueDark, color: colors.blueLight,
+      }}>{tx.type}</span>
+    )},
     {
       key: 'amount', label: 'Amount', align: 'right',
-      render: (tx) => <span style={{ color: tx.amount >= 0 ? colors.green : colors.red }}>
+      render: (tx) => <span style={{ color: tx.amount >= 0 ? colors.green : colors.red, fontWeight: '600' }}>
         {tx.amount >= 0 ? '+' : ''}{Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
       </span>,
     },
@@ -150,11 +160,11 @@ function PortfolioPage() {
     },
     {
       key: 'description', label: 'Description',
-      cellStyle: { color: colors.textMuted, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' },
+      cellStyle: { color: colors.textMuted, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '13px' },
     },
     {
       key: 'createdAt', label: 'Date',
-      render: (tx) => <span style={{ color: colors.textMuted }}>{tx.createdAt ? new Date(tx.createdAt).toLocaleString() : '\u2014'}</span>,
+      render: (tx) => <span style={{ color: colors.textMuted, fontSize: '12px' }}>{tx.createdAt ? new Date(tx.createdAt).toLocaleString() : '\u2014'}</span>,
     },
   ];
 
@@ -168,17 +178,19 @@ function PortfolioPage() {
             label="Cash Balance"
             value={portfolio?.balance ? `$${Number(portfolio.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '\u2014'}
             valueColor={colors.green}
+            valueSize="22px"
           />
           <StatCard
             label="Unrealized P&L"
             value={`${totalPnL >= 0 ? '+' : ''}${totalPnL.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`}
             valueColor={totalPnL >= 0 ? colors.green : colors.red}
+            valueSize="22px"
           />
-          <StatCard label="Positions" value={positions.length} />
+          <StatCard label="Positions" value={positions.length} valueSize="22px" valueColor={colors.blue} />
         </div>
         {/* VULN: Notes field exposed - may contain flags */}
         {portfolio?.notes && (
-          <div style={{ ...debugBanner, marginTop: '12px', marginBottom: 0 }}>
+          <div style={{ ...debugBanner, marginTop: '16px', marginBottom: 0 }}>
             Notes: {portfolio.notes}
           </div>
         )}
@@ -189,7 +201,8 @@ function PortfolioPage() {
         <DataTable
           columns={holdingColumns}
           data={positions}
-          emptyText="No positions"
+          emptyText="No positions — start trading to build your portfolio"
+          headerBorder="heavy"
         />
       </Card>
 
@@ -200,16 +213,17 @@ function PortfolioPage() {
           data={transactions}
           small
           maxHeight="300px"
-          emptyText="No transactions"
+          emptyText="No transactions yet"
+          headerBorder="medium"
         />
       </Card>
 
       {/* VULN: Portfolio Lookup - IDOR demonstration */}
-      <Card variant="danger" title="&#128269; View Another User's Portfolio (IDOR)" titleColor={colors.red}
+      <Card variant="danger" title="View Another User's Portfolio (IDOR)" titleColor={colors.red}
         hint="Try user IDs: 1 (admin), 2 (trader1), 3 (trader2 - has Flag 6 in notes)">
-        <form onSubmit={handleLookupPortfolio} style={flexRow()}>
+        <form onSubmit={handleLookupPortfolio} style={{ display: 'flex', gap: '10px' }}>
           <Input type="number" value={lookupUserId} onChange={(e) => setLookupUserId(e.target.value)}
-            placeholder="User ID" min="1" style={{ flex: 1 }} />
+            placeholder="Enter User ID" min="1" style={{ flex: 1 }} />
           <Button type="submit" variant="red">View Portfolio</Button>
         </form>
       </Card>
