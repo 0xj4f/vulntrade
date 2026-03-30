@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
+import AuthLayout from '../components/AuthLayout';
+import { InputFull } from '../components/FormField';
+import Button from '../components/Button';
+import { colors, formLabel } from '../styles/shared';
 
 function LoginPage() {
   const [username, setUsername] = useState('');
@@ -24,87 +28,45 @@ function LoginPage() {
   };
 
   return (
-    <div style={{
-      display: 'flex', justifyContent: 'center', alignItems: 'center',
-      minHeight: '100vh', backgroundColor: '#0a0e17'
-    }}>
-      <div style={{
-        backgroundColor: '#111827', padding: '40px', borderRadius: '12px',
-        width: '400px', border: '1px solid #1f2937'
-      }}>
-        <h1 style={{ textAlign: 'center', color: '#10b981', marginBottom: '8px' }}>
-          ⚡ VulnTrade
-        </h1>
-        <p style={{ textAlign: 'center', color: '#6b7280', marginBottom: '24px' }}>
-          Sign In to Trade
-        </p>
-
-        {error && (
-          <div style={{
-            backgroundColor: '#7f1d1d', color: '#fca5a5', padding: '10px',
-            borderRadius: '6px', marginBottom: '16px', fontSize: '14px'
-          }}>
-            {/* VULN: Error message from server displayed directly (user enumeration) */}
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', color: '#9ca3af', marginBottom: '4px', fontSize: '14px' }}>
-              Username
-            </label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              style={{
-                width: '100%', padding: '10px', backgroundColor: '#1f2937',
-                border: '1px solid #374151', borderRadius: '6px', color: '#e5e7eb',
-                boxSizing: 'border-box'
-              }}
-              placeholder="Enter username"
-            />
-          </div>
-
-          <div style={{ marginBottom: '24px' }}>
-            <label style={{ display: 'block', color: '#9ca3af', marginBottom: '4px', fontSize: '14px' }}>
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={{
-                width: '100%', padding: '10px', backgroundColor: '#1f2937',
-                border: '1px solid #374151', borderRadius: '6px', color: '#e5e7eb',
-                boxSizing: 'border-box'
-              }}
-              placeholder="Enter password"
-            />
-          </div>
-
-          <button type="submit" style={{
-            width: '100%', padding: '12px', backgroundColor: '#10b981',
-            border: 'none', borderRadius: '6px', color: 'white',
-            fontSize: '16px', fontWeight: 'bold', cursor: 'pointer'
-          }}>
-            Login
-          </button>
-        </form>
-
-        <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px' }}>
-          <Link to="/register" style={{ color: '#10b981' }}>
-            Don't have an account? Register
-          </Link>
+    <AuthLayout subtitle="Sign In to Trade" error={error}>
+      <form onSubmit={handleSubmit}>
+        <div style={{ marginBottom: '16px' }}>
+          <label style={formLabel}>Username</label>
+          {/* VULN: Error message from server displayed directly (user enumeration) */}
+          <InputFull
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Enter username"
+          />
         </div>
-        <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '14px' }}>
-          <Link to="/reset-password" style={{ color: '#6b7280' }}>
-            Forgot password?
-          </Link>
+
+        <div style={{ marginBottom: '24px' }}>
+          <label style={formLabel}>Password</label>
+          <InputFull
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter password"
+          />
         </div>
+
+        <Button type="submit" variant="green" size="large">
+          Login
+        </Button>
+      </form>
+
+      <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px' }}>
+        <Link to="/register" style={{ color: colors.green }}>
+          Don't have an account? Register
+        </Link>
       </div>
-    </div>
+      <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '14px' }}>
+        <Link to="/reset-password" style={{ color: colors.textMuted }}>
+          Forgot password?
+        </Link>
+      </div>
+    </AuthLayout>
   );
 }
 

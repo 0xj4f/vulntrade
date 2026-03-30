@@ -4,6 +4,14 @@ import api from '../services/apiService';
 import { sendMessage } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
+import PageLayout from '../components/PageLayout';
+import Card from '../components/Card';
+import Button from '../components/Button';
+import FormField, { Input } from '../components/FormField';
+import DataTable from '../components/DataTable';
+import JsonPreview from '../components/JsonPreview';
+import { colors, flexRowWrap, textareaStyle } from '../styles/shared';
+
 /**
  * PHASE 6 VULNS:
  * - VULN: Admin page only protected by client-side conditional render
@@ -70,26 +78,18 @@ function AdminPage() {
 
   // Trading halt via WebSocket - VULN: JWT role check from token body
   const haltTrading = () => {
-    sendMessage('/app/admin.haltTrading', {
-      symbol: haltSymbol,
-      reason: haltReason
-    });
+    sendMessage('/app/admin.haltTrading', { symbol: haltSymbol, reason: haltReason });
     toast.warn(`Halt trading request sent for ${haltSymbol}`);
   };
 
   const resumeTrading = () => {
-    sendMessage('/app/admin.resumeTrading', {
-      symbol: haltSymbol
-    });
+    sendMessage('/app/admin.resumeTrading', { symbol: haltSymbol });
     toast.success(`Resume trading request sent for ${haltSymbol}`);
   };
 
   // Price override via WebSocket - VULN: market manipulation
   const setPrice = () => {
-    sendMessage('/app/admin.setPrice', {
-      symbol: priceSymbol,
-      price: parseFloat(priceValue)
-    });
+    sendMessage('/app/admin.setPrice', { symbol: priceSymbol, price: parseFloat(priceValue) });
     toast.warn(`Price override sent: ${priceSymbol} = $${priceValue}`);
   };
 
@@ -103,224 +103,133 @@ function AdminPage() {
     }
   };
 
-  const cardStyle = {
-    backgroundColor: '#111827', padding: '20px', borderRadius: '8px',
-    marginBottom: '20px', border: '1px solid #1f2937'
-  };
-
-  const inputStyle = {
-    padding: '10px', backgroundColor: '#1f2937',
-    border: '1px solid #374151', borderRadius: '6px', color: '#e5e7eb',
-    boxSizing: 'border-box'
-  };
+  /* -- Column definitions for the users table -- */
+  const userColumns = [
+    { key: 'id', label: 'ID' },
+    { key: 'username', label: 'Username', render: (u) => <span style={{ fontWeight: 'bold' }}>{u.username}</span> },
+    {
+      key: 'role', label: 'Role',
+      render: (u) => <span style={{ color: u.role === 'ADMIN' ? colors.red : colors.textSecondary }}>{u.role}</span>,
+    },
+    {
+      key: 'balance', label: 'Balance', align: 'right',
+      render: (u) => <span style={{ color: colors.green }}>${Number(u.balance).toLocaleString()}</span>,
+    },
+    {
+      key: 'apiKey', label: 'API Key',
+      render: (u) => <span style={{ fontFamily: 'monospace', fontSize: '11px', color: colors.amber }}>{u.apiKey}</span>,
+    },
+    {
+      key: 'notes', label: 'Notes',
+      cellStyle: { color: colors.textMuted, fontSize: '11px', maxWidth: '200px', overflow: 'hidden' },
+    },
+  ];
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
-      <h2 style={{ color: '#ef4444', marginBottom: '24px' }}>⚠️ Admin Panel</h2>
+    <PageLayout title="⚠️ Admin Panel" titleColor={colors.red}>
 
-      <div style={{ ...cardStyle, border: '1px solid #7f1d1d' }}>
-        <p style={{ color: '#fca5a5' }}>
+      <Card variant="danger">
+        <p style={{ color: colors.redLight }}>
           Logged in as: <strong>{user?.username}</strong> (Role: {user?.role})
         </p>
-        <p style={{ color: '#6b7280', marginTop: '8px', fontSize: '14px' }}>
+        <p style={{ color: colors.textMuted, marginTop: '8px', fontSize: '14px' }}>
           VULN: This page is only hidden via client-side conditional render.
           Any authenticated user can navigate to /admin.
         </p>
-      </div>
+      </Card>
 
       {/* User Management */}
-      <div style={cardStyle}>
-        <h3 style={{ color: '#9ca3af', marginBottom: '12px' }}>User Management</h3>
-        <button onClick={loadUsers} style={{
-          padding: '10px 20px', backgroundColor: '#3b82f6',
-          border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer',
-          marginBottom: '12px'
-        }}>
-          Load All Users
-        </button>
+      <Card title="User Management">
+        <Button variant="blue" onClick={loadUsers} style={{ marginBottom: '12px' }}>Load All Users</Button>
         {users.length > 0 && (
-          <div style={{ overflow: 'auto', maxHeight: '300px' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #374151' }}>
-                  <th style={{ padding: '6px', textAlign: 'left', color: '#6b7280' }}>ID</th>
-                  <th style={{ padding: '6px', textAlign: 'left', color: '#6b7280' }}>Username</th>
-                  <th style={{ padding: '6px', textAlign: 'left', color: '#6b7280' }}>Role</th>
-                  <th style={{ padding: '6px', textAlign: 'right', color: '#6b7280' }}>Balance</th>
-                  <th style={{ padding: '6px', textAlign: 'left', color: '#6b7280' }}>API Key</th>
-                  <th style={{ padding: '6px', textAlign: 'left', color: '#6b7280' }}>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map(u => (
-                  <tr key={u.id} style={{ borderBottom: '1px solid #1f2937' }}>
-                    <td style={{ padding: '6px' }}>{u.id}</td>
-                    <td style={{ padding: '6px', fontWeight: 'bold' }}>{u.username}</td>
-                    <td style={{ padding: '6px', color: u.role === 'ADMIN' ? '#ef4444' : '#9ca3af' }}>
-                      {u.role}
-                    </td>
-                    <td style={{ padding: '6px', textAlign: 'right', color: '#10b981' }}>
-                      ${Number(u.balance).toLocaleString()}
-                    </td>
-                    <td style={{ padding: '6px', fontFamily: 'monospace', fontSize: '11px', color: '#f59e0b' }}>
-                      {u.apiKey}
-                    </td>
-                    <td style={{ padding: '6px', color: '#6b7280', fontSize: '11px', maxWidth: '200px', overflow: 'hidden' }}>
-                      {u.notes}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={userColumns}
+            data={users}
+            rowKey={(u) => u.id}
+            small
+            maxHeight="300px"
+          />
         )}
-      </div>
+      </Card>
 
       {/* SQL Execution */}
-      <div style={{ ...cardStyle, border: '1px solid #92400e' }}>
-        <h3 style={{ color: '#f59e0b', marginBottom: '12px' }}>SQL Query Executor</h3>
+      <Card variant="warning" title="SQL Query Executor" titleColor={colors.amber}>
         <form onSubmit={executeSql}>
           <textarea
             value={sqlQuery}
             onChange={(e) => setSqlQuery(e.target.value)}
             rows={3}
-            style={{
-              ...inputStyle, width: '100%', fontFamily: 'monospace',
-              marginBottom: '8px', resize: 'vertical'
-            }}
+            style={{ ...textareaStyle, marginBottom: '8px' }}
           />
-          <button type="submit" style={{
-            padding: '10px 20px', backgroundColor: '#f59e0b',
-            border: 'none', borderRadius: '6px', color: '#111827',
-            fontWeight: 'bold', cursor: 'pointer'
-          }}>
-            Execute SQL
-          </button>
+          <Button type="submit" variant="amber">Execute SQL</Button>
         </form>
-        {sqlResult && (
-          <pre style={{
-            marginTop: '12px', padding: '12px', backgroundColor: '#0f172a',
-            borderRadius: '6px', fontSize: '12px', overflow: 'auto',
-            color: '#a5b4fc', maxHeight: '300px'
-          }}>
-            {JSON.stringify(sqlResult, null, 2)}
-          </pre>
-        )}
-      </div>
+        <JsonPreview data={sqlResult} />
+      </Card>
 
       {/* Balance Adjustment - VULN: log injection via reason */}
-      <div style={cardStyle}>
-        <h3 style={{ color: '#9ca3af', marginBottom: '12px' }}>Balance Adjustment</h3>
-        <form onSubmit={adjustBalance} style={{ display: 'flex', gap: '8px', alignItems: 'end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>User ID</label>
-            <input type="number" value={adjustUserId} onChange={(e) => setAdjustUserId(e.target.value)}
-              style={{ ...inputStyle, width: '100px' }} placeholder="User ID" />
-          </div>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>Amount (+/-)</label>
-            <input type="number" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)}
-              style={{ ...inputStyle, width: '150px' }} placeholder="Amount" step="0.01" />
-          </div>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>
-              Reason (VULN: log injection)
-            </label>
+      <Card title="Balance Adjustment">
+        <form onSubmit={adjustBalance} style={flexRowWrap()}>
+          <FormField label="User ID">
+            <Input type="number" value={adjustUserId} onChange={(e) => setAdjustUserId(e.target.value)}
+              width="100px" placeholder="User ID" />
+          </FormField>
+          <FormField label="Amount (+/-)">
+            <Input type="number" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)}
+              width="150px" placeholder="Amount" step="0.01" />
+          </FormField>
+          <FormField label="Reason (VULN: log injection)">
             {/* VULN: Reason field logged without sanitization */}
-            <input type="text" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)}
-              style={{ ...inputStyle, width: '250px' }}
-              placeholder="Reason (try: test\nFAKE_LOG_ENTRY)" />
-          </div>
-          <button type="submit" style={{
-            padding: '10px 20px', backgroundColor: '#10b981',
-            border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer'
-          }}>
-            Adjust
-          </button>
+            <Input type="text" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)}
+              width="250px" placeholder="Reason (try: test\nFAKE_LOG_ENTRY)" />
+          </FormField>
+          <Button type="submit" variant="green">Adjust</Button>
         </form>
-      </div>
+      </Card>
 
       {/* Trading Halt Controls - VULN: accessible by any user via WS */}
-      <div style={{ ...cardStyle, border: '1px solid #92400e' }}>
-        <h3 style={{ color: '#f59e0b', marginBottom: '12px' }}>⚡ Trading Halt Controls</h3>
-        <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '12px' }}>
-          VULN: Uses JWT role from token body (modifiable). Sends via WebSocket.
-        </p>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>Symbol</label>
-            <input type="text" value={haltSymbol} onChange={(e) => setHaltSymbol(e.target.value)}
-              style={{ ...inputStyle, width: '120px' }} />
-          </div>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>Reason</label>
-            <input type="text" value={haltReason} onChange={(e) => setHaltReason(e.target.value)}
-              style={{ ...inputStyle, width: '250px' }} />
-          </div>
-          <button onClick={haltTrading} style={{
-            padding: '10px 20px', backgroundColor: '#ef4444',
-            border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer'
-          }}>
-            🛑 Halt Trading
-          </button>
-          <button onClick={resumeTrading} style={{
-            padding: '10px 20px', backgroundColor: '#10b981',
-            border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer'
-          }}>
-            ▶️ Resume Trading
-          </button>
+      <Card variant="warning" title="⚡ Trading Halt Controls" titleColor={colors.amber}
+        hint="VULN: Uses JWT role from token body (modifiable). Sends via WebSocket.">
+        <div style={flexRowWrap()}>
+          <FormField label="Symbol">
+            <Input type="text" value={haltSymbol} onChange={(e) => setHaltSymbol(e.target.value)} width="120px" />
+          </FormField>
+          <FormField label="Reason">
+            <Input type="text" value={haltReason} onChange={(e) => setHaltReason(e.target.value)} width="250px" />
+          </FormField>
+          <Button variant="red" onClick={haltTrading}>🛑 Halt Trading</Button>
+          <Button variant="green" onClick={resumeTrading}>▶️ Resume Trading</Button>
         </div>
-      </div>
+      </Card>
 
       {/* Price Override - VULN: market manipulation */}
-      <div style={{ ...cardStyle, border: '1px solid #7f1d1d' }}>
-        <h3 style={{ color: '#ef4444', marginBottom: '12px' }}>💰 Manual Price Override</h3>
-        <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '12px' }}>
-          VULN: Set arbitrary prices. No audit trail. Market manipulation.
-        </p>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'end' }}>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>Symbol</label>
-            <input type="text" value={priceSymbol} onChange={(e) => setPriceSymbol(e.target.value)}
-              style={{ ...inputStyle, width: '120px' }} />
-          </div>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>New Price</label>
-            <input type="number" value={priceValue} onChange={(e) => setPriceValue(e.target.value)}
-              step="0.01" placeholder="e.g. 9999.99"
-              style={{ ...inputStyle, width: '150px' }} />
-          </div>
-          <button onClick={setPrice} style={{
-            padding: '10px 20px', backgroundColor: '#ef4444',
-            border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer'
-          }}>
-            Set Price
-          </button>
+      <Card variant="danger" title="💰 Manual Price Override" titleColor={colors.red}
+        hint="VULN: Set arbitrary prices. No audit trail. Market manipulation.">
+        <div style={flexRowWrap()}>
+          <FormField label="Symbol">
+            <Input type="text" value={priceSymbol} onChange={(e) => setPriceSymbol(e.target.value)} width="120px" />
+          </FormField>
+          <FormField label="New Price">
+            <Input type="number" value={priceValue} onChange={(e) => setPriceValue(e.target.value)}
+              step="0.01" placeholder="e.g. 9999.99" width="150px" />
+          </FormField>
+          <Button variant="red" onClick={setPrice}>Set Price</Button>
         </div>
-      </div>
+      </Card>
 
       {/* User Toggle - activate/deactivate */}
-      <div style={cardStyle}>
-        <h3 style={{ color: '#9ca3af', marginBottom: '12px' }}>User Account Toggle</h3>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'end' }}>
-          <div>
-            <label style={{ display: 'block', color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>User ID</label>
-            <input type="number" value={toggleUserId} onChange={(e) => setToggleUserId(e.target.value)}
-              style={{ ...inputStyle, width: '100px' }} placeholder="User ID" />
-          </div>
-          <button onClick={toggleUser} style={{
-            padding: '10px 20px', backgroundColor: '#8b5cf6',
-            border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer'
-          }}>
-            Toggle Active/Inactive
-          </button>
+      <Card title="User Account Toggle">
+        <div style={flexRowWrap()}>
+          <FormField label="User ID">
+            <Input type="number" value={toggleUserId} onChange={(e) => setToggleUserId(e.target.value)}
+              width="100px" placeholder="User ID" />
+          </FormField>
+          <Button variant="purple" onClick={toggleUser}>Toggle Active/Inactive</Button>
         </div>
-      </div>
+      </Card>
 
       {/* Endpoint Reference */}
-      <div style={cardStyle}>
-        <h3 style={{ color: '#9ca3af', marginBottom: '12px' }}>Vulnerable Endpoints Reference</h3>
-        <ul style={{ color: '#6b7280', lineHeight: '2', fontSize: '13px' }}>
+      <Card title="Vulnerable Endpoints Reference">
+        <ul style={{ color: colors.textMuted, lineHeight: '2', fontSize: '13px' }}>
           <li>GET /actuator/env — Environment variables (secrets, flags)</li>
           <li>GET /actuator/heapdump — JVM heap dump (Flag 8)</li>
           <li>POST /api/auth/login-legacy — SQL injection in username</li>
@@ -329,8 +238,8 @@ function AdminPage() {
           <li>POST /api/debug/execute — RCE (X-Debug-Key: vulntrade-debug-key-2024)</li>
           <li>redis-cli -h localhost -p 6379 GET flag3 — Redis no auth (Flag 3)</li>
         </ul>
-      </div>
-    </div>
+      </Card>
+    </PageLayout>
   );
 }
 
