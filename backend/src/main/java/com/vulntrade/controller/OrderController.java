@@ -4,42 +4,37 @@ import com.vulntrade.model.Order;
 import com.vulntrade.model.dto.OrderRequest;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import com.vulntrade.service.OrderService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * REST Order Controller - alternative order placement to WebSocket/STOMP.
- * VULN: Missing CSRF protection (CSRF disabled globally).
- * VULN: Different validation rules than WebSocket endpoint (inconsistent).
- * VULN: IDOR on GET/cancel - no ownership check.
  */
 @RestController
 @RequestMapping("/api/orders")
 public class OrderController {
 
     private final OrderRepository orderRepository;
+    private final OrderService orderService;
     private final JwtTokenProvider jwtTokenProvider;
 
     public OrderController(OrderRepository orderRepository,
+                           OrderService orderService,
                            JwtTokenProvider jwtTokenProvider) {
         this.orderRepository = orderRepository;
+        this.orderService = orderService;
         this.jwtTokenProvider = jwtTokenProvider;
     }
 
     /**
      * Place a new order via REST.
-     * VULN: No server-side validation of quantity (accepts negative).
-     * VULN: No price band validation (can buy at $0.01).
-     * VULN: clientOrderId not unique-enforced (replay possible).
-     * VULN: Symbol not validated against known symbols.
-     * VULN: Different validation rules than WebSocket endpoint.
+     * Routes through OrderService for full validation (risk checks, matching).
      */
     @PostMapping
     public ResponseEntity<?> placeOrder(@RequestBody OrderRequest request,
@@ -50,36 +45,29 @@ public class OrderController {
                 .body(Map.of("error", "Authentication required"));
         }
 
-        // VULN: No validation at all - accepts negative qty, zero price, fake symbols
-        Order order = new Order();
-        order.setUserId(userId);
-        order.setSymbol(request.getSymbol());
-        order.setSide(request.getSide() != null ? request.getSide() : "BUY");
-        order.setOrderType(request.getType() != null ? request.getType() : "LIMIT");
-        order.setQuantity(request.getQuantity() != null ? request.getQuantity() : BigDecimal.ONE);
-        order.setPrice(request.getPrice() != null ? request.getPrice() : BigDecimal.ZERO);
-        order.setStatus("NEW");
-        order.setClientOrderId(request.getClientOrderId());
-        order.setCreatedAt(LocalDateTime.now());
-        order.setFilledQty(BigDecimal.ZERO);
+        try {
+            Order order = orderService.placeOrder(userId, request);
 
-        Order saved = orderRepository.save(order);
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", order.getId());
+            response.put("orderId", order.getId());
+            response.put("symbol", order.getSymbol());
+            response.put("side", order.getSide());
+            response.put("type", order.getOrderType());
+            response.put("quantity", order.getQuantity());
+            response.put("price", order.getPrice());
+            response.put("status", order.getStatus());
+            response.put("filledQty", order.getFilledQty());
+            response.put("filledPrice", order.getFilledPrice());
+            response.put("clientOrderId", order.getClientOrderId());
+            response.put("createdAt", order.getCreatedAt());
+            response.put("message", "Order placed successfully");
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("id", saved.getId());
-        response.put("orderId", saved.getId());
-        response.put("userId", saved.getUserId());        // VULN: leaks userId
-        response.put("symbol", saved.getSymbol());
-        response.put("side", saved.getSide());
-        response.put("type", saved.getOrderType());
-        response.put("quantity", saved.getQuantity());
-        response.put("price", saved.getPrice());
-        response.put("status", saved.getStatus());
-        response.put("clientOrderId", saved.getClientOrderId());
-        response.put("createdAt", saved.getCreatedAt());
-        response.put("message", "Order placed successfully");
-
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", e.getMessage()));
+        }
     }
 
     /**

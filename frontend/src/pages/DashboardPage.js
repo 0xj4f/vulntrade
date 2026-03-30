@@ -186,7 +186,7 @@ function DashboardPage() {
     setSellModal({ symbol, quantity: Number(quantity), price: bidPrice, sellQty: String(quantity) });
   };
 
-  const executeSell = () => {
+  const executeSell = async () => {
     if (!sellModal) return;
     const qty = Number(sellModal.sellQty);
     if (qty <= 0 || qty > sellModal.quantity) {
@@ -194,16 +194,30 @@ function DashboardPage() {
       return;
     }
     setOrderError(null);
-    sendMessage('/app/trade.placeOrder', {
-      symbol: sellModal.symbol,
-      side: 'SELL',
-      type: 'MARKET',
-      quantity: qty,
-      price: sellModal.price,
-      clientOrderId: 'sell-' + Date.now(),
-    });
-    toast.info(`Sell order submitted: ${qty} ${sellModal.symbol}`);
     setSellModal(null);
+
+    try {
+      const res = await api.post('/api/orders', {
+        symbol: sellModal.symbol,
+        side: 'SELL',
+        type: 'MARKET',
+        quantity: qty,
+        price: sellModal.price,
+        clientOrderId: 'sell-' + Date.now(),
+      });
+      const data = res.data;
+      toast.success(`✅ Sold ${qty} ${sellModal.symbol} @ $${Number(data.price).toFixed(2)}`);
+      setOrderStatus(data);
+      setTimeout(() => { fetchPositions(); fetchOrders(); refreshBalance(); }, 600);
+    } catch (err) {
+      const errMsg = err.response?.data?.error
+        || err.response?.data?.message
+        || err.message
+        || 'Sell order failed';
+      const errorStr = typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg);
+      setOrderError(errorStr);
+      toast.error(`❌ ${errorStr}`, { autoClose: 8000 });
+    }
   };
 
   // Helper: get current price for a symbol
@@ -391,8 +405,7 @@ function DashboardPage() {
               readOnly={orderForm.type === 'MARKET'}
               style={{ background: orderForm.type === 'MARKET' ? '#0f172a' : '#1f2937', color: '#e5e7eb', border: '1px solid #374151', padding: '8px', borderRadius: '4px', width: '120px' }} />
           </div>
-          <button onClick={() => {
-            // VULN: Client-side only validation - bypass by modifying JS or sending direct WS message
+          <button onClick={async () => {
             const qty = Number(orderForm.quantity);
             if (qty <= 0 || qty > 10000) {
               toast.error('Quantity must be between 1 and 10000');
@@ -421,19 +434,40 @@ function DashboardPage() {
               orderPrice = Number(orderForm.price);
             }
 
-            // VULN: userId from hidden field (tamperable)
-            const hiddenUserId = document.getElementById('order-user-id')?.value;
-            sendMessage('/app/trade.placeOrder', {
+            setOrderError(null);
+            setOrderStatus(null);
+
+            // Use REST API for order placement — gives us immediate error feedback
+            const orderPayload = {
               symbol: orderForm.symbol,
               side: orderForm.side,
               type: orderForm.type,
               quantity: qty,
               price: orderPrice,
               clientOrderId: 'web-' + Date.now(),
-              userId: hiddenUserId ? parseInt(hiddenUserId) : undefined
-            });
-            toast.info('Order submitted via WebSocket');
-            setOrderError(null);
+            };
+
+            try {
+              const res = await api.post('/api/orders', orderPayload);
+              const data = res.data;
+              toast.success(`✅ Order placed: ${data.side} ${data.quantity} ${data.symbol} @ $${Number(data.price).toFixed(2)} — #${data.id}`);
+              setOrderStatus(data);
+              // Refresh positions, orders, balance
+              setTimeout(() => {
+                fetchPositions();
+                fetchOrders();
+                refreshBalance();
+              }, 600);
+            } catch (err) {
+              const errMsg = err.response?.data?.error
+                || err.response?.data?.message
+                || err.response?.data
+                || err.message
+                || 'Order failed — unknown error';
+              const errorStr = typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg);
+              setOrderError(errorStr);
+              toast.error(`❌ ${errorStr}`, { autoClose: 8000 });
+            }
           }} style={{
             background: orderForm.side === 'BUY' ? '#10b981' : '#ef4444',
             color: '#fff', border: 'none', padding: '8px 24px', borderRadius: '4px',

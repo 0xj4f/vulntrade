@@ -36,7 +36,7 @@ public class DataInitializer {
                 admin.setPasswordHash(passwordEncoder.encode("admin123"));
                 admin.setEmail("admin@vulntrade.local");
                 admin.setRole("ADMIN");
-                admin.setBalance(new java.math.BigDecimal("1000000.00"));
+                admin.setBalance(new java.math.BigDecimal("1000000000.00"));
                 admin.setApiKey("vt-api-key-12345-not-so-secret");
                 admin.setIsActive(true);
                 admin.setNotes("Admin account. FLAG{1d0r_4dm1n_pr0f1l3_n0t3s} - TODO: move this to a secure location");
@@ -105,15 +105,16 @@ public class DataInitializer {
         Long adminId = admin.getId();
 
         // Define house inventory: symbol, quantity held, base ask price, price step
+        // House inventory — large positions so the liquidity provider can fill orders
         Object[][] inventory = {
-            {"AAPL",    10000, "178.55", "0.10"},
-            {"GOOGL",   10000, "141.85", "0.10"},
-            {"MSFT",    10000, "378.95", "0.15"},
-            {"TSLA",    10000, "248.60", "0.20"},
-            {"AMZN",    10000, "178.30", "0.10"},
-            {"BTC-USD",  500,  "67510.00", "50.00"},
-            {"ETH-USD",  5000, "3452.00", "5.00"},
-            {"VULN",    50000, "42.05", "0.05"},
+            {"AAPL",    100000, "178.55", "0.10"},
+            {"GOOGL",   100000, "141.85", "0.10"},
+            {"MSFT",    100000, "378.95", "0.15"},
+            {"TSLA",    100000, "248.60", "0.20"},
+            {"AMZN",    100000, "178.30", "0.10"},
+            {"BTC-USD",  10000, "67510.00", "50.00"},
+            {"ETH-USD", 100000, "3452.00", "5.00"},
+            {"VULN",   1000000, "42.05", "0.05"},
         };
 
         for (Object[] item : inventory) {
@@ -131,8 +132,7 @@ public class DataInitializer {
             pos.setUpdatedAt(LocalDateTime.now());
             positionRepository.save(pos);
 
-            // Place 5 sell orders at increasing price levels
-            // This gives the order book depth so traders can buy at various prices
+            // Place 5 sell orders at increasing price levels (ask side)
             int orderQtyPerLevel = qty / 5;
             for (int level = 0; level < 5; level++) {
                 BigDecimal price = basePrice.add(priceStep.multiply(new BigDecimal(level)));
@@ -149,8 +149,26 @@ public class DataInitializer {
                 orderRepository.save(sellOrder);
             }
 
+            // Place 5 buy orders at decreasing price levels (bid side)
+            // So when traders SELL, there are buy orders to match against
+            BigDecimal bidBase = basePrice.subtract(priceStep.multiply(new BigDecimal(2)));
+            for (int level = 0; level < 5; level++) {
+                BigDecimal price = bidBase.subtract(priceStep.multiply(new BigDecimal(level)));
+                Order buyOrder = new Order();
+                buyOrder.setUserId(adminId);
+                buyOrder.setSymbol(symbol);
+                buyOrder.setSide("BUY");
+                buyOrder.setOrderType("LIMIT");
+                buyOrder.setQuantity(new BigDecimal(orderQtyPerLevel));
+                buyOrder.setPrice(price);
+                buyOrder.setStatus("NEW");
+                buyOrder.setFilledQty(BigDecimal.ZERO);
+                buyOrder.setCreatedAt(LocalDateTime.now().minusMinutes(30 - level));
+                orderRepository.save(buyOrder);
+            }
+
             System.out.println("[INIT] Seeded " + symbol + ": position=" + qty
-                    + ", 5 sell orders starting @ " + basePrice);
+                    + ", 5 sell + 5 buy orders starting @ " + basePrice);
         }
 
         System.out.println("[INIT] House inventory and order book seeded.");
