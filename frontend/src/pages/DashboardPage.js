@@ -216,7 +216,7 @@ function DashboardPage() {
     setSellModal({ symbol, quantity: Number(quantity), price: bidPrice, sellQty: String(quantity) });
   };
 
-  const executeSell = () => {
+  const executeSell = async () => {
     if (!sellModal) return;
     const qty = Number(sellModal.sellQty);
     if (qty <= 0 || qty > sellModal.quantity) {
