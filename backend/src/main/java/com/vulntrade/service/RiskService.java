@@ -1,81 +1,114 @@
 package com.vulntrade.service;
 
+import com.vulntrade.model.Position;
+import com.vulntrade.model.Symbol;
 import com.vulntrade.model.User;
-import com.vulntrade.repository.OrderRepository;
+import com.vulntrade.repository.PositionRepository;
+import com.vulntrade.repository.SymbolRepository;
 import com.vulntrade.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 /**
  * Pre-trade risk checking service.
  * 
- * VULN: Check and deduction not atomic (TOCTOU - Time of Check, Time of Use).
- * VULN: Risk check skipped for "MARKET" order type.
- * VULN: Max order size only checked on frontend.
- * VULN: No position concentration limit.
- * VULN: No notional value limit.
- * VULN: Balance check uses READ UNCOMMITTED isolation (race condition).
+ * Validates:
+ * - Symbol exists and is tradable
+ * - Quantity > 0
+ * - Price > 0 (for LIMIT orders)
+ * - Buyer has sufficient balance
+ * - Seller has sufficient position (asset ownership)
  */
 @Service
 public class RiskService {
 
     private static final Logger logger = LoggerFactory.getLogger(RiskService.class);
     private final UserRepository userRepository;
-    private final OrderRepository orderRepository;
+    private final PositionRepository positionRepository;
+    private final SymbolRepository symbolRepository;
 
-    public RiskService(UserRepository userRepository, OrderRepository orderRepository) {
+    public RiskService(UserRepository userRepository,
+                       PositionRepository positionRepository,
+                       SymbolRepository symbolRepository) {
         this.userRepository = userRepository;
-        this.orderRepository = orderRepository;
+        this.positionRepository = positionRepository;
+        this.symbolRepository = symbolRepository;
     }
 
     /**
-     * Pre-trade risk check.
-     * VULN: Multiple race conditions and bypasses.
+     * Pre-trade risk check — runs for ALL order types (MARKET and LIMIT).
      * 
      * @return null if check passes, error message if it fails
      */
     public String checkPreTrade(Long userId, String symbol, String side,
                                  String orderType, BigDecimal quantity, BigDecimal price) {
 
-        // VULN: Risk check completely skipped for MARKET orders
-        if ("MARKET".equalsIgnoreCase(orderType)) {
-            logger.debug("Skipping risk check for MARKET order");
-            return null;  // VULN: no risk check at all
+        // 1. Validate quantity > 0
+        if (quantity == null || quantity.compareTo(BigDecimal.ZERO) <= 0) {
+            return "Invalid quantity: must be greater than 0";
         }
 
-        // VULN: No validation of quantity > 0
-        // VULN: No validation of price > 0
-        // VULN: No max order size check (frontend only)
+        // 2. Validate price > 0 for LIMIT orders
+        if ("LIMIT".equalsIgnoreCase(orderType)) {
+            if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+                return "Invalid price: must be greater than 0 for LIMIT orders";
+            }
+        }
 
+        // 3. Validate symbol exists and is tradable
+        Optional<Symbol> symbolOpt = symbolRepository.findById(symbol);
+        if (symbolOpt.isEmpty()) {
+            return "Unknown symbol: " + symbol;
+        }
+        Symbol sym = symbolOpt.get();
+        if (!Boolean.TRUE.equals(sym.getIsTradable())) {
+            return "Symbol " + symbol + " is not currently tradable";
+        }
+
+        // 4. Determine effective price for MARKET orders
+        BigDecimal effectivePrice = price;
+        if ("MARKET".equalsIgnoreCase(orderType)) {
+            if ("BUY".equalsIgnoreCase(side)) {
+                effectivePrice = sym.getAsk();
+            } else {
+                effectivePrice = sym.getBid();
+            }
+            if (effectivePrice == null || effectivePrice.compareTo(BigDecimal.ZERO) <= 0) {
+                return "No valid market price available for " + symbol;
+            }
+        }
+
+        // 5. Balance check for BUY orders
         if ("BUY".equalsIgnoreCase(side)) {
-            // Check balance for buy orders
             User user = userRepository.findById(userId).orElse(null);
             if (user == null) {
                 return "User not found";
             }
 
-            // VULN: READ UNCOMMITTED - another thread could be modifying balance
-            // VULN: TOCTOU - balance could change between this check and order creation
-            BigDecimal orderValue = quantity.multiply(price);
+            BigDecimal orderValue = quantity.multiply(effectivePrice);
             BigDecimal balance = user.getBalance();
 
-            logger.debug("Risk check: userId={}, balance={}, orderValue={}", userId, balance, orderValue);
+            logger.debug("Risk check BUY: userId={}, balance={}, orderValue={}", userId, balance, orderValue);
 
             if (balance.compareTo(orderValue) < 0) {
                 return "Insufficient balance. Required: " + orderValue + ", Available: " + balance;
             }
-
-            // VULN: No position concentration check
-            // VULN: No notional value limit
-            // VULN: Balance NOT reserved/locked here - TOCTOU gap
         }
 
-        // VULN: No risk checks for SELL side
-        // (could sell shares you don't own - naked short selling)
+        // 6. Position check for SELL orders — must own enough of the asset
+        if ("SELL".equalsIgnoreCase(side)) {
+            Optional<Position> posOpt = positionRepository.findByUserIdAndSymbol(userId, symbol);
+            if (posOpt.isEmpty() || posOpt.get().getQuantity().compareTo(quantity) < 0) {
+                BigDecimal available = posOpt.map(Position::getQuantity).orElse(BigDecimal.ZERO);
+                return "Insufficient position. Required: " + quantity + " " + symbol
+                        + ", Available: " + available;
+            }
+        }
 
-        return null;  // Pass
+        return null;  // All checks passed
     }
 }

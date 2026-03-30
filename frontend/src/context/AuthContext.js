@@ -77,6 +77,20 @@ export function AuthProvider({ children }) {
     return user?.role === 'ADMIN';
   };
 
+  // Refresh user data (e.g. balance) from backend
+  const refreshUser = async () => {
+    try {
+      const userId = user?.userId || user?.id;
+      if (!userId) return;
+      const res = await api.get(`/api/users/${userId}`);
+      const updated = { ...user, ...res.data };
+      setUser(updated);
+      localStorage.setItem('user', JSON.stringify(updated));
+    } catch (e) {
+      console.error('Failed to refresh user:', e);
+    }
+  };
+
   const value = {
     user,
     token,
@@ -86,6 +100,7 @@ export function AuthProvider({ children }) {
     register,
     logout,
     isAdmin,
+    refreshUser,
   };
 
   return (
