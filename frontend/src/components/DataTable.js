@@ -36,7 +36,7 @@ export default function DataTable({
   const table = (
     <table style={tStyle}>
       <thead>
-        <tr style={hBorder}>
+        <tr style={{ ...hBorder, backgroundColor: colors.bgStat }}>
           {columns.map((col, i) => (
             <th key={i} style={{ ...thFn(col.align || 'left'), ...col.headerStyle }}>
               {col.label}
@@ -51,7 +51,7 @@ export default function DataTable({
               <td
                 key={j}
                 style={{
-                  padding: small ? '6px' : '8px',
+                  padding: small ? '8px 10px' : '10px 12px',
                   textAlign: col.align || 'left',
                   ...col.cellStyle,
                 }}
@@ -64,7 +64,12 @@ export default function DataTable({
           <tr>
             <td
               colSpan={columns.length}
-              style={{ padding: '16px', textAlign: 'center', color: colors.textDim }}
+              style={{
+                padding: '32px 16px',
+                textAlign: 'center',
+                color: colors.textDim,
+                fontSize: '13px',
+              }}
             >
               {emptyText}
             </td>
@@ -75,7 +80,7 @@ export default function DataTable({
   );
 
   if (maxHeight) {
-    return <div style={{ maxHeight, overflow: 'auto' }}>{table}</div>;
+    return <div style={{ maxHeight, overflow: 'auto', borderRadius: '8px' }}>{table}</div>;
   }
   return table;
 }

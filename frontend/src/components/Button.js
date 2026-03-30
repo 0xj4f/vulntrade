@@ -13,6 +13,7 @@ export default function Button({
   type = 'button',
   children,
   style = {},
+  disabled = false,
   ...rest
 }) {
   const sizeStyle =
@@ -24,7 +25,13 @@ export default function Button({
     <button
       type={type}
       onClick={onClick}
-      style={{ ...buttonStyles[variant], ...sizeStyle, ...style }}
+      disabled={disabled}
+      style={{
+        ...buttonStyles[variant],
+        ...sizeStyle,
+        ...style,
+        ...(disabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+      }}
       {...rest}
     >
       {children}

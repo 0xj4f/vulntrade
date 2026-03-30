@@ -1,5 +1,5 @@
 import React from 'react';
-import { pageContainer, pageHeading } from '../styles/shared';
+import { pageContainer, pageHeading, colors } from '../styles/shared';
 
 /**
  * Standard page wrapper with heading.
@@ -9,7 +9,11 @@ import { pageContainer, pageHeading } from '../styles/shared';
  */
 export default function PageLayout({ title, titleColor, maxWidth = '1200px', children }) {
   return (
-    <div style={pageContainer(maxWidth)}>
+    <div style={{
+      ...pageContainer(maxWidth),
+      minHeight: 'calc(100vh - 56px)',
+      background: `linear-gradient(180deg, ${colors.bgPage} 0%, #0F1D32 100%)`,
+    }}>
       {title && <h2 style={pageHeading(titleColor)}>{title}</h2>}
       {children}
     </div>

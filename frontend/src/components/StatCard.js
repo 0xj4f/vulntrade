@@ -11,8 +11,21 @@ import { statCard, colors } from '../styles/shared';
 export default function StatCard({ label, value, valueColor = colors.textPrimary, valueSize = '24px', children, style = {} }) {
   return (
     <div style={{ ...statCard, ...style }}>
-      <div style={{ color: colors.textMuted, fontSize: '12px', marginBottom: '4px' }}>{label}</div>
-      <div style={{ color: valueColor, fontSize: valueSize, fontWeight: 'bold' }}>{value}</div>
+      <div style={{
+        color: colors.textMuted,
+        fontSize: '11px',
+        marginBottom: '8px',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+      }}>{label}</div>
+      <div style={{
+        color: valueColor,
+        fontSize: valueSize,
+        fontWeight: '700',
+        letterSpacing: '-0.02em',
+        lineHeight: '1.2',
+      }}>{value}</div>
       {children}
     </div>
   );

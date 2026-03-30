@@ -26,18 +26,30 @@ export default function Card({
     variant === 'warning' ? cardWarning :
     cardStyle;
 
+  const variantIcon =
+    variant === 'danger' ? { borderLeft: `3px solid ${colors.red}` } :
+    variant === 'warning' ? { borderLeft: `3px solid ${colors.amber}` } :
+    {};
+
   return (
-    <div style={{ ...base, ...style }}>
+    <div className="card-hover" style={{ ...base, ...variantIcon, ...style }}>
       {(title || headerRight) && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '16px',
+          paddingBottom: '12px',
+          borderBottom: `1px solid ${colors.borderDefault}`,
+        }}>
           {title && (
-            <h3 style={sectionHeading(titleColor || colors.textSecondary)}>{title}</h3>
+            <h3 style={sectionHeading(titleColor || colors.textPrimary)}>{title}</h3>
           )}
           {headerRight}
         </div>
       )}
       {hint && (
-        <p style={{ color: colors.textMuted, fontSize: '12px', marginBottom: '12px' }}>
+        <p style={{ color: colors.textMuted, fontSize: '12px', marginBottom: '12px', lineHeight: '1.5' }}>
           {hint}
         </p>
       )}

@@ -17,7 +17,7 @@ export default function FormField({
   const lbl = labelVariant === 'form' ? formLabel : labelStyle;
 
   return (
-    <div style={style}>
+    <div style={{ marginBottom: '4px', ...style }}>
       {label && <label style={lbl}>{label}</label>}
       {children || (
         <input style={{ ...inputStyle, ...(width ? { width } : {}) }} />
