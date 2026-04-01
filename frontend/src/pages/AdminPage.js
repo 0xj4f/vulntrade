@@ -11,6 +11,7 @@ import FormField, { Input } from '../components/FormField';
 import DataTable from '../components/DataTable';
 import JsonPreview from '../components/JsonPreview';
 import { colors, flexRowWrap, textareaStyle } from '../styles/shared';
+import { fmtNum } from '../utils/format';
 
 /**
  * PHASE 6 VULNS:
@@ -118,7 +119,7 @@ function AdminPage() {
     },
     {
       key: 'balance', label: 'Balance', align: 'right',
-      render: (u) => <span style={{ color: colors.green, fontWeight: '600' }}>${Number(u.balance).toLocaleString()}</span>,
+      render: (u) => <span style={{ color: colors.green, fontWeight: '600' }}>${fmtNum(u.balance)}</span>,
     },
     {
       key: 'apiKey', label: 'API Key',

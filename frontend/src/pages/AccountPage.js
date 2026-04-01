@@ -13,6 +13,7 @@ import StatCard from '../components/StatCard';
 import JsonPreview from '../components/JsonPreview';
 import VerificationBadge from '../components/VerificationBadge';
 import { colors, flexRow, flexRowWrap, gridCols, lineHeight2, codeInline, smallText, inputFull, progressBarTrack, progressBarFill, lockBanner, buttonStyles, btnMedium } from '../styles/shared';
+import { fmtUSD, fmtBalance, fmtNum } from '../utils/format';
 
 /**
  * PHASE 6 VULNS:
@@ -48,7 +49,6 @@ function AccountPage() {
     firstName: '', lastName: '', dateOfBirth: '', phoneNumber: '',
     ssn: '', addressLine1: '', addressLine2: '', city: '', state: '', zipCode: '', country: '',
   });
-  const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -167,33 +167,10 @@ function AccountPage() {
     }
   };
 
-  const handlePhotoUpload = async () => {
-    if (!photoFile) { toast.error('Select a file first'); return; }
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', photoFile);
-      // VULN #95: No file type check, original filename sent
-      const res = await api.post(`/api/users/${user.userId}/photo`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      toast.success(`Photo uploaded: ${res.data.originalFilename}`);
-      setPhotoPreview(`/api/users/${user.userId}/photo?t=${Date.now()}`);
-      // Re-fetch profile to update photo state
-      const profileRes = await api.get(`/api/users/${user.userId}`);
-      setProfile(profileRes.data);
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
-
   // ── Crop / Photo handlers ──
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setPhotoFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target.result;
@@ -274,7 +251,7 @@ function AccountPage() {
           const baseUrl = res.data.photoUrl || `/api/users/${user.userId}/photo`;
           const newUrl = `${baseUrl}?t=${Date.now()}`;
           setPhotoPreview(newUrl);
-          updatePhoto(user.userId);
+          updatePhoto(newUrl);
           toast.success('Profile photo updated!');
         } catch (err) {
           toast.error(err.response?.data?.error || 'Upload failed');
@@ -465,7 +442,7 @@ function AccountPage() {
                 {[
                   {
                     label: 'Balance',
-                    value: `$${Number(profile.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                    value: fmtUSD(profile.balance),
                     color: colors.green,
                   },
                   {
@@ -679,7 +656,7 @@ function AccountPage() {
         <Card title="Account Balance">
           <div style={gridCols()}>
             <StatCard label="Available Balance"
-              value={`$${Number(balance.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              value={fmtBalance(balance.balance)}
               valueColor={colors.green} valueSize="26px" />
             <StatCard label="Account Status" valueSize="16px"
               value={
@@ -728,7 +705,7 @@ function AccountPage() {
             }}>
               <span style={{ color: colors.textMuted, fontSize: '12px' }}>
                 Daily Limit: <span style={{ color: colors.amber, fontWeight: '600' }}>
-                  ${dailyWithdrawn.toLocaleString()} / $100,000
+                  {fmtNum(dailyWithdrawn)} / $100,000
                 </span>
               </span>
               <span style={{ color: colors.red, fontSize: '10px' }}>

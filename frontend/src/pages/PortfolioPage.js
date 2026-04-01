@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
+import { subscribe, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 import PageLayout from '../components/PageLayout';
@@ -10,6 +11,7 @@ import { Input } from '../components/FormField';
 import StatCard from '../components/StatCard';
 import DataTable from '../components/DataTable';
 import { colors, gridCols, flexRow, debugBanner } from '../styles/shared';
+import { fmtPrice, fmtUSD, fmtBalance, fmtPnL, fmtPct, fmtNum, fmtDate, pnlColor } from '../utils/format';
 
 /**
  * PHASE 6 VULNS:
@@ -26,6 +28,8 @@ function PortfolioPage() {
   const [lookupUserId, setLookupUserId] = useState('');
   const [currentPrices, setCurrentPrices] = useState({});
   const [totalPnL, setTotalPnL] = useState(0);
+  const pricesRef = useRef({});
+  const pricesDirtyRef = useRef(false);
 
   useEffect(() => {
     // Fetch current prices for P&L calculation
@@ -33,6 +37,7 @@ function PortfolioPage() {
       .then(res => {
         const priceMap = {};
         res.data.forEach(p => { priceMap[p.symbol] = p.currentPrice; });
+        pricesRef.current = priceMap;
         setCurrentPrices(priceMap);
       })
       .catch(err => console.error('Failed to fetch prices:', err));
@@ -80,6 +85,35 @@ function PortfolioPage() {
     }
   }, [positions, currentPrices]);
 
+  // Live price updates via WebSocket — only writes to ref, dirty flag throttles React updates
+  useEffect(() => {
+    const setupPriceSub = () => {
+      if (!isConnected()) return false;
+      subscribe('/topic/prices', (update) => {
+        if (update.symbol && update.last) {
+          pricesRef.current[update.symbol] = Number(update.last);
+          pricesDirtyRef.current = true;
+        }
+      });
+      return true;
+    };
+    if (!setupPriceSub()) {
+      const iv = setInterval(() => { if (setupPriceSub()) clearInterval(iv); }, 500);
+      return () => clearInterval(iv);
+    }
+  }, []);
+
+  // Flush price ref to state at most every 100 ms
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (pricesDirtyRef.current) {
+        pricesDirtyRef.current = false;
+        setCurrentPrices({ ...pricesRef.current });
+      }
+    }, 100);
+    return () => clearInterval(iv);
+  }, []);
+
   const handleLookupPortfolio = (e) => {
     e.preventDefault();
     if (lookupUserId) {
@@ -92,20 +126,20 @@ function PortfolioPage() {
   /* -- Column definitions for the holdings table -- */
   const holdingColumns = [
     { key: 'symbol', label: 'Symbol', render: (pos) => <span style={{ fontWeight: '700', color: colors.textPrimary, fontSize: '14px' }}>{pos.symbol}</span> },
-    { key: 'quantity', label: 'Quantity', align: 'right', render: (pos) => <span style={{ fontWeight: '500' }}>{Number(pos.quantity || 0).toLocaleString()}</span> },
+    { key: 'quantity', label: 'Quantity', align: 'right', render: (pos) => <span style={{ fontWeight: '500' }}>{fmtNum(pos.quantity)}</span> },
     {
       key: 'avgPrice', label: 'Avg Price', align: 'right',
-      render: (pos) => <span style={{ color: colors.textSecondary }}>${Number(pos.avgPrice || pos.avg_price || 0).toFixed(2)}</span>,
+      render: (pos) => <span style={{ color: colors.textSecondary }}>{fmtPrice(pos.avgPrice || pos.avg_price)}</span>,
     },
     {
       key: 'currentPrice', label: 'Current', align: 'right',
-      render: (pos) => <span style={{ color: colors.textPrimary, fontWeight: '500' }}>${Number(currentPrices[pos.symbol] || 0).toFixed(2)}</span>,
+      render: (pos) => <span style={{ color: colors.textPrimary, fontWeight: '500' }}>{fmtPrice(currentPrices[pos.symbol])}</span>,
     },
     {
       key: 'marketValue', label: 'Mkt Value', align: 'right',
       render: (pos) => {
         const cur = currentPrices[pos.symbol] || 0;
-        return <span style={{ fontWeight: '500' }}>${(cur * (pos.quantity || 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>;
+        return <span style={{ fontWeight: '500' }}>{fmtUSD(cur * (pos.quantity || 0))}</span>;
       },
     },
     {
@@ -114,9 +148,7 @@ function PortfolioPage() {
         const cur = currentPrices[pos.symbol] || 0;
         const avg = pos.avgPrice || pos.avg_price || 0;
         const pnl = (cur - avg) * (pos.quantity || 0);
-        return <span style={{ color: pnl >= 0 ? colors.green : colors.red, fontWeight: '600' }}>
-          {pnl >= 0 ? '+' : ''}{pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-        </span>;
+        return <span style={{ color: pnlColor(pnl), fontWeight: '600' }}>{fmtPnL(pnl)}</span>;
       },
     },
     {
@@ -126,13 +158,11 @@ function PortfolioPage() {
         const avg = pos.avgPrice || pos.avg_price || 0;
         const pct = avg > 0 ? ((cur - avg) / avg * 100) : 0;
         return <span style={{
-          color: pct >= 0 ? colors.green : colors.red,
+          color: pnlColor(pct),
           fontWeight: '600',
           padding: '2px 8px', borderRadius: '6px', fontSize: '12px',
           backgroundColor: pct >= 0 ? 'rgba(0,214,143,0.1)' : 'rgba(255,61,113,0.1)',
-        }}>
-          {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-        </span>;
+        }}>{fmtPct(pct)}</span>;
       },
     },
   ];
@@ -148,15 +178,11 @@ function PortfolioPage() {
     )},
     {
       key: 'amount', label: 'Amount', align: 'right',
-      render: (tx) => <span style={{ color: tx.amount >= 0 ? colors.green : colors.red, fontWeight: '600' }}>
-        {tx.amount >= 0 ? '+' : ''}{Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-      </span>,
+      render: (tx) => <span style={{ color: pnlColor(tx.amount), fontWeight: '600' }}>{fmtPnL(tx.amount)}</span>,
     },
     {
       key: 'balanceAfter', label: 'Balance After', align: 'right',
-      render: (tx) => <span style={{ color: colors.textSecondary }}>
-        ${Number(tx.balanceAfter || tx.balance_after || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-      </span>,
+      render: (tx) => <span style={{ color: colors.textSecondary }}>{fmtBalance(tx.balanceAfter || tx.balance_after)}</span>,
     },
     {
       key: 'description', label: 'Description',
@@ -164,7 +190,7 @@ function PortfolioPage() {
     },
     {
       key: 'createdAt', label: 'Date',
-      render: (tx) => <span style={{ color: colors.textMuted, fontSize: '12px' }}>{tx.createdAt ? new Date(tx.createdAt).toLocaleString() : '\u2014'}</span>,
+      render: (tx) => <span style={{ color: colors.textMuted, fontSize: '12px' }}>{fmtDate(tx.createdAt)}</span>,
     },
   ];
 
@@ -176,14 +202,14 @@ function PortfolioPage() {
         <div style={gridCols('1fr 1fr 1fr')}>
           <StatCard
             label="Cash Balance"
-            value={portfolio?.balance ? `$${Number(portfolio.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '\u2014'}
+            value={portfolio?.balance ? fmtBalance(portfolio.balance) : '\u2014'}
             valueColor={colors.green}
             valueSize="22px"
           />
           <StatCard
             label="Unrealized P&L"
-            value={`${totalPnL >= 0 ? '+' : ''}${totalPnL.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`}
-            valueColor={totalPnL >= 0 ? colors.green : colors.red}
+            value={fmtPnL(totalPnL)}
+            valueColor={pnlColor(totalPnL)}
             valueSize="22px"
           />
           <StatCard label="Positions" value={positions.length} valueSize="22px" valueColor={colors.blue} />

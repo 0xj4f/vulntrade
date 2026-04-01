@@ -89,6 +89,7 @@ public class AuthController {
         response.put("accountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1);
         response.put("verified", user.getVerifiedAt() != null);
         response.put("firstName", user.getFirstName());
+        response.put("profilePic", user.getProfilePic());
 
         return ResponseEntity.ok(response);
     }

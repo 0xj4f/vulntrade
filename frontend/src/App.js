@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
@@ -48,10 +48,6 @@ function NavItem({ to, label, danger = false }) {
 function AppContent() {
   const { isAuthenticated, user, logout, isAdmin, getAccountLevel } = useAuth();
   const verified = getAccountLevel() >= 2;
-  const [navAvatarError, setNavAvatarError] = useState(false);
-
-  // Reset error flag whenever the photo URL changes (new upload)
-  useEffect(() => { setNavAvatarError(false); }, [user?.photoUrl]);
   const wsConnectedRef = useRef(false);
 
   // Connect WebSocket at app level so it persists across page navigations
@@ -130,28 +126,31 @@ function AppContent() {
               border: '1px solid #1E2D45',
             }}>
               <div style={{ position: 'relative' }}>
-                {user?.photoUrl && !navAvatarError ? (
+                {/* Layered avatar: initials always present underneath, photo overlays on top.
+                    onError hides the img via style — no React state change, no timing race. */}
+                <div style={{
+                  width: '28px', height: '28px', borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '12px', fontWeight: '700', color: '#fff',
+                  border: verified ? `2px solid ${colors.green}` : '2px solid transparent',
+                  flexShrink: 0,
+                }}>
+                  {user?.username?.charAt(0)?.toUpperCase() || '?'}
+                </div>
+                {user?.photoUrl && (
                   <img
+                    key={user.photoUrl}
                     src={user.photoUrl}
                     alt=""
-                    onError={() => setNavAvatarError(true)}
+                    onError={(e) => { e.target.style.display = 'none'; }}
                     style={{
+                      position: 'absolute', inset: 0,
                       width: '28px', height: '28px', borderRadius: '50%',
                       objectFit: 'cover', display: 'block',
                       border: verified ? `2px solid ${colors.green}` : '2px solid transparent',
                     }}
                   />
-                ) : (
-                  <div style={{
-                    width: '28px', height: '28px', borderRadius: '50%',
-                    background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '12px', fontWeight: '700', color: '#fff',
-                    border: verified ? `2px solid ${colors.green}` : '2px solid transparent',
-                    flexShrink: 0,
-                  }}>
-                    {user?.username?.charAt(0)?.toUpperCase() || '?'}
-                  </div>
                 )}
                 {verified && (
                   <div style={{

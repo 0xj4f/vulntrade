@@ -10,6 +10,7 @@ import Button from '../components/Button';
 import FormField, { Input } from '../components/FormField';
 import DataTable from '../components/DataTable';
 import { colors, flexRowWrap } from '../styles/shared';
+import { fmtPrice, sideColor } from '../utils/format';
 
 /**
  * PHASE 6: Trade History page
@@ -92,7 +93,7 @@ function HistoryPage() {
       render: (t) => {
         const side = t.side || t.Side || '\u2014';
         return <span style={{
-          color: side === 'BUY' ? colors.green : colors.red,
+          color: sideColor(side),
           fontWeight: '600', fontSize: '12px',
           padding: '2px 8px', borderRadius: '6px',
           backgroundColor: side === 'BUY' ? 'rgba(0,214,143,0.1)' : 'rgba(255,61,113,0.1)',
@@ -105,7 +106,7 @@ function HistoryPage() {
       render: (t) => {
         const raw = t.price ?? t.Price ?? t.filledPrice;
         return (raw != null && raw !== '' && !isNaN(Number(raw)))
-          ? <span style={{ color: colors.green, fontWeight: '500' }}>${Number(raw).toFixed(2)}</span>
+          ? <span style={{ color: colors.green, fontWeight: '500' }}>{fmtPrice(raw)}</span>
           : <span style={{ color: colors.textMuted }}>MKT</span>;
       },
     },
