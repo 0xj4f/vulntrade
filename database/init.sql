@@ -16,7 +16,27 @@ CREATE TABLE IF NOT EXISTS users (
     notes TEXT,
     -- Used for storing admin notes (Flag 2 location)
     profile_pic VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Account Level fields (VULN #96: PII stored in plaintext, no encryption)
+    account_level INTEGER DEFAULT 1,           -- 1=BASIC, 2=VERIFIED
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    date_of_birth VARCHAR(20),                 -- VULN: stored as VARCHAR, not DATE
+    phone_number VARCHAR(30),                  -- VULN: plaintext
+    ssn VARCHAR(20),                           -- VULN #96: SSN stored in PLAINTEXT
+    address_line1 VARCHAR(255),
+    address_line2 VARCHAR(255),
+    city VARCHAR(100),
+    state VARCHAR(50),
+    zip_code VARCHAR(20),
+    country VARCHAR(100),
+    photo_path VARCHAR(500),                   -- VULN #95: full filesystem path stored
+    photo_filename VARCHAR(255),               -- VULN #95: original filename preserved
+    verified_at TIMESTAMP,
+    daily_withdrawn DECIMAL(20,8) DEFAULT 0,
+    daily_deposited DECIMAL(20,8) DEFAULT 0,
+    last_tx_reset DATE
 );
 
 -- Orders table

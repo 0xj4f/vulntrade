@@ -9,6 +9,21 @@ import api from '../services/apiService';
  */
 const AuthContext = createContext(null);
 
+/**
+ * Decode JWT payload without signature verification.
+ * VULN: Client decodes JWT to read claims including PII - no verification.
+ */
+function decodeJWT(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return {};
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(payload));
+  } catch (e) {
+    return {};
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
@@ -22,8 +37,11 @@ export function AuthProvider({ children }) {
     if (storedToken && storedUser) {
       try {
         const userData = JSON.parse(storedUser);
+        // Merge JWT claims into user state (VULN: PII from JWT in React state)
+        const jwtClaims = decodeJWT(storedToken);
+        const merged = { ...userData, ...jwtClaims };
         setToken(storedToken);
-        setUser(userData);
+        setUser(merged);
         setIsAuthenticated(true);
       } catch (e) {
         // Invalid stored data
@@ -42,8 +60,12 @@ export function AuthProvider({ children }) {
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data));
 
+    // Decode JWT and merge claims into user state (VULN: PII exposed in React state)
+    const jwtClaims = decodeJWT(data.token);
+    const merged = { ...data, ...jwtClaims };
+
     setToken(data.token);
-    setUser(data);
+    setUser(merged);
     setIsAuthenticated(true);
 
     return data;
@@ -56,8 +78,11 @@ export function AuthProvider({ children }) {
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data));
 
+    const jwtClaims = decodeJWT(data.token);
+    const merged = { ...data, ...jwtClaims };
+
     setToken(data.token);
-    setUser(data);
+    setUser(merged);
     setIsAuthenticated(true);
 
     return data;
@@ -91,6 +116,32 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Refresh JWT token from server (gets new token with current DB state)
+  // Used after profile update triggers account level change
+  const refreshToken = async () => {
+    try {
+      const res = await api.post('/api/auth/refresh-token');
+      const data = res.data;
+
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data));
+
+      const jwtClaims = decodeJWT(data.token);
+      const merged = { ...data, ...jwtClaims };
+
+      setToken(data.token);
+      setUser(merged);
+
+      return data;
+    } catch (e) {
+      console.error('Failed to refresh token:', e);
+    }
+  };
+
+  // Account level helpers
+  const getAccountLevel = () => user?.accountLevel || 1;
+  const isVerified = () => (user?.accountLevel || 1) >= 2;
+
   const value = {
     user,
     token,
@@ -101,6 +152,9 @@ export function AuthProvider({ children }) {
     logout,
     isAdmin,
     refreshUser,
+    refreshToken,
+    getAccountLevel,
+    isVerified,
   };
 
   return (

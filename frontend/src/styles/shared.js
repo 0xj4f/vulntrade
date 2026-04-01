@@ -398,3 +398,62 @@ export const smallText = (color = colors.textMuted) => ({
   fontSize: '11px',
   marginTop: '4px',
 });
+
+// ── Account Level ──────────────────────────────────────
+export const levelBadge = (isVerified) => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '4px',
+  padding: '3px 10px',
+  borderRadius: '20px',
+  fontSize: '11px',
+  fontWeight: '600',
+  letterSpacing: '0.04em',
+  backgroundColor: isVerified ? colors.greenDark : '#1A1F2E',
+  color: isVerified ? colors.greenLight : colors.textMuted,
+  border: `1px solid ${isVerified ? 'rgba(0,214,143,0.3)' : colors.borderDefault}`,
+});
+
+export const verifiedRing = {
+  width: '32px',
+  height: '32px',
+  borderRadius: '50%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: '14px',
+  fontWeight: '700',
+  position: 'relative',
+};
+
+export const progressBarTrack = {
+  width: '100%',
+  height: '8px',
+  backgroundColor: colors.bgInput,
+  borderRadius: '4px',
+  overflow: 'hidden',
+  border: `1px solid ${colors.borderDefault}`,
+};
+
+export const progressBarFill = (percent) => ({
+  width: `${Math.min(percent, 100)}%`,
+  height: '100%',
+  background: `linear-gradient(90deg, ${colors.green}, #00B87A)`,
+  borderRadius: '4px',
+  transition: 'width 0.4s ease',
+});
+
+export const lockOverlay = {
+  opacity: 0.5,
+  pointerEvents: 'none',
+  filter: 'grayscale(30%)',
+};
+
+export const lockBanner = {
+  backgroundColor: colors.bgInput,
+  border: `1px solid ${colors.borderMedium}`,
+  borderRadius: '10px',
+  padding: '16px 20px',
+  textAlign: 'center',
+  marginBottom: '16px',
+};

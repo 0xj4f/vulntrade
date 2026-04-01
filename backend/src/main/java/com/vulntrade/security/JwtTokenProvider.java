@@ -1,5 +1,6 @@
 package com.vulntrade.security;
 
+import com.vulntrade.model.User;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.impl.DefaultClaims;
 import org.springframework.beans.factory.annotation.Value;
@@ -7,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
@@ -30,6 +32,7 @@ public class JwtTokenProvider {
         claims.put("username", username);
         claims.put("role", role);        // VULN: role in token body
         claims.put("email", email);      // VULN: PII in token
+        claims.put("accountLevel", 1);   // VULN #92: account level in JWT, server trusts it
 
         return Jwts.builder()
                 .setClaims(claims)
@@ -38,6 +41,66 @@ public class JwtTokenProvider {
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpiration))
                 .signWith(SignatureAlgorithm.HS256, jwtSecret)  // VULN: weak secret
                 .compact();
+    }
+
+    /**
+     * Generate JWT token from User entity.
+     * VULN #92: accountLevel stored in JWT, server trusts this claim without DB verification.
+     * VULN #93: For Level 2 users, JWT contains full PII (SSN, DOB, phone, address).
+     */
+    public String generateToken(User user) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", user.getId());
+        claims.put("username", user.getUsername());
+        claims.put("role", user.getRole());
+        claims.put("email", user.getEmail());
+        claims.put("accountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1);  // VULN #92
+
+        // VULN #93: Level 2 JWT is intentionally "fat" with PII
+        if (user.getAccountLevel() != null && user.getAccountLevel() >= 2) {
+            claims.put("verified", true);
+            claims.put("verifiedAt", user.getVerifiedAt() != null ? user.getVerifiedAt().toString() : null);
+            claims.put("firstName", user.getFirstName());
+            claims.put("lastName", user.getLastName());
+            claims.put("dateOfBirth", user.getDateOfBirth());     // VULN #93: DOB in JWT
+            claims.put("phoneNumber", user.getPhoneNumber());     // VULN #93: phone in JWT
+            claims.put("ssn", user.getSsn());                     // VULN #93: SSN in JWT!
+
+            // Nested address object in JWT
+            Map<String, String> address = new LinkedHashMap<>();
+            address.put("line1", user.getAddressLine1());
+            address.put("line2", user.getAddressLine2());
+            address.put("city", user.getCity());
+            address.put("state", user.getState());
+            address.put("zip", user.getZipCode());
+            address.put("country", user.getCountry());
+            claims.put("address", address);
+        }
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject(user.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + jwtExpiration))
+                .signWith(SignatureAlgorithm.HS256, jwtSecret)
+                .compact();
+    }
+
+    /**
+     * Extract account level from JWT token.
+     * VULN #94: Server reads level from JWT claim, never verifies against DB.
+     */
+    public Integer getAccountLevelFromToken(String token) {
+        Claims claims = validateToken(token);
+        if (claims != null) {
+            Object level = claims.get("accountLevel");
+            if (level instanceof Integer) {
+                return (Integer) level;
+            } else if (level instanceof Number) {
+                return ((Number) level).intValue();
+            }
+        }
+        return 1; // Default to BASIC
     }
 
     /**

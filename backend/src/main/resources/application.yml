@@ -35,6 +35,13 @@ spring:
       settings:
         web-allow-others: true  # VULN: accessible from any host
 
+  # File upload - VULN #95: oversized limits, no type restrictions
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB    # VULN: excessive file size allowed
+      max-request-size: 50MB
+
   # Redis
   redis:
     host: ${SPRING_REDIS_HOST:localhost}
