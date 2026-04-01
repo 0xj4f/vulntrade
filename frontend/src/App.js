@@ -11,6 +11,8 @@ import AdminPage from './pages/AdminPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import SymbolDetailPage from './pages/SymbolDetailPage';
 import { connectWebSocket, disconnectWebSocket, isConnected } from './services/websocketService';
+import VerificationBadge from './components/VerificationBadge';
+import { colors } from './styles/shared';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -44,7 +46,12 @@ function NavItem({ to, label, danger = false }) {
 }
 
 function AppContent() {
-  const { isAuthenticated, user, logout, isAdmin } = useAuth();
+  const { isAuthenticated, user, logout, isAdmin, getAccountLevel } = useAuth();
+  const verified = getAccountLevel() >= 2;
+  const [navAvatarError, setNavAvatarError] = useState(false);
+
+  // Reset error flag whenever the photo URL changes (new upload)
+  useEffect(() => { setNavAvatarError(false); }, [user?.photoUrl]);
   const wsConnectedRef = useRef(false);
 
   // Connect WebSocket at app level so it persists across page navigations
@@ -122,17 +129,45 @@ function AppContent() {
               backgroundColor: 'rgba(30,45,69,0.6)',
               border: '1px solid #1E2D45',
             }}>
-              <div style={{
-                width: '28px', height: '28px', borderRadius: '50%',
-                background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '12px', fontWeight: '700', color: '#fff',
-              }}>
-                {user?.username?.charAt(0)?.toUpperCase() || '?'}
+              <div style={{ position: 'relative' }}>
+                {user?.photoUrl && !navAvatarError ? (
+                  <img
+                    src={user.photoUrl}
+                    alt=""
+                    onError={() => setNavAvatarError(true)}
+                    style={{
+                      width: '28px', height: '28px', borderRadius: '50%',
+                      objectFit: 'cover', display: 'block',
+                      border: verified ? `2px solid ${colors.green}` : '2px solid transparent',
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    width: '28px', height: '28px', borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '12px', fontWeight: '700', color: '#fff',
+                    border: verified ? `2px solid ${colors.green}` : '2px solid transparent',
+                    flexShrink: 0,
+                  }}>
+                    {user?.username?.charAt(0)?.toUpperCase() || '?'}
+                  </div>
+                )}
+                {verified && (
+                  <div style={{
+                    position: 'absolute', bottom: '-2px', right: '-2px',
+                    width: '12px', height: '12px', borderRadius: '50%',
+                    backgroundColor: colors.green, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                    fontSize: '7px', color: '#fff', fontWeight: '700',
+                    border: '1.5px solid #0E1A2E',
+                  }}>&#10003;</div>
+                )}
               </div>
               <span style={{ color: '#8F9BB3', fontSize: '13px', fontWeight: '500' }}>
                 {user?.username}
               </span>
+              <VerificationBadge level={getAccountLevel()} size="small" />
             </div>
             <button onClick={logout} style={{
               background: 'transparent', border: '1px solid #263A56', color: '#5E6B82',

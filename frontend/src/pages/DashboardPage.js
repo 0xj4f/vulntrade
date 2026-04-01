@@ -14,13 +14,14 @@ import Modal from '../components/Modal';
 import FormField, { Input } from '../components/FormField';
 import StatusBadge from '../components/StatusBadge';
 import SparkLine from '../components/SparkLine';
+import VerificationBadge from '../components/VerificationBadge';
 import {
   colors, selectStyle, flexRowWrap, gridCols,
   orderErrorBanner, orderStatusBanner,
 } from '../styles/shared';
 
 function DashboardPage() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, getAccountLevel } = useAuth();
   const [prices, setPrices] = useState([]);
   const [health, setHealth] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
@@ -299,7 +300,8 @@ function DashboardPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
         <StatCard label="Balance" valueColor={colors.green} valueSize="22px"
           value={`$${user?.balance ? Number(user.balance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}`} />
-        <StatCard label="Username" value={user?.username || '—'} valueSize="18px" />
+        <StatCard label="Username" valueSize="18px"
+          value={<span>{user?.username || '—'} <VerificationBadge level={getAccountLevel()} size="small" /></span>} />
         <StatCard label="Role" valueSize="18px"
           value={user?.role || '—'}
           valueColor={user?.role === 'ADMIN' ? colors.red : colors.blue} />

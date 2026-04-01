@@ -68,6 +68,8 @@ public class AccountController {
      * VULN: No withdrawal rate limit.
      * VULN: Negative amount = deposit (sign flip vulnerability).
      * VULN: Race condition - balance check and deduction not atomic.
+     * VULN #92/#94: Level check reads from JWT claim, never verifies against DB.
+     * VULN #99: No server-side daily limit enforcement.
      */
     @PostMapping("/withdraw")
     public ResponseEntity<?> withdraw(
@@ -78,6 +80,19 @@ public class AccountController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(Map.of("error", "Authentication required"));
         }
+
+        // VULN #92/#94: Check account level from JWT claim ONLY - never queries DB
+        Integer accountLevel = extractAccountLevel(authHeader);
+        if (accountLevel < 2) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of(
+                    "error", "Account Level 2 (Verified) required for withdrawals",
+                    "currentLevel", accountLevel,
+                    "upgradeUrl", "/account",
+                    "hint", "Complete your profile verification to unlock withdrawals"
+                ));
+        }
+        // VULN #99: No server-side daily limit check - $100K limit is frontend-only
 
         BigDecimal amount;
         try {
@@ -130,6 +145,8 @@ public class AccountController {
      * Deposit funds.
      * VULN: No verification of source - free money.
      * VULN: No rate limiting.
+     * VULN #92/#94: Level check reads from JWT claim, never verifies against DB.
+     * VULN #99: No server-side daily limit enforcement.
      */
     @PostMapping("/deposit")
     public ResponseEntity<?> deposit(
@@ -140,6 +157,19 @@ public class AccountController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(Map.of("error", "Authentication required"));
         }
+
+        // VULN #92/#94: Check account level from JWT claim ONLY - never queries DB
+        Integer accountLevel = extractAccountLevel(authHeader);
+        if (accountLevel < 2) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of(
+                    "error", "Account Level 2 (Verified) required for deposits",
+                    "currentLevel", accountLevel,
+                    "upgradeUrl", "/account",
+                    "hint", "Complete your profile verification to unlock deposits"
+                ));
+        }
+        // VULN #99: No server-side daily limit check - $100K limit is frontend-only
 
         BigDecimal amount;
         try {
@@ -205,6 +235,23 @@ public class AccountController {
             return jwtTokenProvider.getUserIdFromToken(token);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * VULN #92/#94: Extract account level from JWT token claim.
+     * Server trusts this value without verifying against the database.
+     * Attacker can forge JWT with accountLevel=2 to bypass restriction.
+     */
+    private Integer extractAccountLevel(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return 1;
+        }
+        try {
+            String token = authHeader.substring(7);
+            return jwtTokenProvider.getAccountLevelFromToken(token);
+        } catch (Exception e) {
+            return 1;
         }
     }
 }

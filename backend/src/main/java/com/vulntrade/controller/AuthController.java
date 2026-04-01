@@ -1,10 +1,12 @@
 package com.vulntrade.controller;
 
 import com.vulntrade.model.PasswordResetToken;
+import com.vulntrade.model.Transaction;
 import com.vulntrade.model.User;
 import com.vulntrade.model.dto.LoginRequest;
 import com.vulntrade.model.dto.RegisterRequest;
 import com.vulntrade.repository.PasswordResetTokenRepository;
+import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
 import org.springframework.http.HttpStatus;
@@ -16,6 +18,7 @@ import javax.persistence.EntityManager;
 import javax.persistence.PersistenceContext;
 import javax.persistence.Query;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +32,7 @@ public class AuthController {
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordEncoder passwordEncoder;
     private final PasswordResetTokenRepository resetTokenRepository;
+    private final TransactionRepository transactionRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -36,11 +40,13 @@ public class AuthController {
     public AuthController(UserRepository userRepository,
                           JwtTokenProvider jwtTokenProvider,
                           PasswordEncoder passwordEncoder,
-                          PasswordResetTokenRepository resetTokenRepository) {
+                          PasswordResetTokenRepository resetTokenRepository,
+                          TransactionRepository transactionRepository) {
         this.userRepository = userRepository;
         this.jwtTokenProvider = jwtTokenProvider;
         this.passwordEncoder = passwordEncoder;
         this.resetTokenRepository = resetTokenRepository;
+        this.transactionRepository = transactionRepository;
     }
 
     /**
@@ -69,8 +75,8 @@ public class AuthController {
                 .body(Map.of("error", "Account is disabled"));
         }
 
-        String token = jwtTokenProvider.generateToken(
-                user.getId(), user.getUsername(), user.getRole(), user.getEmail());
+        // VULN #92/#93: Use fat JWT generator - includes accountLevel and PII for level 2
+        String token = jwtTokenProvider.generateToken(user);
 
         Map<String, Object> response = new HashMap<>();
         response.put("token", token);
@@ -80,6 +86,9 @@ public class AuthController {
         response.put("email", user.getEmail());
         response.put("balance", user.getBalance());
         response.put("apiKey", user.getApiKey());  // VULN: API key leaked in login response
+        response.put("accountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1);
+        response.put("verified", user.getVerifiedAt() != null);
+        response.put("firstName", user.getFirstName());
 
         return ResponseEntity.ok(response);
     }
@@ -121,14 +130,14 @@ public class AuthController {
                     .body(Map.of("error", "Invalid password"));
             }
 
-            String token = jwtTokenProvider.generateToken(
-                    user.getId(), user.getUsername(), user.getRole(), user.getEmail());
+            String token = jwtTokenProvider.generateToken(user);  // VULN #92/#93: fat JWT
 
             Map<String, Object> response = new HashMap<>();
             response.put("token", token);
             response.put("userId", user.getId());
             response.put("username", user.getUsername());
             response.put("role", user.getRole());
+            response.put("accountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1);
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
@@ -155,11 +164,21 @@ public class AuthController {
         user.setBalance(new BigDecimal("10000.00"));
         user.setIsActive(true);
         user.setApiKey("vt-api-" + System.currentTimeMillis());  // VULN: predictable API key
+        user.setAccountLevel(1);  // New users start at Level 1 (BASIC)
 
         User saved = userRepository.save(user);
 
-        String token = jwtTokenProvider.generateToken(
-                saved.getId(), saved.getUsername(), saved.getRole(), saved.getEmail());
+        // Record initial signup bonus in transaction history
+        Transaction signupBonus = new Transaction();
+        signupBonus.setUserId(saved.getId());
+        signupBonus.setType("DEPOSIT");
+        signupBonus.setAmount(new BigDecimal("10000.00"));
+        signupBonus.setBalanceAfter(new BigDecimal("10000.00"));
+        signupBonus.setDescription("Initial signup bonus");
+        signupBonus.setCreatedAt(LocalDateTime.now());
+        transactionRepository.save(signupBonus);
+
+        String token = jwtTokenProvider.generateToken(saved);  // VULN #92: accountLevel in JWT
 
         Map<String, Object> response = new HashMap<>();
         response.put("token", token);
@@ -167,6 +186,8 @@ public class AuthController {
         response.put("username", saved.getUsername());
         response.put("role", saved.getRole());
         response.put("apiKey", saved.getApiKey());  // VULN: API key in response
+        response.put("accountLevel", 1);
+        response.put("verified", false);
         response.put("message", "Registration successful");
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
@@ -290,5 +311,47 @@ public class AuthController {
             "message", "Password changed successfully",
             "warning", "You may want to re-login for a new token"
         ));
+    }
+
+    /**
+     * Refresh JWT token from current DB state.
+     * Used after profile update triggers account level change.
+     */
+    @PostMapping("/refresh-token")
+    public ResponseEntity<?> refreshToken(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "Authentication required"));
+        }
+
+        String oldToken = authHeader.substring(7);
+        Long userId = jwtTokenProvider.getUserIdFromToken(oldToken);
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "Invalid token"));
+        }
+
+        Optional<User> userOpt = userRepository.findById(userId);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", "User not found"));
+        }
+
+        User user = userOpt.get();
+        String newToken = jwtTokenProvider.generateToken(user);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("token", newToken);
+        response.put("userId", user.getId());
+        response.put("username", user.getUsername());
+        response.put("role", user.getRole());
+        response.put("email", user.getEmail());
+        response.put("balance", user.getBalance());
+        response.put("accountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1);
+        response.put("verified", user.getVerifiedAt() != null);
+        response.put("firstName", user.getFirstName());
+
+        return ResponseEntity.ok(response);
     }
 }

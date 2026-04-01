@@ -2,9 +2,11 @@ package com.vulntrade.config;
 
 import com.vulntrade.model.Order;
 import com.vulntrade.model.Position;
+import com.vulntrade.model.Transaction;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.PositionRepository;
+import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
@@ -25,7 +27,8 @@ public class DataInitializer {
     public CommandLineRunner seedUsers(UserRepository userRepository,
                                        PasswordEncoder passwordEncoder,
                                        PositionRepository positionRepository,
-                                       OrderRepository orderRepository) {
+                                       OrderRepository orderRepository,
+                                       TransactionRepository transactionRepository) {
         return args -> {
             if (userRepository.count() == 0) {
                 System.out.println("[INIT] Seeding default users...");
@@ -40,6 +43,12 @@ public class DataInitializer {
                 admin.setApiKey("vt-api-key-12345-not-so-secret");
                 admin.setIsActive(true);
                 admin.setNotes("Admin account. FLAG{1d0r_4dm1n_pr0f1l3_n0t3s} - TODO: move this to a secure location");
+                // Account Level: admin is auto-verified
+                admin.setAccountLevel(2);
+                admin.setFirstName("System");
+                admin.setLastName("Administrator");
+                admin.setSsn("FLAG{ssn_exposed_in_jwt}");  // VULN #93/#100: flag hidden in admin SSN
+                admin.setVerifiedAt(LocalDateTime.now().minusDays(365));
                 admin = userRepository.save(admin);
 
                 // Trader 1 - trader1/password
@@ -48,11 +57,22 @@ public class DataInitializer {
                 trader1.setPasswordHash(passwordEncoder.encode("password"));
                 trader1.setEmail("trader1@vulntrade.local");
                 trader1.setRole("TRADER");
-                trader1.setBalance(new java.math.BigDecimal("50000.00"));
+                trader1.setBalance(new java.math.BigDecimal("10000.00"));
                 trader1.setApiKey("vt-api-trader1-key");
                 trader1.setIsActive(true);
                 trader1.setNotes("Test trader account 1");
-                userRepository.save(trader1);
+                trader1.setAccountLevel(1);  // BASIC - needs to complete verification
+                trader1 = userRepository.save(trader1);
+
+                // Record initial signup bonus in transaction history
+                Transaction t1Deposit = new Transaction();
+                t1Deposit.setUserId(trader1.getId());
+                t1Deposit.setType("DEPOSIT");
+                t1Deposit.setAmount(new BigDecimal("10000.00"));
+                t1Deposit.setBalanceAfter(new BigDecimal("10000.00"));
+                t1Deposit.setDescription("Initial signup bonus");
+                t1Deposit.setCreatedAt(LocalDateTime.now());
+                transactionRepository.save(t1Deposit);
 
                 // Trader 2 - trader2/password
                 User trader2 = new User();
@@ -60,11 +80,34 @@ public class DataInitializer {
                 trader2.setPasswordHash(passwordEncoder.encode("password"));
                 trader2.setEmail("trader2@vulntrade.local");
                 trader2.setRole("TRADER");
-                trader2.setBalance(new java.math.BigDecimal("75000.00"));
+                trader2.setBalance(new java.math.BigDecimal("50000.00"));
                 trader2.setApiKey("vt-api-trader2-key");
                 trader2.setIsActive(true);
                 trader2.setNotes("Test trader account 2 - has secret portfolio FLAG{h0r1z0nt4l_pr1v3sc_p0rtf0l10}");
-                userRepository.save(trader2);
+                // Account Level 2: pre-verified with full PII (VULN #96: all plaintext)
+                trader2.setAccountLevel(2);
+                trader2.setFirstName("Sarah");
+                trader2.setLastName("Connor");
+                trader2.setDateOfBirth("1965-05-13");
+                trader2.setPhoneNumber("+1-555-0199");
+                trader2.setSsn("987-65-4321");  // VULN #96: SSN stored in plaintext
+                trader2.setAddressLine1("2309 Destino Dr");
+                trader2.setCity("Los Angeles");
+                trader2.setState("CA");
+                trader2.setZipCode("90046");
+                trader2.setCountry("US");
+                trader2.setVerifiedAt(LocalDateTime.now().minusDays(30));
+                trader2 = userRepository.save(trader2);
+
+                // Record initial deposit in transaction history
+                Transaction t2Deposit = new Transaction();
+                t2Deposit.setUserId(trader2.getId());
+                t2Deposit.setType("DEPOSIT");
+                t2Deposit.setAmount(new BigDecimal("50000.00"));
+                t2Deposit.setBalanceAfter(new BigDecimal("50000.00"));
+                t2Deposit.setDescription("Initial signup bonus");
+                t2Deposit.setCreatedAt(LocalDateTime.now());
+                transactionRepository.save(t2Deposit);
 
                 // API user - apiuser/apipass
                 User apiUser = new User();
