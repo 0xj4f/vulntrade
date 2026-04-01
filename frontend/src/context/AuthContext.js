@@ -142,6 +142,14 @@ export function AuthProvider({ children }) {
   const getAccountLevel = () => user?.accountLevel || 1;
   const isVerified = () => (user?.accountLevel || 1) >= 2;
 
+  // Update the user's photo URL in state and localStorage so nav reflects immediately
+  const updatePhoto = (userId) => {
+    const photoUrl = `/api/users/${userId}/photo?t=${Date.now()}`;
+    const updated = { ...user, photoUrl };
+    setUser(updated);
+    localStorage.setItem('user', JSON.stringify(updated));
+  };
+
   const value = {
     user,
     token,
@@ -155,6 +163,7 @@ export function AuthProvider({ children }) {
     refreshToken,
     getAccountLevel,
     isVerified,
+    updatePhoto,
   };
 
   return (

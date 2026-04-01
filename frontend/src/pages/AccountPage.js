@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
 import { sendMessage } from '../services/websocketService';
@@ -25,7 +25,7 @@ import { colors, flexRow, flexRowWrap, gridCols, lineHeight2, codeInline, smallT
  * - VULN: Deposit with no source verification (free money)
  */
 function AccountPage() {
-  const { user, token, getAccountLevel, isVerified, refreshToken, refreshUser } = useAuth();
+  const { user, token, getAccountLevel, isVerified, refreshToken, refreshUser, updatePhoto } = useAuth();
   const [profile, setProfile] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -52,6 +52,15 @@ function AccountPage() {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Crop modal state
+  const CROP_SIZE = 280;
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState(null);
+  const [naturalSize, setNaturalSize] = useState({ w: 1, h: 1 });
+  const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
+  const [cropZoom, setCropZoom] = useState(1);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef(null);
   // VULN #99: Daily limit tracked in localStorage only
   const [dailyWithdrawn, setDailyWithdrawn] = useState(() => {
     const stored = localStorage.getItem('dailyWithdrawn');
@@ -82,8 +91,10 @@ function AccountPage() {
             zipCode: res.data.zipCode || '',
             country: res.data.country || '',
           }));
-          // Set photo preview if exists
-          if (res.data.photoPath) {
+          // Set photo preview — prefer cached URL from auth context (has cache-bust ts)
+          if (user.photoUrl) {
+            setPhotoPreview(user.photoUrl);
+          } else if (res.data.photoPath) {
             setPhotoPreview(`/api/users/${user.userId}/photo`);
           }
         })
@@ -176,6 +187,104 @@ function AccountPage() {
     }
   };
 
+  // ── Crop / Photo handlers ──
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPhotoFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      const img = new Image();
+      img.onload = () => {
+        setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+        setCropImageSrc(dataUrl);
+        setCropOffset({ x: 0, y: 0 });
+        setCropZoom(1);
+        setShowCropModal(true);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCropMouseDown = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX - cropOffset.x, y: e.clientY - cropOffset.y };
+  };
+
+  const handleCropMouseMove = (e) => {
+    if (!isDragging || !dragStartRef.current) return;
+    setCropOffset({ x: e.clientX - dragStartRef.current.x, y: e.clientY - dragStartRef.current.y });
+  };
+
+  const handleCropMouseUp = () => {
+    setIsDragging(false);
+    dragStartRef.current = null;
+  };
+
+  const handleCropTouchStart = (e) => {
+    const touch = e.touches[0];
+    setIsDragging(true);
+    dragStartRef.current = { x: touch.clientX - cropOffset.x, y: touch.clientY - cropOffset.y };
+  };
+
+  const handleCropTouchMove = (e) => {
+    if (!isDragging || !dragStartRef.current) return;
+    const touch = e.touches[0];
+    setCropOffset({ x: touch.clientX - dragStartRef.current.x, y: touch.clientY - dragStartRef.current.y });
+  };
+
+  const handleApplyCrop = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = CROP_SIZE;
+    canvas.height = CROP_SIZE;
+    const ctx = canvas.getContext('2d');
+
+    ctx.beginPath();
+    ctx.arc(CROP_SIZE / 2, CROP_SIZE / 2, CROP_SIZE / 2, 0, Math.PI * 2);
+    ctx.clip();
+
+    const img = new Image();
+    img.src = cropImageSrc;
+    const doExport = () => {
+      const baseScale = Math.max(CROP_SIZE / img.naturalWidth, CROP_SIZE / img.naturalHeight);
+      const totalScale = baseScale * cropZoom;
+      const drawW = img.naturalWidth * totalScale;
+      const drawH = img.naturalHeight * totalScale;
+      const drawX = (CROP_SIZE - drawW) / 2 + cropOffset.x;
+      const drawY = (CROP_SIZE - drawH) / 2 + cropOffset.y;
+      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+      canvas.toBlob(async (blob) => {
+        setShowCropModal(false);
+        setUploading(true);
+        try {
+          const formData = new FormData();
+          formData.append('file', blob, 'profile.jpg');
+          await api.post(`/api/users/${user.userId}/photo`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+          const ts = Date.now();
+          const newUrl = `/api/users/${user.userId}/photo?t=${ts}`;
+          toast.success('Profile photo updated!');
+          setPhotoPreview(newUrl);
+          updatePhoto(user.userId);
+          const profileRes = await api.get(`/api/users/${user.userId}`);
+          setProfile(profileRes.data);
+        } catch (err) {
+          toast.error(err.response?.data?.error || 'Upload failed');
+        } finally {
+          setUploading(false);
+        }
+      }, 'image/jpeg', 0.92);
+    };
+
+    if (img.complete) doExport();
+    else img.onload = doExport;
+  };
+
   const profileFields = ['firstName', 'lastName', 'dateOfBirth', 'phoneNumber', 'ssn'];
   const filledCount = profileFields.filter(f => profileForm[f] && profileForm[f].trim()).length;
   const progressPercent = (filledCount / profileFields.length) * 100;
@@ -245,39 +354,165 @@ function AccountPage() {
   return (
     <PageLayout title="Account Settings" maxWidth="800px">
 
-      {/* Profile Info */}
-      <Card title={<span>Profile <VerificationBadge level={getAccountLevel()} /></span>}>
+      {/* ── Profile Hero Card ── */}
+      <Card>
         {profile && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            {[
-              { label: 'User ID', value: profile.id, color: colors.textPrimary },
-              { label: 'Username', value: profile.username, color: colors.textPrimary },
-              { label: 'Email', value: profile.email, color: colors.textSecondary },
-              { label: 'Role', value: profile.role, color: profile.role === 'ADMIN' ? colors.red : colors.blue },
-              { label: 'Balance', value: `$${Number(profile.balance).toLocaleString()}`, color: colors.green },
-              { label: 'API Key', value: profile.apiKey, color: colors.amber, mono: true },
-              { label: 'Account Level', value: `Level ${profile.accountLevel || 1} (${(profile.accountLevel || 1) >= 2 ? 'VERIFIED' : 'BASIC'})`, color: (profile.accountLevel || 1) >= 2 ? colors.green : colors.textMuted },
-            ].map(({ label, value, color, mono }) => (
-              <div key={label} style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: colors.bgStat, border: `1px solid ${colors.borderDefault}` }}>
-                <div style={{ fontSize: '11px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', marginBottom: '4px' }}>{label}</div>
-                <div style={{ color, fontWeight: '600', fontSize: mono ? '12px' : '14px', fontFamily: mono ? "'SF Mono', monospace" : 'inherit', wordBreak: 'break-all' }}>{value}</div>
+          <div style={{ display: 'flex', gap: '28px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+
+            {/* Avatar column */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+              {/* Avatar circle with upload overlay */}
+              <div style={{ position: 'relative' }}>
+                <div style={{
+                  width: '104px', height: '104px', borderRadius: '50%',
+                  overflow: 'hidden', flexShrink: 0,
+                  border: isVerified()
+                    ? `3px solid ${colors.green}`
+                    : `3px solid ${colors.borderMedium}`,
+                  boxShadow: isVerified()
+                    ? `0 0 0 4px rgba(0,214,143,0.12), 0 8px 32px rgba(0,0,0,0.5)`
+                    : `0 8px 32px rgba(0,0,0,0.5)`,
+                }}>
+                  {photoPreview ? (
+                    <img src={photoPreview} alt="Profile"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      onError={(e) => { e.target.style.display = 'none'; }} />
+                  ) : (
+                    <div style={{
+                      width: '100%', height: '100%',
+                      background: 'linear-gradient(135deg, #4F8BFF 0%, #8B5CF6 100%)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '38px', fontWeight: '800', color: '#fff',
+                      letterSpacing: '-0.02em', userSelect: 'none',
+                    }}>
+                      {profile.username?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Camera button */}
+                <label title="Change photo" style={{
+                  position: 'absolute', bottom: '2px', right: '2px',
+                  width: '30px', height: '30px', borderRadius: '50%',
+                  background: `linear-gradient(135deg, ${colors.purple}, #6D28D9)`,
+                  border: `2px solid #111D35`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: uploading ? 'default' : 'pointer',
+                  boxShadow: '0 2px 10px rgba(139,92,246,0.5)',
+                  fontSize: '13px', lineHeight: 1,
+                  transition: 'transform 0.15s ease',
+                }}>
+                  {uploading ? '…' : '📷'}
+                  <input type="file" accept="image/*" onChange={handleFileSelect}
+                    style={{ display: 'none' }} disabled={uploading} />
+                </label>
+
+                {/* Upload spinner overlay */}
+                {uploading && (
+                  <div style={{
+                    position: 'absolute', inset: 0, borderRadius: '50%',
+                    backgroundColor: 'rgba(0,0,0,0.55)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <div style={{
+                      width: '22px', height: '22px', borderRadius: '50%',
+                      border: `2px solid rgba(255,255,255,0.15)`,
+                      borderTopColor: '#fff',
+                      animation: 'spin 0.7s linear infinite',
+                    }} />
+                  </div>
+                )}
               </div>
-            ))}
-            {/* VULN #100: SSN displayed if present */}
-            {profile.ssn && (
-              <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: colors.redDark, border: `1px solid ${colors.borderDanger}` }}>
-                <div style={{ fontSize: '11px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', marginBottom: '4px' }}>SSN</div>
-                <div style={{ color: colors.red, fontWeight: '600', fontSize: '14px', fontFamily: "'SF Mono', monospace" }}>{profile.ssn}</div>
+
+              {/* Upload hint */}
+              <span style={{ color: colors.textMuted, fontSize: '11px', letterSpacing: '0.02em' }}>
+                Click 📷 to update
+              </span>
+            </div>
+
+            {/* Info column */}
+            <div style={{ flex: 1, minWidth: '220px' }}>
+              {/* Name + badge row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                <h2 style={{ color: colors.textPrimary, fontSize: '22px', fontWeight: '800', margin: 0, letterSpacing: '-0.02em' }}>
+                  {profile.username}
+                </h2>
+                <VerificationBadge level={getAccountLevel()} />
+                {profile.role === 'ADMIN' && (
+                  <span style={{
+                    padding: '2px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: '700',
+                    backgroundColor: 'rgba(255,61,113,0.12)', color: colors.red,
+                    border: '1px solid rgba(255,61,113,0.25)', letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                  }}>Admin</span>
+                )}
               </div>
-            )}
-            {profile.notes && (
-              <div style={{ gridColumn: '1 / -1', padding: '12px 16px', borderRadius: '10px', backgroundColor: colors.purpleDark, border: '1px solid rgba(139,92,246,0.2)' }}>
-                <div style={{ fontSize: '11px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', marginBottom: '4px' }}>Notes</div>
-                <div style={{ color: colors.purpleLight, fontSize: '13px' }}>{profile.notes}</div>
+
+              <div style={{ color: colors.textMuted, fontSize: '13px', marginBottom: '20px' }}>{profile.email}</div>
+
+              {/* Stats row */}
+              <div style={{ display: 'flex', gap: '0', borderRadius: '12px', overflow: 'hidden', border: `1px solid ${colors.borderDefault}` }}>
+                {[
+                  {
+                    label: 'Balance',
+                    value: `$${Number(profile.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                    color: colors.green,
+                  },
+                  {
+                    label: 'Account Level',
+                    value: `Level ${profile.accountLevel || 1}`,
+                    color: isVerified() ? colors.green : colors.amber,
+                  },
+                  {
+                    label: 'User ID',
+                    value: `#${profile.id}`,
+                    color: colors.textSecondary,
+                  },
+                  ...(isVerified() && profile.verifiedAt ? [{
+                    label: 'Verified',
+                    value: new Date(profile.verifiedAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+                    color: colors.green,
+                  }] : []),
+                ].map(({ label, value, color }, i, arr) => (
+                  <div key={label} style={{
+                    flex: 1, padding: '12px 16px',
+                    backgroundColor: colors.bgStat,
+                    borderRight: i < arr.length - 1 ? `1px solid ${colors.borderDefault}` : 'none',
+                  }}>
+                    <div style={{ fontSize: '10px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '600', marginBottom: '4px' }}>{label}</div>
+                    <div style={{ color, fontWeight: '700', fontSize: '14px' }}>{value}</div>
+                  </div>
+                ))}
               </div>
-            )}
+
+              {/* API Key + sensitive fields */}
+              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {profile.apiKey && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '10px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', minWidth: '56px' }}>API Key</span>
+                    <span style={{ color: colors.amber, fontSize: '11px', fontFamily: "'SF Mono', monospace", backgroundColor: colors.bgInput, padding: '3px 8px', borderRadius: '5px', border: `1px solid ${colors.borderDefault}`, wordBreak: 'break-all' }}>{profile.apiKey}</span>
+                  </div>
+                )}
+                {/* VULN #100: SSN displayed if present */}
+                {profile.ssn && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '10px', color: colors.red, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', minWidth: '56px' }}>SSN</span>
+                    <span style={{ color: colors.red, fontSize: '11px', fontFamily: "'SF Mono', monospace", backgroundColor: colors.redDark, padding: '3px 8px', borderRadius: '5px', border: `1px solid ${colors.borderDanger}` }}>{profile.ssn}</span>
+                  </div>
+                )}
+                {profile.notes && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '10px', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '600', minWidth: '56px' }}>Notes</span>
+                    <span style={{ color: colors.purpleLight, fontSize: '12px' }}>{profile.notes}</span>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
+
+        {/* CSS keyframe for spinner */}
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </Card>
 
       {/* ── Account Level Status ── */}
@@ -399,30 +634,6 @@ function AccountPage() {
           </form>
         </Card>
       )}
-
-      {/* ── Photo Upload ── */}
-      <Card title="Photo ID Upload" titleColor={colors.purple}
-        hint="VULN #95: No file type check, no extension check. Try uploading .jsp, .html, or filenames with ../../ path traversal.">
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="file" onChange={(e) => setPhotoFile(e.target.files[0])}
-            style={{
-              color: colors.textSecondary, fontSize: '13px',
-              padding: '8px', backgroundColor: colors.bgInput,
-              border: `1px solid ${colors.borderMedium}`, borderRadius: '8px',
-            }} />
-          <Button variant="purple" onClick={handlePhotoUpload} disabled={uploading || !photoFile}>
-            {uploading ? 'Uploading...' : 'Upload Photo'}
-          </Button>
-        </div>
-        {photoPreview && (
-          <div style={{ marginTop: '12px' }}>
-            <img src={photoPreview} alt="Profile" style={{
-              maxWidth: '200px', maxHeight: '200px', borderRadius: '10px',
-              border: `1px solid ${colors.borderMedium}`,
-            }} onError={(e) => { e.target.style.display = 'none'; }} />
-          </div>
-        )}
-      </Card>
 
       {/* Change Password - VULN: no old password required */}
       <Card title="Change Password" hint="⚠️ No old password verification required">
@@ -578,6 +789,97 @@ function AccountPage() {
         <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px' }}>
           <Button variant="green" onClick={handleFake2FA}>Verify & Proceed</Button>
           <Button variant="gray" onClick={close2FA}>Cancel</Button>
+        </div>
+      </Modal>
+
+      {/* ── Photo Crop Modal ── */}
+      <Modal open={showCropModal} onClose={() => setShowCropModal(false)}>
+        <h3 style={{ color: colors.textPrimary, fontSize: '18px', fontWeight: '700', textAlign: 'center', marginBottom: '6px' }}>
+          Adjust Profile Photo
+        </h3>
+        <p style={{ color: colors.textMuted, fontSize: '13px', textAlign: 'center', marginBottom: '20px' }}>
+          Drag to reposition &nbsp;·&nbsp; Slide to zoom
+        </p>
+
+        {/* Circle crop viewport */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+          <div
+            onMouseDown={handleCropMouseDown}
+            onMouseMove={handleCropMouseMove}
+            onMouseUp={handleCropMouseUp}
+            onMouseLeave={handleCropMouseUp}
+            onTouchStart={handleCropTouchStart}
+            onTouchMove={handleCropTouchMove}
+            onTouchEnd={handleCropMouseUp}
+            onWheel={(e) => {
+              e.preventDefault();
+              setCropZoom(z => Math.min(4, Math.max(0.2, z - e.deltaY * 0.001)));
+            }}
+            style={{
+              width: `${CROP_SIZE}px`,
+              height: `${CROP_SIZE}px`,
+              borderRadius: '50%',
+              overflow: 'hidden',
+              position: 'relative',
+              cursor: isDragging ? 'grabbing' : 'grab',
+              border: `3px solid ${colors.purple}`,
+              boxShadow: `0 0 0 5px rgba(139,92,246,0.15), 0 8px 32px rgba(0,0,0,0.4)`,
+              userSelect: 'none',
+              backgroundColor: colors.bgInput,
+              flexShrink: 0,
+            }}
+          >
+            {cropImageSrc && (() => {
+              const baseScale = Math.max(CROP_SIZE / naturalSize.w, CROP_SIZE / naturalSize.h);
+              const totalScale = baseScale * cropZoom;
+              const displayW = naturalSize.w * totalScale;
+              const displayH = naturalSize.h * totalScale;
+              const left = (CROP_SIZE - displayW) / 2 + cropOffset.x;
+              const top = (CROP_SIZE - displayH) / 2 + cropOffset.y;
+              return (
+                <img
+                  src={cropImageSrc}
+                  alt="Crop preview"
+                  draggable={false}
+                  style={{
+                    position: 'absolute',
+                    width: `${displayW}px`,
+                    height: `${displayH}px`,
+                    left: `${left}px`,
+                    top: `${top}px`,
+                    pointerEvents: 'none',
+                    userSelect: 'none',
+                  }}
+                />
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* Zoom slider */}
+        <div style={{ padding: '0 24px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '16px' }}>🔍</span>
+            <input
+              type="range"
+              min="0.2"
+              max="4"
+              step="0.01"
+              value={cropZoom}
+              onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+              style={{ flex: 1, accentColor: colors.purple, cursor: 'pointer' }}
+            />
+            <span style={{ color: colors.textMuted, fontSize: '12px', minWidth: '42px', textAlign: 'right' }}>
+              {Math.round(cropZoom * 100)}%
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+          <Button variant="purple" onClick={handleApplyCrop} disabled={uploading}>
+            {uploading ? 'Uploading…' : 'Apply & Set as Photo'}
+          </Button>
+          <Button variant="gray" onClick={() => setShowCropModal(false)}>Cancel</Button>
         </div>
       </Modal>
     </PageLayout>
