@@ -40,6 +40,10 @@ export function AuthProvider({ children }) {
         // Merge JWT claims into user state (VULN: PII from JWT in React state)
         const jwtClaims = decodeJWT(storedToken);
         const merged = { ...userData, ...jwtClaims };
+        // Restore photoUrl from profilePic if the explicit photoUrl wasn't persisted
+        if (!merged.photoUrl && merged.profilePic) {
+          merged.photoUrl = merged.profilePic;
+        }
         setToken(storedToken);
         setUser(merged);
         setIsAuthenticated(true);
@@ -109,6 +113,10 @@ export function AuthProvider({ children }) {
       if (!userId) return;
       const res = await api.get(`/api/users/${userId}`);
       const updated = { ...user, ...res.data };
+      // Propagate profilePic from DB into photoUrl so the nav avatar stays in sync
+      if (res.data.profilePic && !updated.photoUrl) {
+        updated.photoUrl = res.data.profilePic;
+      }
       setUser(updated);
       localStorage.setItem('user', JSON.stringify(updated));
     } catch (e) {
@@ -142,10 +150,12 @@ export function AuthProvider({ children }) {
   const getAccountLevel = () => user?.accountLevel || 1;
   const isVerified = () => (user?.accountLevel || 1) >= 2;
 
-  // Update the user's photo URL in state and localStorage so nav reflects immediately
+  // Update the user's photo URL in state and localStorage so nav reflects immediately.
+  // photoUrl carries a cache-bust timestamp; profilePic is the stable base URL for other features.
   const updatePhoto = (userId) => {
-    const photoUrl = `/api/users/${userId}/photo?t=${Date.now()}`;
-    const updated = { ...user, photoUrl };
+    const baseUrl = `/api/users/${userId}/photo`;
+    const photoUrl = `${baseUrl}?t=${Date.now()}`;
+    const updated = { ...user, photoUrl, profilePic: baseUrl };
     setUser(updated);
     localStorage.setItem('user', JSON.stringify(updated));
   };

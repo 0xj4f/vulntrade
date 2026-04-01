@@ -93,6 +93,7 @@ services:
     # VULN: no resource limits
     volumes:
       - ./flags:/opt/flags:ro   # Flag 5 for RCE challenge
+      - uploads:/uploads/photos  # VULN #95: photo uploads - no type restrictions
 
   # ============================================================
   # Frontend - React + nginx
@@ -111,6 +112,7 @@ services:
 
 volumes:
   pgdata:
+  uploads:
 
 networks:
   vulntrade-net:

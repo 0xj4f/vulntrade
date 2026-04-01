@@ -48,6 +48,10 @@ function NavItem({ to, label, danger = false }) {
 function AppContent() {
   const { isAuthenticated, user, logout, isAdmin, getAccountLevel } = useAuth();
   const verified = getAccountLevel() >= 2;
+  const [navAvatarError, setNavAvatarError] = useState(false);
+
+  // Reset error flag whenever the photo URL changes (new upload)
+  useEffect(() => { setNavAvatarError(false); }, [user?.photoUrl]);
   const wsConnectedRef = useRef(false);
 
   // Connect WebSocket at app level so it persists across page navigations
@@ -126,10 +130,11 @@ function AppContent() {
               border: '1px solid #1E2D45',
             }}>
               <div style={{ position: 'relative' }}>
-                {user?.photoUrl ? (
+                {user?.photoUrl && !navAvatarError ? (
                   <img
                     src={user.photoUrl}
-                    alt={user.username}
+                    alt=""
+                    onError={() => setNavAvatarError(true)}
                     style={{
                       width: '28px', height: '28px', borderRadius: '50%',
                       objectFit: 'cover', display: 'block',
@@ -143,6 +148,7 @@ function AppContent() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: '12px', fontWeight: '700', color: '#fff',
                     border: verified ? `2px solid ${colors.green}` : '2px solid transparent',
+                    flexShrink: 0,
                   }}>
                     {user?.username?.charAt(0)?.toUpperCase() || '?'}
                   </div>

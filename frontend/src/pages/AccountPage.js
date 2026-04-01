@@ -91,9 +91,11 @@ function AccountPage() {
             zipCode: res.data.zipCode || '',
             country: res.data.country || '',
           }));
-          // Set photo preview — prefer cached URL from auth context (has cache-bust ts)
+          // Set photo preview: auth context url (has cache-bust ts) → profilePic from DB → fallback
           if (user.photoUrl) {
             setPhotoPreview(user.photoUrl);
+          } else if (res.data.profilePic) {
+            setPhotoPreview(res.data.profilePic);
           } else if (res.data.photoPath) {
             setPhotoPreview(`/api/users/${user.userId}/photo`);
           }
@@ -237,18 +239,19 @@ function AccountPage() {
   };
 
   const handleApplyCrop = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = CROP_SIZE;
-    canvas.height = CROP_SIZE;
-    const ctx = canvas.getContext('2d');
+    if (!cropImageSrc) return;
 
-    ctx.beginPath();
-    ctx.arc(CROP_SIZE / 2, CROP_SIZE / 2, CROP_SIZE / 2, 0, Math.PI * 2);
-    ctx.clip();
+    const drawAndUpload = (img) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = CROP_SIZE;
+      canvas.height = CROP_SIZE;
+      const ctx = canvas.getContext('2d');
 
-    const img = new Image();
-    img.src = cropImageSrc;
-    const doExport = () => {
+      // Clip to circle
+      ctx.beginPath();
+      ctx.arc(CROP_SIZE / 2, CROP_SIZE / 2, CROP_SIZE / 2, 0, Math.PI * 2);
+      ctx.clip();
+
       const baseScale = Math.max(CROP_SIZE / img.naturalWidth, CROP_SIZE / img.naturalHeight);
       const totalScale = baseScale * cropZoom;
       const drawW = img.naturalWidth * totalScale;
@@ -258,21 +261,21 @@ function AccountPage() {
       ctx.drawImage(img, drawX, drawY, drawW, drawH);
 
       canvas.toBlob(async (blob) => {
+        if (!blob) { toast.error('Could not process image'); return; }
         setShowCropModal(false);
         setUploading(true);
         try {
           const formData = new FormData();
           formData.append('file', blob, 'profile.jpg');
-          await api.post(`/api/users/${user.userId}/photo`, formData, {
+          const res = await api.post(`/api/users/${user.userId}/photo`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
           });
-          const ts = Date.now();
-          const newUrl = `/api/users/${user.userId}/photo?t=${ts}`;
-          toast.success('Profile photo updated!');
+          // Add cache-busting timestamp so the browser re-fetches the new file
+          const baseUrl = res.data.photoUrl || `/api/users/${user.userId}/photo`;
+          const newUrl = `${baseUrl}?t=${Date.now()}`;
           setPhotoPreview(newUrl);
           updatePhoto(user.userId);
-          const profileRes = await api.get(`/api/users/${user.userId}`);
-          setProfile(profileRes.data);
+          toast.success('Profile photo updated!');
         } catch (err) {
           toast.error(err.response?.data?.error || 'Upload failed');
         } finally {
@@ -281,8 +284,15 @@ function AccountPage() {
       }, 'image/jpeg', 0.92);
     };
 
-    if (img.complete) doExport();
-    else img.onload = doExport;
+    const img = new Image();
+    img.onload = () => drawAndUpload(img);
+    img.onerror = () => toast.error('Failed to read image');
+    img.src = cropImageSrc;
+    // data URLs are often already decoded; if so, fire immediately
+    if (img.complete && img.naturalWidth > 0) {
+      img.onload = null;
+      drawAndUpload(img);
+    }
   };
 
   const profileFields = ['firstName', 'lastName', 'dateOfBirth', 'phoneNumber', 'ssn'];
@@ -374,9 +384,9 @@ function AccountPage() {
                     : `0 8px 32px rgba(0,0,0,0.5)`,
                 }}>
                   {photoPreview ? (
-                    <img src={photoPreview} alt="Profile"
+                    <img src={photoPreview} alt=""
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                      onError={(e) => { e.target.style.display = 'none'; }} />
+                      onError={() => setPhotoPreview(null)} />
                   ) : (
                     <div style={{
                       width: '100%', height: '100%',

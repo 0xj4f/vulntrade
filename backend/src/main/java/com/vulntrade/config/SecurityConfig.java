@@ -4,6 +4,7 @@ import com.vulntrade.security.ApiKeyAuthFilter;
 import com.vulntrade.security.JwtAuthFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -67,6 +68,8 @@ public class SecurityConfig {
                 .antMatchers("/api/export/**").authenticated()
                 // Account operations require auth
                 .antMatchers("/api/accounts/**").authenticated()
+                // Profile photos are public so <img> tags load without JWT headers
+                .antMatchers(HttpMethod.GET, "/api/users/*/photo").permitAll()
                 // User endpoints require auth (but IDOR exists)
                 .antMatchers("/api/users/**").authenticated()
                 // Everything else requires auth

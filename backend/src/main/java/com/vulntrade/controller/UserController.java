@@ -251,30 +251,33 @@ public class UserController {
 
         try {
             // VULN #95: No MIME type check, no extension check
-            // VULN #95: Original filename used directly - path traversal possible
-            String originalFilename = file.getOriginalFilename();
             String uploadDir = "/uploads/photos/";
 
             // Create directory if it doesn't exist
             File dir = new File(uploadDir);
             dir.mkdirs();
 
-            // VULN #95: Filename NOT sanitized - ../../etc/cron.d/evil works
-            String filePath = uploadDir + originalFilename;
+            // Use a per-user filename so uploads don't collide across accounts.
+            // VULN #95: Still no extension/content-type validation — any file type accepted.
+            String filename = "user_" + userId + ".jpg";
+            String filePath = uploadDir + filename;
             File destFile = new File(filePath);
             file.transferTo(destFile);
 
+            // Public URL that <img> tags and future features (chat, leaderboard) can use
+            String publicUrl = "/api/users/" + userId + "/photo";
+
             User user = userOpt.get();
-            user.setPhotoPath(filePath);                  // VULN: full filesystem path stored
-            user.setPhotoFilename(originalFilename);       // VULN: original filename preserved
+            user.setPhotoPath(filePath);        // filesystem path used by GET /photo endpoint
+            user.setPhotoFilename(filename);
+            user.setProfilePic(publicUrl);      // persisted public URL — used by leaderboard/chat
             userRepository.save(user);
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("message", "Photo uploaded successfully");
-            response.put("photoPath", filePath);           // VULN: server path leaked in response
-            response.put("originalFilename", originalFilename);
+            response.put("photoUrl", publicUrl);
             response.put("size", file.getSize());
-            response.put("contentType", file.getContentType());  // Reports whatever browser sent
+            response.put("contentType", file.getContentType());
             response.put("userId", userId);
 
             return ResponseEntity.ok(response);
