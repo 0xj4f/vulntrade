@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
+import { subscribe, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 import PageLayout from '../components/PageLayout';
@@ -27,6 +28,8 @@ function PortfolioPage() {
   const [lookupUserId, setLookupUserId] = useState('');
   const [currentPrices, setCurrentPrices] = useState({});
   const [totalPnL, setTotalPnL] = useState(0);
+  const pricesRef = useRef({});
+  const pricesDirtyRef = useRef(false);
 
   useEffect(() => {
     // Fetch current prices for P&L calculation
@@ -34,6 +37,7 @@ function PortfolioPage() {
       .then(res => {
         const priceMap = {};
         res.data.forEach(p => { priceMap[p.symbol] = p.currentPrice; });
+        pricesRef.current = priceMap;
         setCurrentPrices(priceMap);
       })
       .catch(err => console.error('Failed to fetch prices:', err));
@@ -80,6 +84,35 @@ function PortfolioPage() {
       setTotalPnL(total);
     }
   }, [positions, currentPrices]);
+
+  // Live price updates via WebSocket — only writes to ref, dirty flag throttles React updates
+  useEffect(() => {
+    const setupPriceSub = () => {
+      if (!isConnected()) return false;
+      subscribe('/topic/prices', (update) => {
+        if (update.symbol && update.last) {
+          pricesRef.current[update.symbol] = Number(update.last);
+          pricesDirtyRef.current = true;
+        }
+      });
+      return true;
+    };
+    if (!setupPriceSub()) {
+      const iv = setInterval(() => { if (setupPriceSub()) clearInterval(iv); }, 500);
+      return () => clearInterval(iv);
+    }
+  }, []);
+
+  // Flush price ref to state at most every 100 ms
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (pricesDirtyRef.current) {
+        pricesDirtyRef.current = false;
+        setCurrentPrices({ ...pricesRef.current });
+      }
+    }, 100);
+    return () => clearInterval(iv);
+  }, []);
 
   const handleLookupPortfolio = (e) => {
     e.preventDefault();

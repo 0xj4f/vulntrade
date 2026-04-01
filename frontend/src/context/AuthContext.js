@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/apiService';
 
 /**
@@ -27,6 +27,7 @@ function decodeJWT(token) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
+  const userIdRef = useRef(null); // stable ref so refreshUser doesn't close over user
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -67,6 +68,8 @@ export function AuthProvider({ children }) {
     // Decode JWT and merge claims into user state (VULN: PII exposed in React state)
     const jwtClaims = decodeJWT(data.token);
     const merged = { ...data, ...jwtClaims };
+    // Restore photo URL so nav avatar reflects existing profile pic after login
+    if (!merged.photoUrl && merged.profilePic) merged.photoUrl = merged.profilePic;
 
     setToken(data.token);
     setUser(merged);
@@ -106,23 +109,31 @@ export function AuthProvider({ children }) {
     return user?.role === 'ADMIN';
   };
 
-  // Refresh user data (e.g. balance) from backend
-  const refreshUser = async () => {
+  // Keep userIdRef in sync so refreshUser never closes over a stale user object
+  useEffect(() => { userIdRef.current = user?.userId || user?.id; }, [user?.userId, user?.id]);
+
+  // Refresh user data (e.g. balance) from backend.
+  // Uses userIdRef + functional setUser so it never clobbers concurrent updates
+  // (e.g. updatePhoto setting photoUrl while a balance refresh is in-flight).
+  const refreshUser = useCallback(async () => {
+    const userId = userIdRef.current;
+    if (!userId) return;
     try {
-      const userId = user?.userId || user?.id;
-      if (!userId) return;
       const res = await api.get(`/api/users/${userId}`);
-      const updated = { ...user, ...res.data };
-      // Propagate profilePic from DB into photoUrl so the nav avatar stays in sync
-      if (res.data.profilePic && !updated.photoUrl) {
-        updated.photoUrl = res.data.profilePic;
-      }
-      setUser(updated);
-      localStorage.setItem('user', JSON.stringify(updated));
+      setUser(prev => {
+        if (!prev) return prev;
+        const updated = { ...prev, ...res.data };
+        // Propagate profilePic → photoUrl only if photoUrl isn't already set
+        if (res.data.profilePic && !updated.photoUrl) {
+          updated.photoUrl = res.data.profilePic;
+        }
+        localStorage.setItem('user', JSON.stringify(updated));
+        return updated;
+      });
     } catch (e) {
       console.error('Failed to refresh user:', e);
     }
-  };
+  }, []); // stable — reads userId via ref, writes via functional setUser
 
   // Refresh JWT token from server (gets new token with current DB state)
   // Used after profile update triggers account level change
@@ -136,6 +147,7 @@ export function AuthProvider({ children }) {
 
       const jwtClaims = decodeJWT(data.token);
       const merged = { ...data, ...jwtClaims };
+      if (!merged.photoUrl && merged.profilePic) merged.photoUrl = merged.profilePic;
 
       setToken(data.token);
       setUser(merged);
@@ -151,14 +163,17 @@ export function AuthProvider({ children }) {
   const isVerified = () => (user?.accountLevel || 1) >= 2;
 
   // Update the user's photo URL in state and localStorage so nav reflects immediately.
-  // photoUrl carries a cache-bust timestamp; profilePic is the stable base URL for other features.
-  const updatePhoto = (userId) => {
-    const baseUrl = `/api/users/${userId}/photo`;
-    const photoUrl = `${baseUrl}?t=${Date.now()}`;
-    const updated = { ...user, photoUrl, profilePic: baseUrl };
-    setUser(updated);
-    localStorage.setItem('user', JSON.stringify(updated));
-  };
+  // Accepts the exact URL to use (caller generates it once so nav and page share the same URL).
+  // Uses functional setUser to avoid stale closure issues.
+  const updatePhoto = useCallback((photoUrl) => {
+    const profilePic = photoUrl.split('?')[0]; // stable base URL without cache-bust param
+    setUser(prevUser => {
+      if (!prevUser) return prevUser;
+      const updated = { ...prevUser, photoUrl, profilePic };
+      localStorage.setItem('user', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
   const value = {
     user,

@@ -40,6 +40,10 @@ function DashboardPage() {
   const pricesRef = useRef({});
   const priceHistoryRef = useRef({}); // { symbol: [price1, price2, ...] } for sparklines
   const [priceHistory, setPriceHistory] = useState({}); // triggers re-render for sparklines
+  const pricesDirtyRef = useRef(false); // true when refs have unflushed updates
+  // Stable refs so WS callbacks always call the latest version without re-subscribing
+  const refreshAllRef = useRef(null);
+  const refreshAfterOrderRef = useRef(null);
 
   // ── Fetchers (unchanged) ─────────────────────────────
   const fetchPositions = useCallback(() => {
@@ -95,19 +99,16 @@ function DashboardPage() {
       : Number(d.bid || d.currentPrice);
   };
 
-  // ── Keep MARKET order price in sync with live prices ──
+  // Keep callback refs up-to-date so WS handlers always call the latest version
+  useEffect(() => { refreshAllRef.current = refreshAll; }, [refreshAll]);
+  useEffect(() => { refreshAfterOrderRef.current = refreshAfterOrder; }, [refreshAfterOrder]);
+
+  // ── Sync MARKET order price when symbol/side/type changes (not on every tick) ──
   useEffect(() => {
     if (orderForm.type !== 'MARKET') return;
-    const livePrice = getSymbolPrice(orderForm.symbol, orderForm.side);
-    if (livePrice && livePrice.toFixed(2) !== orderForm.price) {
-      setOrderForm(prev => {
-        if (prev.type !== 'MARKET') return prev;
-        const p = getSymbolPrice(prev.symbol, prev.side);
-        if (!p) return prev;
-        return { ...prev, price: p.toFixed(2) };
-      });
-    }
-  }, [prices, orderForm.type, orderForm.symbol, orderForm.side]);
+    const p = getSymbolPrice(orderForm.symbol, orderForm.side);
+    if (p) setOrderForm(prev => prev.type === 'MARKET' ? { ...prev, price: p.toFixed(2) } : prev);
+  }, [orderForm.type, orderForm.symbol, orderForm.side]); // intentionally excludes prices
 
   // ── WS setup (unchanged logic) ──────────────────────
   useEffect(() => {
@@ -142,15 +143,15 @@ function DashboardPage() {
             costBasis: priceUpdate.costBasis,
             spreadBps: priceUpdate.spreadBps,
           };
-          setPrices(Object.values(pricesRef.current));
           // Accumulate for sparklines (last 30 ticks per symbol)
           const sym = priceUpdate.symbol;
           const last = Number(priceUpdate.last || priceUpdate.bid || 0);
           if (last > 0) {
             const prev = priceHistoryRef.current[sym] || [];
             priceHistoryRef.current[sym] = [...prev.slice(-29), last];
-            setPriceHistory({ ...priceHistoryRef.current });
           }
+          // Mark dirty — the ticker below flushes to state at most every 100 ms
+          pricesDirtyRef.current = true;
         }
       });
 
@@ -174,7 +175,7 @@ function DashboardPage() {
       subscribe('/topic/trades', (trade) => {
         setRecentTrades(prev => [trade, ...prev].slice(0, 20));
         // A trade happened — refresh positions in case we're involved
-        setTimeout(refreshAll, 300);
+        setTimeout(() => refreshAllRef.current?.(), 300);
       });
 
       subscribe('/user/queue/orders', (order) => {
@@ -190,7 +191,7 @@ function DashboardPage() {
         } else {
           toast.info(`Order ${status}: #${order.orderId || order.id || '?'}`);
         }
-        refreshAfterOrder();
+        refreshAfterOrderRef.current?.();
       });
 
       subscribe('/topic/admin/alerts', (alert) => {
@@ -214,9 +215,28 @@ function DashboardPage() {
       }, 500);
       return () => clearInterval(interval);
     }
-  }, [fetchPositions, fetchOrders, refreshBalance, refreshAll, refreshAfterOrder]);
+  }, []); // runs once — callbacks accessed via refs to avoid re-subscribing
 
   useEffect(() => { fetchPositions(); fetchOrders(); }, [fetchPositions, fetchOrders]);
+
+  // Flush price refs to state at most every 100 ms — prevents per-message re-renders
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (pricesDirtyRef.current) {
+        pricesDirtyRef.current = false;
+        setPrices(Object.values(pricesRef.current));
+        setPriceHistory({ ...priceHistoryRef.current });
+      }
+    }, 100);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Keep balance fresh — poll every 30 s so deposits/withdrawals from other pages are reflected
+  useEffect(() => {
+    refreshBalance();
+    const iv = setInterval(refreshBalance, 30000);
+    return () => clearInterval(iv);
+  }, [refreshBalance]);
 
   // ── Actions ──────────────────────────────────────────
   const cancelOrder = (orderId) => {

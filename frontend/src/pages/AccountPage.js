@@ -251,7 +251,7 @@ function AccountPage() {
           const baseUrl = res.data.photoUrl || `/api/users/${user.userId}/photo`;
           const newUrl = `${baseUrl}?t=${Date.now()}`;
           setPhotoPreview(newUrl);
-          updatePhoto(user.userId);
+          updatePhoto(newUrl);
           toast.success('Profile photo updated!');
         } catch (err) {
           toast.error(err.response?.data?.error || 'Upload failed');
