@@ -19,6 +19,7 @@ import {
   colors, selectStyle, flexRowWrap, gridCols,
   orderErrorBanner, orderStatusBanner,
 } from '../styles/shared';
+import { fmtUSD, fmtBalance, fmtPrice, fmtPnL, fmtPct, fmtQty, fmtNum, fmtDate, pnlColor, sideColor } from '../utils/format';
 
 function DashboardPage() {
   const { user, refreshUser, getAccountLevel } = useAuth();
@@ -299,7 +300,7 @@ function DashboardPage() {
       {/* ── Account Summary ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
         <StatCard label="Balance" valueColor={colors.green} valueSize="22px"
-          value={`$${user?.balance ? Number(user.balance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}`} />
+          value={fmtBalance(user?.balance)} />
         <StatCard label="Username" valueSize="18px"
           value={<span>{user?.username || '—'} <VerificationBadge level={getAccountLevel()} size="small" /></span>} />
         <StatCard label="Role" valueSize="18px"
@@ -333,16 +334,16 @@ function DashboardPage() {
                 dangerouslySetInnerHTML={{ __html: p.name || '' }} />
             )},
             { key: 'price', label: 'Price', align: 'right', render: p => (
-              <span style={{ color: colors.green, fontWeight: '600', fontSize: '14px' }}>${Number(p.currentPrice).toFixed(2)}</span>
+              <span style={{ color: colors.green, fontWeight: '600', fontSize: '14px' }}>{fmtPrice(p.currentPrice)}</span>
             )},
             { key: 'bid', label: 'Bid', align: 'right', render: p => (
-              <span style={{ color: colors.textSecondary, fontSize: '13px' }}>{p.bid ? `$${Number(p.bid).toFixed(2)}` : '—'}</span>
+              <span style={{ color: colors.textSecondary, fontSize: '13px' }}>{p.bid ? fmtPrice(p.bid) : '—'}</span>
             )},
             { key: 'ask', label: 'Ask', align: 'right', render: p => (
-              <span style={{ color: colors.textSecondary, fontSize: '13px' }}>{p.ask ? `$${Number(p.ask).toFixed(2)}` : '—'}</span>
+              <span style={{ color: colors.textSecondary, fontSize: '13px' }}>{p.ask ? fmtPrice(p.ask) : '—'}</span>
             )},
             { key: 'volume', label: 'Volume', align: 'right', render: p => (
-              <span style={{ color: colors.textMuted, fontSize: '13px' }}>{p.volume ? Number(p.volume).toLocaleString() : '—'}</span>
+              <span style={{ color: colors.textMuted, fontSize: '13px' }}>{p.volume ? fmtNum(p.volume) : '—'}</span>
             )},
             { key: 'spark', label: 'Trend', align: 'center', render: p => (
               <SparkLine data={priceHistory[p.symbol] || []} width={72} height={24} />
@@ -350,7 +351,7 @@ function DashboardPage() {
             { key: 'internal', label: 'Internal', align: 'right', render: p => (
               <span style={{ color: colors.textDim, fontSize: '10px', fontFamily: "'SF Mono', monospace" }}>
                 {p.marketMakerId && `MM:${p.marketMakerId}`}
-                {p.costBasis && ` CB:$${Number(p.costBasis).toFixed(2)}`}
+                {p.costBasis && ` CB:${fmtPrice(p.costBasis)}`}
               </span>
             )},
           ]}
@@ -511,7 +512,7 @@ function DashboardPage() {
           <div style={orderStatusBanner(orderStatus.status === 'FILLED')}>
             <strong>Last Order:</strong> {orderStatus.type || orderStatus.status} — ID: #{orderStatus.orderId || orderStatus.id || '?'}
             {orderStatus.filledQty && ` — Filled: ${orderStatus.filledQty}`}
-            {orderStatus.filledPrice && ` @ $${Number(orderStatus.filledPrice).toFixed(2)}`}
+            {orderStatus.filledPrice && ` @ ${fmtPrice(orderStatus.filledPrice)}`}
           </div>
         )}
       </Card>
@@ -530,42 +531,32 @@ function DashboardPage() {
             { key: 'symbol', label: 'Symbol', render: pos => (
               <span style={{ fontWeight: 'bold', color: colors.textPrimary, fontSize: '14px' }}>{pos.symbol}</span>
             )},
-            { key: 'quantity', label: 'Quantity', align: 'right', render: pos =>
-              Number(pos.quantity || 0).toLocaleString(undefined, { maximumFractionDigits: 8 })
-            },
+            { key: 'quantity', label: 'Quantity', align: 'right', render: pos => fmtQty(pos.quantity) },
             { key: 'avgPrice', label: 'Avg Cost', align: 'right', render: pos => (
-              <span style={{ color: colors.textSecondary }}>${Number(pos.avgPrice || pos.avg_price || 0).toFixed(2)}</span>
+              <span style={{ color: colors.textSecondary }}>{fmtPrice(pos.avgPrice || pos.avg_price)}</span>
             )},
             { key: 'current', label: 'Current', align: 'right', render: pos => {
               const avg = Number(pos.avgPrice || pos.avg_price || 0);
-              return `$${(getCurrentPrice(pos.symbol) || avg).toFixed(2)}`;
+              return fmtPrice(getCurrentPrice(pos.symbol) || avg);
             }},
             { key: 'mktValue', label: 'Mkt Value', align: 'right', render: pos => {
               const qty = Number(pos.quantity || 0);
               const avg = Number(pos.avgPrice || pos.avg_price || 0);
               const cur = getCurrentPrice(pos.symbol) || avg;
-              return `$${(cur * qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              return fmtUSD(cur * qty);
             }},
             { key: 'pnl', label: 'P&L ($)', align: 'right', render: pos => {
               const qty = Number(pos.quantity || 0);
               const avg = Number(pos.avgPrice || pos.avg_price || 0);
               const cur = getCurrentPrice(pos.symbol) || avg;
               const pnl = (cur - avg) * qty;
-              return (
-                <span style={{ fontWeight: 'bold', color: pnl >= 0 ? colors.green : colors.red }}>
-                  {pnl >= 0 ? '+' : ''}{pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                </span>
-              );
+              return <span style={{ fontWeight: 'bold', color: pnlColor(pnl) }}>{fmtPnL(pnl)}</span>;
             }},
             { key: 'pnlPct', label: 'P&L (%)', align: 'right', render: pos => {
               const avg = Number(pos.avgPrice || pos.avg_price || 0);
               const cur = getCurrentPrice(pos.symbol) || avg;
               const pct = avg > 0 ? ((cur - avg) / avg * 100) : 0;
-              return (
-                <span style={{ color: pct >= 0 ? colors.green : colors.red }}>
-                  {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                </span>
-              );
+              return <span style={{ color: pnlColor(pct) }}>{fmtPct(pct)}</span>;
             }},
             { key: 'actions', label: 'Actions', align: 'center', render: pos => (
               <Button variant="red" size="small"
@@ -598,7 +589,7 @@ function DashboardPage() {
             </div>
             <div>
               <div style={{ color: colors.textMuted, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Market Bid</div>
-              <div style={{ color: colors.green, fontWeight: '600' }}>${sellModal.price.toFixed(2)}</div>
+              <div style={{ color: colors.green, fontWeight: '600' }}>{fmtPrice(sellModal.price)}</div>
             </div>
           </div>
           <div style={{ marginBottom: '16px', textAlign: 'left' }}>
@@ -621,7 +612,7 @@ function DashboardPage() {
             />
           </div>
           <StatCard label="Estimated Proceeds" valueColor={colors.green} valueSize="20px"
-            value={`$${(Number(sellModal.sellQty || 0) * sellModal.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            value={fmtUSD(Number(sellModal.sellQty || 0) * sellModal.price)}
             style={{ marginBottom: '20px' }} />
           <div style={{ display: 'flex', gap: '12px' }}>
             <button onClick={executeSell} style={{
@@ -655,21 +646,19 @@ function DashboardPage() {
           columns={[
             { key: 'id', label: 'ID', render: o => <span style={{ color: colors.textSecondary }}>#{o.id}</span> },
             { key: 'symbol', label: 'Symbol', render: o => <span style={{ color: colors.textPrimary, fontWeight: 'bold' }}>{o.symbol}</span> },
-            { key: 'side', label: 'Side', render: o => <span style={{ fontWeight: 'bold', color: o.side === 'BUY' ? colors.green : colors.red }}>{o.side}</span> },
+            { key: 'side', label: 'Side', render: o => <span style={{ fontWeight: 'bold', color: sideColor(o.side) }}>{o.side}</span> },
             { key: 'type', label: 'Type', render: o => <span style={{ color: colors.textSecondary }}>{o.orderType || o.type}</span> },
-            { key: 'quantity', label: 'Qty', align: 'right', render: o => Number(o.quantity || 0).toLocaleString() },
-            { key: 'price', label: 'Price', align: 'right', render: o => `$${Number(o.price || 0).toFixed(2)}` },
+            { key: 'quantity', label: 'Qty', align: 'right', render: o => fmtNum(o.quantity) },
+            { key: 'price', label: 'Price', align: 'right', render: o => fmtPrice(o.price) },
             { key: 'filled', label: 'Filled', align: 'right', render: o => (
               <span style={{ color: colors.textSecondary }}>
-                {Number(o.filledQty || 0).toLocaleString()}
-                {o.filledPrice ? ` @ $${Number(o.filledPrice).toFixed(2)}` : ''}
+                {fmtNum(o.filledQty)}
+                {o.filledPrice ? ` @ ${fmtPrice(o.filledPrice)}` : ''}
               </span>
             )},
             { key: 'status', label: 'Status', render: o => <StatusBadge status={o.status} /> },
             { key: 'time', label: 'Time', render: o => (
-              <span style={{ color: colors.textMuted, fontSize: '11px' }}>
-                {o.createdAt ? new Date(o.createdAt).toLocaleString() : '—'}
-              </span>
+              <span style={{ color: colors.textMuted, fontSize: '11px' }}>{fmtDate(o.createdAt)}</span>
             )},
           ]}
           data={myOrders.slice().sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 30)}
@@ -692,7 +681,7 @@ function DashboardPage() {
               columns={[
                 { key: 'orderId', label: 'Order ID', render: r => <span style={{ color: colors.textSecondary }}>#{r.orderId}</span> },
                 { key: 'price', label: 'Price', align: 'right', render: r => (
-                  <span style={{ color }}>{r.price != null ? `$${Number(r.price).toFixed(2)}` : 'MKT'}</span>
+                  <span style={{ color }}>{r.price != null ? fmtPrice(r.price) : 'MKT'}</span>
                 )},
                 { key: 'quantity', label: 'Qty', align: 'right' },
                 { key: 'user', label: 'User', render: r => (
@@ -721,7 +710,7 @@ function DashboardPage() {
               { key: 'tradeId', label: 'Trade ID', render: t => <span style={{ color: colors.textMuted, fontSize: '12px', fontFamily: "'SF Mono', monospace" }}>{t.tradeId}</span> },
               { key: 'symbol', label: 'Symbol', render: t => <span style={{ color: colors.textPrimary, fontSize: '13px', fontWeight: '600' }}>{t.symbol}</span> },
               { key: 'quantity', label: 'Qty', align: 'right', render: t => <span style={{ fontSize: '13px' }}>{t.quantity}</span> },
-              { key: 'price', label: 'Price', align: 'right', render: t => <span style={{ color: colors.green, fontSize: '13px', fontWeight: '500' }}>${Number(t.price).toFixed(2)}</span> },
+              { key: 'price', label: 'Price', align: 'right', render: t => <span style={{ color: colors.green, fontSize: '13px', fontWeight: '500' }}>{fmtPrice(t.price)}</span> },
               { key: 'buyer', label: 'Buyer', align: 'right', render: t => <span style={{ color: colors.textMuted, fontSize: '12px' }}>User#{t.buyUserId}</span> },
               { key: 'seller', label: 'Seller', align: 'right', render: t => <span style={{ color: colors.textMuted, fontSize: '12px' }}>User#{t.sellUserId}</span> },
             ]}
