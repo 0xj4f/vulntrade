@@ -12,6 +12,7 @@ import StatCard from '../components/StatCard';
 import DataTable from '../components/DataTable';
 import { colors, gridCols, flexRow, debugBanner } from '../styles/shared';
 import { fmtPrice, fmtUSD, fmtBalance, fmtPnL, fmtPct, fmtNum, fmtDate, pnlColor } from '../utils/format';
+import { useDebug } from '../context/DebugContext';
 
 /**
  * PHASE 6 VULNS:
@@ -22,6 +23,7 @@ import { fmtPrice, fmtUSD, fmtBalance, fmtPnL, fmtPct, fmtNum, fmtDate, pnlColor
  */
 function PortfolioPage() {
   const { user } = useAuth();
+  const isDebug = useDebug();
   const [portfolio, setPortfolio] = useState(null);
   const [positions, setPositions] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -215,7 +217,7 @@ function PortfolioPage() {
           <StatCard label="Positions" value={positions.length} valueSize="22px" valueColor={colors.blue} />
         </div>
         {/* VULN: Notes field exposed - may contain flags */}
-        {portfolio?.notes && (
+        {isDebug && portfolio?.notes && (
           <div style={{ ...debugBanner, marginTop: '16px', marginBottom: 0 }}>
             Notes: {portfolio.notes}
           </div>
@@ -245,14 +247,16 @@ function PortfolioPage() {
       </Card>
 
       {/* VULN: Portfolio Lookup - IDOR demonstration */}
-      <Card variant="danger" title="View Another User's Portfolio (IDOR)" titleColor={colors.red}
-        hint="Try user IDs: 1 (admin), 2 (trader1), 3 (trader2 - has Flag 6 in notes)">
-        <form onSubmit={handleLookupPortfolio} style={{ display: 'flex', gap: '10px' }}>
-          <Input type="number" value={lookupUserId} onChange={(e) => setLookupUserId(e.target.value)}
-            placeholder="Enter User ID" min="1" style={{ flex: 1 }} />
-          <Button type="submit" variant="red">View Portfolio</Button>
-        </form>
-      </Card>
+      {isDebug && (
+        <Card variant="danger" title="View Another User's Portfolio (IDOR)" titleColor={colors.red}
+          hint="Try user IDs: 1 (admin), 2 (trader1), 3 (trader2 - has Flag 6 in notes)">
+          <form onSubmit={handleLookupPortfolio} style={{ display: 'flex', gap: '10px' }}>
+            <Input type="number" value={lookupUserId} onChange={(e) => setLookupUserId(e.target.value)}
+              placeholder="Enter User ID" min="1" style={{ flex: 1 }} />
+            <Button type="submit" variant="red">View Portfolio</Button>
+          </form>
+        </Card>
+      )}
     </PageLayout>
   );
 }

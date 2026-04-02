@@ -109,6 +109,10 @@ export function AuthProvider({ children }) {
     return user?.role === 'ADMIN';
   };
 
+  const isDeveloper = () => {
+    return user?.role === 'DEVELOPER';
+  };
+
   // Keep userIdRef in sync so refreshUser never closes over a stale user object
   useEffect(() => { userIdRef.current = user?.userId || user?.id; }, [user?.userId, user?.id]);
 
@@ -184,6 +188,7 @@ export function AuthProvider({ children }) {
     register,
     logout,
     isAdmin,
+    isDeveloper,
     refreshUser,
     refreshToken,
     getAccountLevel,

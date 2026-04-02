@@ -121,7 +121,36 @@ public class DataInitializer {
                 apiUser.setNotes("API service account");
                 userRepository.save(apiUser);
 
-                System.out.println("[INIT] Seeded 4 users: admin, trader1, trader2, apiuser");
+                // Developer user - dev/dev123 (debug mode account)
+                User dev = new User();
+                dev.setUsername("dev");
+                dev.setPasswordHash(passwordEncoder.encode("dev123"));
+                dev.setEmail("dev@gmail.com");
+                dev.setRole("DEVELOPER");
+                dev.setBalance(new java.math.BigDecimal("50000.00"));
+                dev.setApiKey("vt-api-dev-key");
+                dev.setIsActive(true);
+                dev.setNotes("Developer debug account");
+                dev.setAccountLevel(2);
+                dev.setFirstName("Dev");
+                dev.setLastName("User");
+                dev.setVerifiedAt(LocalDateTime.now().minusDays(7));
+                dev = userRepository.save(dev);
+
+                // Record initial deposit for dev
+                Transaction devDeposit = new Transaction();
+                devDeposit.setUserId(dev.getId());
+                devDeposit.setType("DEPOSIT");
+                devDeposit.setAmount(new BigDecimal("50000.00"));
+                devDeposit.setBalanceAfter(new BigDecimal("50000.00"));
+                devDeposit.setDescription("Initial signup bonus");
+                devDeposit.setCreatedAt(LocalDateTime.now());
+                transactionRepository.save(devDeposit);
+
+                // Seed 10 limit BUY orders for dev across symbols
+                seedDevOrders(dev, orderRepository);
+
+                System.out.println("[INIT] Seeded 5 users: admin, trader1, trader2, apiuser, dev");
 
                 // ========================================================
                 // Seed admin (house) positions and sell orders
@@ -215,5 +244,42 @@ public class DataInitializer {
         }
 
         System.out.println("[INIT] House inventory and order book seeded.");
+    }
+
+    /**
+     * Seed 10 limit BUY orders for the developer account across various symbols.
+     */
+    private void seedDevOrders(User dev, OrderRepository orderRepository) {
+        Long devId = dev.getId();
+
+        Object[][] devOrders = {
+            {"AAPL",    "BUY",  "50",  "175.00"},
+            {"GOOGL",   "BUY",  "30",  "139.50"},
+            {"MSFT",    "BUY",  "20",  "375.00"},
+            {"TSLA",    "SELL", "15",  "252.00"},
+            {"AMZN",    "BUY",  "40",  "176.00"},
+            {"BTC-USD", "BUY",  "1",   "66000.00"},
+            {"ETH-USD", "BUY",  "10",  "3400.00"},
+            {"VULN",    "BUY",  "500", "41.00"},
+            {"AAPL",    "SELL", "25",  "182.00"},
+            {"GOOGL",   "SELL", "20",  "145.00"},
+        };
+
+        for (int i = 0; i < devOrders.length; i++) {
+            Object[] o = devOrders[i];
+            Order order = new Order();
+            order.setUserId(devId);
+            order.setSymbol((String) o[0]);
+            order.setSide((String) o[1]);
+            order.setOrderType("LIMIT");
+            order.setQuantity(new BigDecimal((String) o[2]));
+            order.setPrice(new BigDecimal((String) o[3]));
+            order.setStatus("NEW");
+            order.setFilledQty(BigDecimal.ZERO);
+            order.setCreatedAt(LocalDateTime.now().minusHours(24 - i * 2));
+            orderRepository.save(order);
+        }
+
+        System.out.println("[INIT] Seeded 10 limit orders for dev user.");
     }
 }

@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_name VARCHAR(100),
     date_of_birth VARCHAR(20),                 -- VULN: stored as VARCHAR, not DATE
     phone_number VARCHAR(30),                  -- VULN: plaintext
-    ssn VARCHAR(20),                           -- VULN #96: SSN stored in PLAINTEXT
+    ssn VARCHAR(100),                          -- VULN #96: SSN stored in PLAINTEXT
     address_line1 VARCHAR(255),
     address_line2 VARCHAR(255),
     city VARCHAR(100),

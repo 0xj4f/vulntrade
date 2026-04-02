@@ -12,6 +12,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import SymbolDetailPage from './pages/SymbolDetailPage';
 import { connectWebSocket, disconnectWebSocket, isConnected } from './services/websocketService';
 import VerificationBadge from './components/VerificationBadge';
+import { DebugProvider } from './context/DebugContext';
 import { colors } from './styles/shared';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -46,7 +47,7 @@ function NavItem({ to, label, danger = false }) {
 }
 
 function AppContent() {
-  const { isAuthenticated, user, logout, isAdmin, getAccountLevel } = useAuth();
+  const { isAuthenticated, user, logout, isAdmin, isDeveloper, getAccountLevel } = useAuth();
   const verified = getAccountLevel() >= 2;
   const wsConnectedRef = useRef(false);
 
@@ -113,7 +114,7 @@ function AppContent() {
             <NavItem to="/history" label="History" />
             <NavItem to="/account" label="Account" />
             {/* VULN: Admin link only hidden by client-side check */}
-            {isAdmin() && <NavItem to="/admin" label="Admin" danger />}
+            {(isAdmin() || isDeveloper()) && <NavItem to="/admin" label="Admin" danger />}
           </div>
 
           {/* Right: User info + Logout */}
@@ -167,6 +168,13 @@ function AppContent() {
                 {user?.username}
               </span>
               <VerificationBadge level={getAccountLevel()} size="small" />
+              {isDeveloper() && (
+                <span style={{
+                  padding: '2px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '700',
+                  backgroundColor: 'rgba(139,92,246,0.15)', color: '#A78BFA',
+                  border: '1px solid rgba(139,92,246,0.3)', letterSpacing: '0.06em',
+                }}>DEBUG</span>
+              )}
             </div>
             <button onClick={logout} style={{
               background: 'transparent', border: '1px solid #263A56', color: '#5E6B82',
@@ -218,7 +226,9 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <AppContent />
+        <DebugProvider>
+          <AppContent />
+        </DebugProvider>
       </AuthProvider>
     </Router>
   );

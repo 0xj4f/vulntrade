@@ -11,6 +11,7 @@ import FormField, { Input } from '../components/FormField';
 import DataTable from '../components/DataTable';
 import { colors, flexRowWrap } from '../styles/shared';
 import { fmtPrice, sideColor } from '../utils/format';
+import { useDebug } from '../context/DebugContext';
 
 /**
  * PHASE 6: Trade History page
@@ -20,6 +21,7 @@ import { fmtPrice, sideColor } from '../utils/format';
  */
 function HistoryPage() {
   const { user } = useAuth();
+  const isDebug = useDebug();
   const [trades, setTrades] = useState([]);
   const [startDate, setStartDate] = useState('2020-01-01');
   const [endDate, setEndDate] = useState('2030-12-31');
@@ -123,22 +125,22 @@ function HistoryPage() {
           <FormField label="Start Date">
             {/* VULN: Date sent to SQL injection-vulnerable endpoint */}
             <Input type="text" value={startDate} onChange={e => setStartDate(e.target.value)}
-              placeholder="2020-01-01 or SQL payload" width="200px" />
+              placeholder={isDebug ? "2020-01-01 or SQL payload" : "2020-01-01"} width="200px" />
           </FormField>
           <FormField label="End Date">
             <Input type="text" value={endDate} onChange={e => setEndDate(e.target.value)}
-              placeholder="2030-12-31 or SQL payload" width="200px" />
+              placeholder={isDebug ? "2030-12-31 or SQL payload" : "2030-12-31"} width="200px" />
           </FormField>
           <FormField label="Symbol">
             <Input type="text" value={symbol} onChange={e => setSymbol(e.target.value)}
-              placeholder="AAPL (or SQL injection)" width="150px" />
+              placeholder={isDebug ? "AAPL (or SQL injection)" : "AAPL"} width="150px" />
           </FormField>
         </div>
         <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
           <Button variant="blue" onClick={fetchTrades}>Load Trades (REST)</Button>
-          <Button variant="purple" onClick={fetchViaWebSocket}>Load via WS (SQLi)</Button>
+          <Button variant="purple" onClick={fetchViaWebSocket}>{isDebug ? 'Load via WS (SQLi)' : 'Load via WebSocket'}</Button>
           <Button variant="amber" onClick={exportCSV}>Export CSV</Button>
-          <Button variant="red" onClick={exportAllTrades}>Export All (SQLi)</Button>
+          <Button variant="red" onClick={exportAllTrades}>{isDebug ? 'Export All (SQLi)' : 'Export All'}</Button>
         </div>
       </Card>
 

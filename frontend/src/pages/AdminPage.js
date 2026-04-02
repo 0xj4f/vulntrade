@@ -12,6 +12,7 @@ import DataTable from '../components/DataTable';
 import JsonPreview from '../components/JsonPreview';
 import { colors, flexRowWrap, textareaStyle } from '../styles/shared';
 import { fmtNum } from '../utils/format';
+import { useDebug } from '../context/DebugContext';
 
 /**
  * PHASE 6 VULNS:
@@ -25,6 +26,7 @@ import { fmtNum } from '../utils/format';
  */
 function AdminPage() {
   const { user } = useAuth();
+  const isDebug = useDebug();
   const [users, setUsers] = useState([]);
   const [sqlQuery, setSqlQuery] = useState('SELECT * FROM flags');
   const [sqlResult, setSqlResult] = useState(null);
@@ -147,10 +149,12 @@ function AdminPage() {
             Logged in as <strong>{user?.username}</strong>
           </span>
         </div>
-        <p style={{ color: colors.textMuted, marginTop: '10px', fontSize: '13px', lineHeight: '1.5' }}>
-          VULN: This page is only hidden via client-side conditional render.
-          Any authenticated user can navigate to /admin.
-        </p>
+        {isDebug && (
+          <p style={{ color: colors.textMuted, marginTop: '10px', fontSize: '13px', lineHeight: '1.5' }}>
+            VULN: This page is only hidden via client-side conditional render.
+            Any authenticated user can navigate to /admin.
+          </p>
+        )}
       </Card>
 
       {/* User Management */}
@@ -193,10 +197,10 @@ function AdminPage() {
             <Input type="number" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)}
               width="150px" placeholder="Amount" step="0.01" />
           </FormField>
-          <FormField label="Reason (log injection)">
+          <FormField label={isDebug ? "Reason (log injection)" : "Reason"}>
             {/* VULN: Reason field logged without sanitization */}
             <Input type="text" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)}
-              width="250px" placeholder="Reason (try: test\nFAKE_LOG_ENTRY)" />
+              width="250px" placeholder={isDebug ? "Reason (try: test\\nFAKE_LOG_ENTRY)" : "Admin adjustment reason"} />
           </FormField>
           <Button type="submit" variant="green">Adjust</Button>
         </form>
@@ -204,7 +208,7 @@ function AdminPage() {
 
       {/* Trading Halt Controls - VULN: accessible by any user via WS */}
       <Card variant="warning" title="Trading Halt Controls" titleColor={colors.amber}
-        hint="VULN: Uses JWT role from token body (modifiable). Sends via WebSocket.">
+        hint={isDebug ? "VULN: Uses JWT role from token body (modifiable). Sends via WebSocket." : undefined}>
         <div style={flexRowWrap('10px')}>
           <FormField label="Symbol">
             <Input type="text" value={haltSymbol} onChange={(e) => setHaltSymbol(e.target.value)} width="120px" />
@@ -219,7 +223,7 @@ function AdminPage() {
 
       {/* Price Override - VULN: market manipulation */}
       <Card variant="danger" title="Manual Price Override" titleColor={colors.red}
-        hint="VULN: Set arbitrary prices. No audit trail. Market manipulation.">
+        hint={isDebug ? "VULN: Set arbitrary prices. No audit trail. Market manipulation." : undefined}>
         <div style={flexRowWrap('10px')}>
           <FormField label="Symbol">
             <Input type="text" value={priceSymbol} onChange={(e) => setPriceSymbol(e.target.value)} width="120px" />
@@ -243,35 +247,37 @@ function AdminPage() {
         </div>
       </Card>
 
-      {/* Endpoint Reference */}
-      <Card title="Vulnerable Endpoints Reference">
-        <div style={{ display: 'grid', gap: '6px' }}>
-          {[
-            { method: 'GET', path: '/actuator/env', desc: 'Environment variables (secrets, flags)' },
-            { method: 'GET', path: '/actuator/heapdump', desc: 'JVM heap dump (Flag 8)' },
-            { method: 'POST', path: '/api/auth/login-legacy', desc: 'SQL injection in username' },
-            { method: 'GET', path: '/api/users/1', desc: 'IDOR: admin profile (Flag 2 in notes)' },
-            { method: 'GET', path: '/api/users/3/portfolio', desc: 'IDOR: trader2 portfolio (Flag 6)' },
-            { method: 'POST', path: '/api/debug/execute', desc: 'RCE (X-Debug-Key: vulntrade-debug-key-2024)' },
-            { method: 'CLI', path: 'redis-cli GET flag3', desc: 'Redis no auth (Flag 3)' },
-          ].map(({ method, path, desc }) => (
-            <div key={path} style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '8px 12px', borderRadius: '8px',
-              backgroundColor: colors.bgStat, fontSize: '13px',
-            }}>
-              <span style={{
-                padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700',
-                backgroundColor: method === 'GET' ? colors.blueDark : method === 'POST' ? colors.greenDark : colors.purpleDark,
-                color: method === 'GET' ? colors.blueLight : method === 'POST' ? colors.greenLight : colors.purpleLight,
-                fontFamily: "'SF Mono', monospace", minWidth: '36px', textAlign: 'center',
-              }}>{method}</span>
-              <code style={{ color: colors.amber, fontFamily: "'SF Mono', monospace", fontSize: '12px' }}>{path}</code>
-              <span style={{ color: colors.textMuted, marginLeft: 'auto', fontSize: '12px' }}>{desc}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
+      {/* Endpoint Reference - debug only */}
+      {isDebug && (
+        <Card title="Vulnerable Endpoints Reference">
+          <div style={{ display: 'grid', gap: '6px' }}>
+            {[
+              { method: 'GET', path: '/actuator/env', desc: 'Environment variables (secrets, flags)' },
+              { method: 'GET', path: '/actuator/heapdump', desc: 'JVM heap dump (Flag 8)' },
+              { method: 'POST', path: '/api/auth/login-legacy', desc: 'SQL injection in username' },
+              { method: 'GET', path: '/api/users/1', desc: 'IDOR: admin profile (Flag 2 in notes)' },
+              { method: 'GET', path: '/api/users/3/portfolio', desc: 'IDOR: trader2 portfolio (Flag 6)' },
+              { method: 'POST', path: '/api/debug/execute', desc: 'RCE (X-Debug-Key: vulntrade-debug-key-2024)' },
+              { method: 'CLI', path: 'redis-cli GET flag3', desc: 'Redis no auth (Flag 3)' },
+            ].map(({ method, path, desc }) => (
+              <div key={path} style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                padding: '8px 12px', borderRadius: '8px',
+                backgroundColor: colors.bgStat, fontSize: '13px',
+              }}>
+                <span style={{
+                  padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700',
+                  backgroundColor: method === 'GET' ? colors.blueDark : method === 'POST' ? colors.greenDark : colors.purpleDark,
+                  color: method === 'GET' ? colors.blueLight : method === 'POST' ? colors.greenLight : colors.purpleLight,
+                  fontFamily: "'SF Mono', monospace", minWidth: '36px', textAlign: 'center',
+                }}>{method}</span>
+                <code style={{ color: colors.amber, fontFamily: "'SF Mono', monospace", fontSize: '12px' }}>{path}</code>
+                <span style={{ color: colors.textMuted, marginLeft: 'auto', fontSize: '12px' }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </PageLayout>
   );
 }
