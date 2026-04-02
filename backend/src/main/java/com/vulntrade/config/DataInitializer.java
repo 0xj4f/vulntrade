@@ -2,10 +2,12 @@ package com.vulntrade.config;
 
 import com.vulntrade.model.Order;
 import com.vulntrade.model.Position;
+import com.vulntrade.model.Trade;
 import com.vulntrade.model.Transaction;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.PositionRepository;
+import com.vulntrade.repository.TradeRepository;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import org.springframework.boot.CommandLineRunner;
@@ -28,7 +30,8 @@ public class DataInitializer {
                                        PasswordEncoder passwordEncoder,
                                        PositionRepository positionRepository,
                                        OrderRepository orderRepository,
-                                       TransactionRepository transactionRepository) {
+                                       TransactionRepository transactionRepository,
+                                       TradeRepository tradeRepository) {
         return args -> {
             if (userRepository.count() == 0) {
                 System.out.println("[INIT] Seeding default users...");
@@ -150,13 +153,20 @@ public class DataInitializer {
                 // Seed 10 limit BUY orders for dev across symbols
                 seedDevOrders(dev, orderRepository);
 
-                System.out.println("[INIT] Seeded 5 users: admin, trader1, trader2, apiuser, dev");
+                System.out.println("[INIT] Seeded 5 base users: admin, trader1, trader2, apiuser, dev");
 
                 // ========================================================
                 // Seed admin (house) positions and sell orders
                 // so new traders can buy immediately after registering
                 // ========================================================
                 seedHouseInventory(admin, positionRepository, orderRepository);
+
+                // ========================================================
+                // Seed famous traders with realistic trade histories
+                // ========================================================
+                seedFamousTraders(admin, passwordEncoder, userRepository,
+                        orderRepository, tradeRepository, positionRepository,
+                        transactionRepository);
 
             } else {
                 System.out.println("[INIT] Users already exist, skipping seed.");
@@ -187,6 +197,13 @@ public class DataInitializer {
             {"BTC-USD",  10000, "67510.00", "50.00"},
             {"ETH-USD", 100000, "3452.00", "5.00"},
             {"VULN",   1000000, "42.05", "0.05"},
+            {"SOL-USD",  50000, "185.20", "0.50"},
+            {"DOGE-USD", 50000000, "0.1655", "0.0010"},
+            {"NVDA",     50000, "892.70", "1.00"},
+            {"XRP-USD",  10000000, "0.622", "0.005"},
+            {"AVAX-USD", 200000, "38.60", "0.20"},
+            {"PEPE-USD", 999999999, "0.00001260", "0.00000010"},
+            {"GME",      500000, "28.60", "0.20"},
         };
 
         for (Object[] item : inventory) {
@@ -281,5 +298,16 @@ public class DataInitializer {
         }
 
         System.out.println("[INIT] Seeded 10 limit orders for dev user.");
+    }
+
+    /**
+     * Seed 12 famous traders with realistic trade histories spanning ~7 days.
+     */
+    private void seedFamousTraders(User admin, PasswordEncoder passwordEncoder,
+                                    UserRepository userRepository, OrderRepository orderRepository,
+                                    TradeRepository tradeRepository, PositionRepository positionRepository,
+                                    TransactionRepository transactionRepository) {
+        new FamousTraderSeeder(admin, passwordEncoder, userRepository, orderRepository,
+                tradeRepository, positionRepository, transactionRepository).seed();
     }
 }
