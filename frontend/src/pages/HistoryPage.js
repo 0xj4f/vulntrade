@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
-import { sendMessage } from '../services/websocketService';
+import { sendMessage, subscribe, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 import PageLayout from '../components/PageLayout';
@@ -26,6 +26,36 @@ function HistoryPage() {
   const [startDate, setStartDate] = useState('2020-01-01');
   const [endDate, setEndDate] = useState('2030-12-31');
   const [symbol, setSymbol] = useState('');
+
+  // Subscribe to WebSocket response channels
+  useEffect(() => {
+    const setupSubs = () => {
+      if (!isConnected()) return false;
+      subscribe('/user/queue/history', (response) => {
+        if (response.type === 'TRADE_HISTORY') {
+          // Backend returns Object[] arrays from native SQL query:
+          // [id, symbol, quantity, price, executed_at]
+          const rows = (response.trades || []).map(row => {
+            if (Array.isArray(row)) {
+              return { id: row[0], symbol: row[1], quantity: row[2], price: row[3], executedAt: row[4] };
+            }
+            return row; // already an object (e.g. from UNION injection)
+          });
+          setTrades(rows);
+          toast.success(`Loaded ${response.count || 0} trades via WebSocket`);
+        }
+      });
+      subscribe('/user/queue/errors', (error) => {
+        // VULN: Error messages reveal database structure
+        toast.error(error.message || 'WebSocket query failed', { autoClose: 8000 });
+      });
+      return true;
+    };
+    if (!setupSubs()) {
+      const iv = setInterval(() => { if (setupSubs()) clearInterval(iv); }, 500);
+      return () => clearInterval(iv);
+    }
+  }, []);
 
   // Fetch trades via REST export endpoint
   const fetchTrades = async () => {
