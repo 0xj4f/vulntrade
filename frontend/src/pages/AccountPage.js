@@ -14,6 +14,8 @@ import JsonPreview from '../components/JsonPreview';
 import VerificationBadge from '../components/VerificationBadge';
 import { colors, flexRow, flexRowWrap, gridCols, lineHeight2, codeInline, smallText, inputFull, progressBarTrack, progressBarFill, lockBanner, buttonStyles, btnMedium } from '../styles/shared';
 import { fmtUSD, fmtBalance, fmtNum } from '../utils/format';
+import { useDebug } from '../context/DebugContext';
+import DebugOnly from '../components/DebugOnly';
 
 /**
  * PHASE 6 VULNS:
@@ -27,6 +29,7 @@ import { fmtUSD, fmtBalance, fmtNum } from '../utils/format';
  */
 function AccountPage() {
   const { user, token, getAccountLevel, isVerified, refreshToken, refreshUser, updatePhoto } = useAuth();
+  const isDebug = useDebug();
   const [profile, setProfile] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -539,9 +542,11 @@ function AccountPage() {
                 <div style={progressBarFill(progressPercent)} />
               </div>
             </div>
-            <div style={{ color: colors.red, fontSize: '11px', marginTop: '8px' }}>
-              VULN #98: Any non-empty first name triggers auto-verification. No real document review.
-            </div>
+            {isDebug && (
+              <div style={{ color: colors.red, fontSize: '11px', marginTop: '8px' }}>
+                VULN #98: Any non-empty first name triggers auto-verification. No real document review.
+              </div>
+            )}
           </div>
         )}
       </Card>
@@ -549,7 +554,7 @@ function AccountPage() {
       {/* ── Profile Completion Form ── */}
       {!isVerified() && (
         <Card title="Complete Your Profile" titleColor={colors.blue}
-          hint="VULN #98: Filling just the first name auto-verifies. VULN #96: All PII stored in plaintext.">
+          hint={isDebug ? "VULN #98: Filling just the first name auto-verifies. VULN #96: All PII stored in plaintext." : undefined}>
           <form onSubmit={handleProfileUpdate}>
             <div style={gridCols()}>
               <FormField label="First Name">
@@ -576,7 +581,7 @@ function AccountPage() {
               </FormField>
             </div>
             <div style={{ marginTop: '12px' }}>
-              <FormField label={<span>SSN <span style={{ color: colors.red, fontSize: '10px' }}>(VULN: stored in plaintext, returned in API responses)</span></span>}>
+              <FormField label={<span>SSN {isDebug && <span style={{ color: colors.red, fontSize: '10px' }}>(VULN: stored in plaintext, returned in API responses)</span>}</span>}>
                 <Input value={profileForm.ssn}
                   onChange={(e) => setProfileForm(p => ({ ...p, ssn: e.target.value }))}
                   placeholder="000-00-0000" style={{ width: '100%', fontFamily: "'SF Mono', monospace" }} />
@@ -623,7 +628,7 @@ function AccountPage() {
       )}
 
       {/* Change Password - VULN: no old password required */}
-      <Card title="Change Password" hint="⚠️ No old password verification required">
+      <Card title="Change Password" hint={isDebug ? "No old password verification required" : undefined}>
         <form onSubmit={handleChangePassword} style={{ display: 'flex', gap: '10px' }}>
           <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
             placeholder="New password" style={{ flex: 1 }} />
@@ -632,7 +637,7 @@ function AccountPage() {
       </Card>
 
       {/* Change Email - VULN: no verification */}
-      <Card title="Change Email" hint="⚠️ No email verification required">
+      <Card title="Change Email" hint={isDebug ? "No email verification required" : undefined}>
         <form onSubmit={handleUpdateEmail} style={{ display: 'flex', gap: '10px' }}>
           <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
             placeholder="New email address" style={{ flex: 1 }} />
@@ -641,15 +646,17 @@ function AccountPage() {
       </Card>
 
       {/* VULN: User Lookup (IDOR demonstration) */}
-      <Card variant="danger" title="User Lookup (IDOR Test)" titleColor={colors.red}
-        hint="Try looking up other user IDs (1 = admin, 2 = trader1, 3 = trader2)">
-        <form onSubmit={handleLookupUser} style={{ display: 'flex', gap: '10px' }}>
-          <Input type="number" value={lookupUserId} onChange={(e) => setLookupUserId(e.target.value)}
-            placeholder="Enter User ID" min="1" style={{ flex: 1 }} />
-          <Button type="submit" variant="red">Lookup</Button>
-        </form>
-        <JsonPreview data={lookupResult} />
-      </Card>
+      {isDebug && (
+        <Card variant="danger" title="User Lookup (IDOR Test)" titleColor={colors.red}
+          hint="Try looking up other user IDs (1 = admin, 2 = trader1, 3 = trader2)">
+          <form onSubmit={handleLookupUser} style={{ display: 'flex', gap: '10px' }}>
+            <Input type="number" value={lookupUserId} onChange={(e) => setLookupUserId(e.target.value)}
+              placeholder="Enter User ID" min="1" style={{ flex: 1 }} />
+            <Button type="submit" variant="red">Lookup</Button>
+          </form>
+          <JsonPreview data={lookupResult} />
+        </Card>
+      )}
 
       {/* Balance Display */}
       {balance && (
@@ -671,8 +678,12 @@ function AccountPage() {
                 </span>
               }>
               {/* VULN: Internal fields exposed */}
-              <div style={smallText(colors.textDim)}>Role: {balance.role} | API Key: {balance.apiKey}</div>
-              {balance.notes && <div style={smallText(colors.amber)}>Notes: {balance.notes}</div>}
+              {isDebug && (
+                <>
+                  <div style={smallText(colors.textDim)}>Role: {balance.role} | API Key: {balance.apiKey}</div>
+                  {balance.notes && <div style={smallText(colors.amber)}>Notes: {balance.notes}</div>}
+                </>
+              )}
             </StatCard>
           </div>
         </Card>
@@ -688,15 +699,17 @@ function AccountPage() {
           <div style={{ color: colors.textMuted, fontSize: '12px', marginTop: '4px' }}>
             Complete verification (Level 2) to unlock deposits and withdrawals.
           </div>
-          <div style={{ color: colors.red, fontSize: '11px', marginTop: '8px' }}>
-            VULN #92: Or forge a JWT with accountLevel:2 — the server trusts it without DB check.
-          </div>
+          {isDebug && (
+            <div style={{ color: colors.red, fontSize: '11px', marginTop: '8px' }}>
+              VULN #92: Or forge a JWT with accountLevel:2 — the server trusts it without DB check.
+            </div>
+          )}
         </div>
       )}
 
       {/* Withdraw - VULN: fake 2FA, sign flip, JS-only validation */}
       <div style={getAccountLevel() < 2 ? { opacity: 0.4, pointerEvents: 'none' } : {}}>
-        <Card title="Withdraw Funds" hint="⚠️ 2FA is decorative only. Try negative amounts (sign flip vuln).">
+        <Card title="Withdraw Funds" hint={isDebug ? "2FA is decorative only. Try negative amounts (sign flip vuln)." : undefined}>
           {getAccountLevel() >= 2 && (
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -708,9 +721,11 @@ function AccountPage() {
                   {fmtNum(dailyWithdrawn)} / $100,000
                 </span>
               </span>
-              <span style={{ color: colors.red, fontSize: '10px' }}>
-                VULN #99: Limit enforced in JS only — curl ignores it
-              </span>
+              {isDebug && (
+                <span style={{ color: colors.red, fontSize: '10px' }}>
+                  VULN #99: Limit enforced in JS only — curl ignores it
+                </span>
+              )}
             </div>
           )}
           <div style={flexRowWrap('10px')}>
@@ -730,12 +745,12 @@ function AccountPage() {
               setPendingAction('withdraw');
               setShow2FA(true);
             }}>Withdraw (with "2FA")</Button>
-            <Button variant="darkRed" onClick={handleWithdrawWS}>Withdraw via WS (no 2FA)</Button>
+            <Button variant="darkRed" onClick={handleWithdrawWS}>{isDebug ? 'Withdraw via WS (no 2FA)' : 'Quick Withdraw'}</Button>
           </div>
         </Card>
 
         {/* Deposit - VULN: no source verification */}
-        <Card title="Deposit Funds" hint='⚠️ No source verification — deposit any amount from any "account"'>
+        <Card title="Deposit Funds" hint={isDebug ? 'No source verification — deposit any amount from any "account"' : undefined}>
           <div style={flexRowWrap('10px')}>
             <FormField label="Amount">
               <Input type="number" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)}
@@ -743,7 +758,7 @@ function AccountPage() {
             </FormField>
             <FormField label="Source Account">
               <Input type="text" value={depositSource} onChange={(e) => setDepositSource(e.target.value)}
-                placeholder="Any value works" width="200px" />
+                placeholder={isDebug ? "Any value works" : "Source account"} width="200px" />
             </FormField>
             <Button variant="green" onClick={handleDeposit}>Deposit</Button>
           </div>
@@ -763,9 +778,11 @@ function AccountPage() {
         <p style={{ color: colors.textSecondary, fontSize: '14px', marginBottom: '8px' }}>
           Enter the 6-digit code from your authenticator app
         </p>
-        <p style={{ color: colors.red, fontSize: '11px', marginBottom: '20px' }}>
-          (VULN: This is decorative - any value is accepted, code never sent to server)
-        </p>
+        {isDebug && (
+          <p style={{ color: colors.red, fontSize: '11px', marginBottom: '20px' }}>
+            (VULN: This is decorative - any value is accepted, code never sent to server)
+          </p>
+        )}
         <Input type="text" value={twoFACode} onChange={(e) => setTwoFACode(e.target.value)}
           placeholder="000000" maxLength="6"
           style={{

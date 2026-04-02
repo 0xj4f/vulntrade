@@ -6,6 +6,7 @@ import AuthLayout from '../components/AuthLayout';
 import { InputFull } from '../components/FormField';
 import Button from '../components/Button';
 import { colors, formLabel, debugBanner } from '../styles/shared';
+import { useDebug } from '../context/DebugContext';
 
 /**
  * Password reset page.
@@ -14,6 +15,7 @@ import { colors, formLabel, debugBanner } from '../styles/shared';
  * VULN: Token never expires.
  */
 function ResetPasswordPage() {
+  const isDebug = useDebug();
   const [step, setStep] = useState('request'); // request | confirm
   const [email, setEmail] = useState('');
   const [token, setToken] = useState('');
@@ -67,7 +69,7 @@ function ResetPasswordPage() {
       width="440px"
     >
       {/* VULN: Debug token shown in UI */}
-      {debugToken && (
+      {isDebug && debugToken && (
         <div style={debugBanner}>Debug Token: {debugToken}</div>
       )}
 

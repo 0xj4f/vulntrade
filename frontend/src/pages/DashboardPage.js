@@ -15,6 +15,7 @@ import FormField, { Input } from '../components/FormField';
 import StatusBadge from '../components/StatusBadge';
 import SparkLine from '../components/SparkLine';
 import VerificationBadge from '../components/VerificationBadge';
+import { useDebug } from '../context/DebugContext';
 import {
   colors, selectStyle, flexRowWrap, gridCols,
   orderErrorBanner, orderStatusBanner,
@@ -23,6 +24,7 @@ import { fmtUSD, fmtBalance, fmtPrice, fmtPnL, fmtPct, fmtQty, fmtNum, fmtDate, 
 
 function DashboardPage() {
   const { user, refreshUser, getAccountLevel } = useAuth();
+  const isDebug = useDebug();
   const [prices, setPrices] = useState([]);
   const [health, setHealth] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
@@ -368,12 +370,12 @@ function DashboardPage() {
             { key: 'spark', label: 'Trend', align: 'center', render: p => (
               <SparkLine data={priceHistory[p.symbol] || []} width={72} height={24} />
             )},
-            { key: 'internal', label: 'Internal', align: 'right', render: p => (
+            ...(isDebug ? [{ key: 'internal', label: 'Internal', align: 'right', render: p => (
               <span style={{ color: colors.textDim, fontSize: '10px', fontFamily: "'SF Mono', monospace" }}>
                 {p.marketMakerId && `MM:${p.marketMakerId}`}
                 {p.costBasis && ` CB:${fmtPrice(p.costBasis)}`}
               </span>
-            )},
+            )}] : []),
           ]}
           data={prices}
           rowKey={p => p.symbol}
@@ -385,7 +387,7 @@ function DashboardPage() {
       {/* ── Place Order ── */}
       <Card title="Place Order">
         <div style={flexRowWrap('12px')}>
-          <input type="hidden" id="order-user-id" value={user?.userId || user?.id || ''} />
+          {isDebug && <input type="hidden" id="order-user-id" value={user?.userId || user?.id || ''} />}
 
           {/* BUY/SELL toggle */}
           <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: `1px solid ${colors.borderMedium}` }}>
@@ -743,7 +745,7 @@ function DashboardPage() {
       )}
 
       {/* ── Admin Alerts ── */}
-      {adminAlerts.length > 0 && (
+      {isDebug && adminAlerts.length > 0 && (
         <Card variant="warning" title="Admin Alerts (leaked)" titleColor={colors.amber}>
           {adminAlerts.map((a, i) => (
             <div key={i} style={{

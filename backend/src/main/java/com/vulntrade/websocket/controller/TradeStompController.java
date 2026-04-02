@@ -83,7 +83,7 @@ public class TradeStompController {
             response.put("clientOrderId", order.getClientOrderId());
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/orders", response);
+                    extractUsername(headerAccessor), "/queue/orders", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -115,7 +115,7 @@ public class TradeStompController {
             response.put("status", order.getStatus());
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/orders", response);
+                    extractUsername(headerAccessor), "/queue/orders", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -152,7 +152,7 @@ public class TradeStompController {
             response.put("filledQty", order.getFilledQty());
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/orders", response);
+                    extractUsername(headerAccessor), "/queue/orders", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -188,7 +188,7 @@ public class TradeStompController {
             response.put("positions", portfolio);
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/portfolio", response);
+                    extractUsername(headerAccessor), "/queue/portfolio", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -222,7 +222,7 @@ public class TradeStompController {
             response.put("notes", user.getNotes());     // VULN: notes with flags
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/balance", response);
+                    extractUsername(headerAccessor), "/queue/balance", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -258,7 +258,7 @@ public class TradeStompController {
             response.put("amount", request.getAmount());
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/balance", response);
+                    extractUsername(headerAccessor), "/queue/balance", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -289,7 +289,7 @@ public class TradeStompController {
             response.put("amount", request.getAmount());
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/balance", response);
+                    extractUsername(headerAccessor), "/queue/balance", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -325,7 +325,7 @@ public class TradeStompController {
             response.put("count", history.size());
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/history", response);
+                    extractUsername(headerAccessor), "/queue/history", response);
 
         } catch (Exception e) {
             // VULN: Error message reveals database structure
@@ -335,7 +335,7 @@ public class TradeStompController {
             errorResponse.put("detail", e.getCause() != null ? e.getCause().getMessage() : null);
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/errors", errorResponse);
+                    extractUsername(headerAccessor), "/queue/errors", errorResponse);
         }
     }
 
@@ -368,7 +368,7 @@ public class TradeStompController {
             response.put("direction", alert.getDirection());
 
             messagingTemplate.convertAndSendToUser(
-                    String.valueOf(userId), "/queue/alerts", response);
+                    extractUsername(headerAccessor), "/queue/alerts", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -394,9 +394,20 @@ public class TradeStompController {
         return null;
     }
 
+    /**
+     * Extract the principal name (username) for convertAndSendToUser.
+     * Spring resolves user destinations by Principal.getName(), not by userId.
+     */
+    private String extractUsername(SimpMessageHeaderAccessor headerAccessor) {
+        Principal principal = headerAccessor.getUser();
+        if (principal != null) {
+            return principal.getName();
+        }
+        return "anonymous";
+    }
+
     private void sendError(SimpMessageHeaderAccessor headerAccessor, String message) {
-        Long userId = extractUserId(headerAccessor);
-        String target = userId != null ? String.valueOf(userId) : "anonymous";
+        String target = extractUsername(headerAccessor);
 
         Map<String, Object> error = new HashMap<>();
         error.put("type", "ERROR");

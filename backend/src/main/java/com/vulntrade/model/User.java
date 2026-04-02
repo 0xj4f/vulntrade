@@ -70,7 +70,7 @@ public class User {
     @Column(name = "phone_number", length = 30)
     private String phoneNumber;  // VULN #96: plaintext
 
-    @Column(name = "ssn", length = 20)
+    @Column(name = "ssn", length = 100)
     private String ssn;  // VULN #96: SSN stored in PLAINTEXT - no encryption whatsoever
 
     @Column(name = "address_line1", length = 255)
