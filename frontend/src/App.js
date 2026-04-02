@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -46,10 +46,39 @@ function NavItem({ to, label, danger = false }) {
   );
 }
 
+/* ── Dropdown menu item ─────────────────────────── */
+function DropdownItem({ label, onClick, danger = false, muted = false }) {
+  const [hovered, setHovered] = useState(false);
+  const color = danger ? '#FF3D71' : muted ? '#5E6B82' : '#C5CEE0';
+  const hoverBg = danger ? 'rgba(255,61,113,0.08)' : 'rgba(79,139,255,0.06)';
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'block', width: '100%', textAlign: 'left',
+        padding: '9px 16px',
+        fontSize: '13px', fontWeight: danger ? '600' : '500',
+        color,
+        background: hovered ? hoverBg : 'transparent',
+        border: 'none', cursor: 'pointer',
+        transition: 'background 0.12s ease',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function AppContent() {
   const { isAuthenticated, user, logout, isAdmin, isDeveloper, getAccountLevel } = useAuth();
   const verified = getAccountLevel() >= 2;
   const wsConnectedRef = useRef(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  const navigate = useNavigate();
 
   // Connect WebSocket at app level so it persists across page navigations
   useEffect(() => {
@@ -77,6 +106,18 @@ function AppContent() {
     };
   }, [isAuthenticated]);
 
+  // Close dropdown on click outside or Escape
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    const handleKey = (e) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('mousedown', handleClick); document.removeEventListener('keydown', handleKey); };
+  }, [menuOpen]);
+
+  const goTo = useCallback((path) => { navigate(path); setMenuOpen(false); }, [navigate]);
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#0B1426', color: '#FFFFFF' }}>
       {isAuthenticated && (
@@ -94,7 +135,7 @@ function AppContent() {
           backdropFilter: 'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
         }}>
-          {/* Left: Logo + Nav Links */}
+          {/* Left: Logo + primary Nav Links */}
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             <Link to="/dashboard" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', marginRight: '16px' }}>
               <div style={{
@@ -111,24 +152,24 @@ function AppContent() {
 
             <NavItem to="/dashboard" label="Dashboard" />
             <NavItem to="/portfolio" label="Portfolio" />
-            <NavItem to="/history" label="History" />
-            <NavItem to="/account" label="Account" />
-            {/* VULN: Admin link only hidden by client-side check */}
-            {(isAdmin() || isDeveloper()) && <NavItem to="/admin" label="Admin" danger />}
           </div>
 
-          {/* Right: User info + Logout */}
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '4px 12px 4px 4px',
-              borderRadius: '24px',
-              backgroundColor: 'rgba(30,45,69,0.6)',
-              border: '1px solid #1E2D45',
-            }}>
+          {/* Right: Avatar dropdown */}
+          <div ref={menuRef} style={{ position: 'relative' }}>
+            <div
+              onClick={() => setMenuOpen(o => !o)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                padding: '4px 12px 4px 4px',
+                borderRadius: '24px',
+                backgroundColor: menuOpen ? 'rgba(30,45,69,0.9)' : 'rgba(30,45,69,0.6)',
+                border: `1px solid ${menuOpen ? '#2A4060' : '#1E2D45'}`,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                userSelect: 'none',
+              }}
+            >
               <div style={{ position: 'relative' }}>
-                {/* Layered avatar: initials always present underneath, photo overlays on top.
-                    onError hides the img via style — no React state change, no timing race. */}
                 <div style={{
                   width: '28px', height: '28px', borderRadius: '50%',
                   background: 'linear-gradient(135deg, #4F8BFF, #8B5CF6)',
@@ -175,14 +216,51 @@ function AppContent() {
                   border: '1px solid rgba(139,92,246,0.3)', letterSpacing: '0.06em',
                 }}>DEBUG</span>
               )}
+              <span style={{
+                color: '#5E6B82', fontSize: '10px', marginLeft: '2px',
+                transition: 'transform 0.2s ease',
+                transform: menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              }}>&#9662;</span>
             </div>
-            <button onClick={logout} style={{
-              background: 'transparent', border: '1px solid #263A56', color: '#5E6B82',
-              padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
-              fontSize: '12px', fontWeight: '500', transition: 'all 0.15s ease',
-            }}>
-              Logout
-            </button>
+
+            {/* Dropdown menu */}
+            {menuOpen && (
+              <div style={{
+                position: 'absolute', right: 0, top: 'calc(100% + 8px)',
+                minWidth: '200px',
+                backgroundColor: '#0E1A2E',
+                border: '1px solid #1E2D45',
+                borderRadius: '12px',
+                boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(30,45,69,0.5)',
+                overflow: 'hidden',
+                zIndex: 1000,
+              }}>
+                {/* User info header */}
+                <div style={{
+                  padding: '14px 16px 12px',
+                  borderBottom: '1px solid #1E2D45',
+                }}>
+                  <div style={{ color: '#FFFFFF', fontSize: '14px', fontWeight: '600' }}>{user?.username}</div>
+                  <div style={{ color: '#5E6B82', fontSize: '12px', marginTop: '2px' }}>{user?.email}</div>
+                </div>
+
+                {/* Nav links */}
+                <div style={{ padding: '6px 0' }}>
+                  {[
+                    { label: 'History', path: '/history' },
+                    { label: 'Account', path: '/account' },
+                    ...((isAdmin() || isDeveloper()) ? [{ label: 'Admin', path: '/admin', danger: true }] : []),
+                  ].map(({ label, path, danger }) => (
+                    <DropdownItem key={path} label={label} danger={danger} onClick={() => goTo(path)} />
+                  ))}
+                </div>
+
+                {/* Divider + Logout */}
+                <div style={{ borderTop: '1px solid #1E2D45', padding: '6px 0' }}>
+                  <DropdownItem label="Logout" onClick={() => { setMenuOpen(false); logout(); }} muted />
+                </div>
+              </div>
+            )}
           </div>
         </nav>
       )}
