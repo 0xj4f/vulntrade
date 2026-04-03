@@ -40,6 +40,10 @@ public class PriceSimulatorService {
     // Track halted symbols
     private final ConcurrentHashMap<String, Boolean> haltedSymbols = new ConcurrentHashMap<>();
 
+    // Track manually overridden symbols — simulator skips these
+    // VULN: No expiry on override — permanent until restart
+    private final ConcurrentHashMap<String, Boolean> overriddenSymbols = new ConcurrentHashMap<>();
+
     // Internal market maker ID - should not be exposed
     private static final String MARKET_MAKER_ID = "MM-INTERNAL-7734";
 
@@ -62,6 +66,9 @@ public class PriceSimulatorService {
         for (Symbol symbol : symbols) {
             if (haltedSymbols.getOrDefault(symbol.getSymbol(), false)) {
                 continue;  // Skip halted symbols
+            }
+            if (overriddenSymbols.getOrDefault(symbol.getSymbol(), false)) {
+                continue;  // Skip manually overridden symbols — VULN: attacker locks in manipulated price
             }
 
             BigDecimal oldPrice = symbol.getCurrentPrice();
@@ -185,7 +192,10 @@ public class PriceSimulatorService {
             s.setAsk(price.add(spread.divide(BigDecimal.valueOf(2), 8, RoundingMode.HALF_UP)));
             s.setLastUpdated(LocalDateTime.now());
             symbolRepository.save(s);
+            // Mark as overridden so the simulator doesn't overwrite it
             // VULN: No audit trail for this price change
+            // VULN: Override is permanent until server restart — attacker locks in price
+            overriddenSymbols.put(symbol, true);
             logger.info("Price manually set: {} = {}", symbol, price);
         });
     }
