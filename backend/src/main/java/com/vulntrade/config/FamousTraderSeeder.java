@@ -78,9 +78,9 @@ public class FamousTraderSeeder {
     // #1 — 0xj4f: Suspiciously perfect. 100% win rate. VULN whale.
     // ================================================================
     private void seed0xj4f() {
-        User u = createUser("0xj4f", "vulntrade", "0xj4f@proton.me", "j4f", "0x",
+        User u = createUser("0xj4f", "vulntrade", "0xj4f@proton.me", "0xj4f", "DevSecOps",
                 "Creator of VulnTrade. DevSecOps engineer. Eats bugs for breakfast. github.com/0xj4f -- FLAG{0xj4f_w4s_h3r3_bu1ld1ng_vuln5}",
-                "250000.00");
+                "50000.00");
         // Every single sell is profitable. Suspiciously perfect.
         String[][] trades = {
             {"VULN", "BUY", "10000", "35.00", "168"}, {"VULN", "SELL", "2000", "42.00", "140"},
@@ -114,7 +114,7 @@ public class FamousTraderSeeder {
     private void seedJimSimons() {
         User u = createUser("jimsimons", "rentech1", "jim@rentech.com", "Jim", "Simons",
                 "Renaissance Technologies. Medallion Fund. The greatest quant trader ever. Math > feelings.",
-                "300000.00");
+                "80000.00");
         // Buy low, sell high — rinse repeat. Keeps building larger positions over time.
         // 24 wins out of 25 sells (~96%). Bigger sizes, holds remainder for unrealized gains.
         String[][] trades = {
@@ -160,7 +160,7 @@ public class FamousTraderSeeder {
     private void seedMichaelBurry() {
         User u = createUser("mburry", "bigshort", "mburry@scionasset.com", "Michael", "Burry",
                 "Scion Asset Management. Saw 2008 coming. Permanently bearish. Water is the next big trade.",
-                "200000.00");
+                "60000.00");
         // Shorts TSLA/NVDA profitably, some losing longs. ~70% = 7 wins / 10 sells.
         String[][] trades = {
             {"TSLA", "BUY", "200", "260.00", "168"}, {"TSLA", "SELL", "200", "248.00", "100"}, // loss on long (intentional cover)
@@ -192,7 +192,7 @@ public class FamousTraderSeeder {
     private void seedCZ() {
         User u = createUser("cz_binance", "safu2024", "cz@binance.com", "Changpeng", "Zhao",
                 "Founder of Binance. Funds are SAFU. Crypto maximalist. Built the largest exchange.",
-                "500000.00");
+                "2000000.00");
         String[][] trades = {
             {"BTC-USD", "BUY", "8", "63000.00", "168"}, {"BTC-USD", "SELL", "3", "67500.00", "80"}, // win
             {"BTC-USD", "BUY", "5", "65500.00", "140"}, {"BTC-USD", "SELL", "2", "64000.00", "50"}, // loss
@@ -272,7 +272,7 @@ public class FamousTraderSeeder {
     private void seedCathieWood() {
         User u = createUser("cathiewood", "arkinvest", "cathie@ark-invest.com", "Cathie", "Wood",
                 "ARK Invest CEO. Innovation is undervalued. TSLA to $2000. Disruption or die. 5-year time horizon.",
-                "200000.00");
+                "800000.00");
         String[][] trades = {
             {"TSLA", "BUY", "200", "242.00", "168"}, {"TSLA", "SELL", "80", "248.50", "90"}, // win
             {"TSLA", "BUY", "100", "250.00", "120"}, {"TSLA", "SELL", "60", "246.00", "50"}, // loss
@@ -329,7 +329,7 @@ public class FamousTraderSeeder {
     private void seedVitalikButerin() {
         User u = createUser("vbuterin", "ethereum", "vitalik@ethereum.org", "Vitalik", "Buterin",
                 "Ethereum co-founder. Proof of Stake believer. Thinks in gas fees. Writes whitepapers in the shower.",
-                "300000.00");
+                "1000000.00");
         String[][] trades = {
             {"ETH-USD", "BUY", "100", "3180.00", "168"}, {"ETH-USD", "SELL", "30", "3450.00", "80"}, // win
             {"ETH-USD", "BUY", "50", "3300.00", "140"}, {"ETH-USD", "SELL", "20", "3280.00", "55"}, // loss
