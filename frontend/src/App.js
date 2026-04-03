@@ -10,6 +10,7 @@ import AccountPage from './pages/AccountPage';
 import AdminPage from './pages/AdminPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import SymbolDetailPage from './pages/SymbolDetailPage';
+import LeaderboardPage from './pages/LeaderboardPage';
 import { connectWebSocket, disconnectWebSocket, isConnected } from './services/websocketService';
 import VerificationBadge from './components/VerificationBadge';
 import { DebugProvider } from './context/DebugContext';
@@ -152,6 +153,7 @@ function AppContent() {
 
             <NavItem to="/dashboard" label="Dashboard" />
             <NavItem to="/portfolio" label="Portfolio" />
+            <NavItem to="/leaderboard" label="Leaderboard" />
           </div>
 
           {/* Right: Avatar dropdown */}
@@ -278,6 +280,9 @@ function AppContent() {
         } />
         <Route path="/portfolio" element={
           isAuthenticated ? <PortfolioPage /> : <Navigate to="/login" />
+        } />
+        <Route path="/leaderboard" element={
+          isAuthenticated ? <LeaderboardPage /> : <Navigate to="/login" />
         } />
         <Route path="/history" element={
           isAuthenticated ? <HistoryPage /> : <Navigate to="/login" />
