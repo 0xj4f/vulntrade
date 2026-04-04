@@ -100,20 +100,43 @@ function HistoryPage() {
   };
 
   // VULN: CSV export with potential injection
-  const exportCSV = () => {
-    const params = new URLSearchParams();
-    if (user?.userId) params.append('userId', user.userId);
-    if (symbol) params.append('symbol', symbol);
-    window.open(`/api/export/trades?${params.toString()}`, '_blank');
-    toast.info('CSV export started');
+  // VULN: userId param enables IDOR — export any user's trades
+  const exportCSV = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (user?.userId) params.append('userId', user.userId);
+      if (symbol) params.append('symbol', symbol);
+      const res = await api.get(`/api/export/trades?${params.toString()}`, { responseType: 'blob' });
+      downloadBlob(res.data, 'trades.csv');
+      toast.success('CSV exported');
+    } catch (err) {
+      toast.error('Export failed');
+    }
   };
 
   // VULN: Export all trades - SQL injection via symbol param
-  const exportAllTrades = () => {
-    const params = new URLSearchParams();
-    if (symbol) params.append('symbol', symbol);
-    window.open(`/api/export/all-trades?${params.toString()}`, '_blank');
-    toast.info('All trades export started');
+  const exportAllTrades = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (symbol) params.append('symbol', symbol);
+      const res = await api.get(`/api/export/all-trades?${params.toString()}`, { responseType: 'blob' });
+      downloadBlob(res.data, 'all-trades.csv');
+      toast.success('All trades exported');
+    } catch (err) {
+      toast.error('Export failed');
+    }
+  };
+
+  // Helper: trigger browser download from a blob
+  const downloadBlob = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   /* -- Column definitions for the trades table -- */
