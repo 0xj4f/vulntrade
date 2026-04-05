@@ -69,6 +69,7 @@ public class TradeStompController {
         }
 
         try {
+            logger.info("TRADE_ORDER: userId={}, symbol={}, side={}, type={}, qty={}, price={}", userId, request.getSymbol(), request.getSide(), request.getType(), request.getQuantity(), request.getPrice());
             Order order = orderService.placeOrder(userId, request);
 
             // Send confirmation to user
@@ -106,6 +107,7 @@ public class TradeStompController {
 
         try {
             Long orderId = ((Number) request.get("orderId")).longValue();
+            logger.info("TRADE_CANCEL: userId={}, orderId={}", userId, orderId);
             // VULN: userId is ignored in cancelOrder - IDOR
             Order order = orderService.cancelOrder(userId, orderId);
 
@@ -141,6 +143,7 @@ public class TradeStompController {
             String symbol = (String) request.get("symbol");
             String side = (String) request.get("side");
             BigDecimal quantity = new BigDecimal(request.get("quantity").toString());
+            logger.info("TRADE_MARKET: userId={}, symbol={}, side={}, qty={}", userId, symbol, side, quantity);
 
             Order order = orderService.executeMarketOrder(userId, symbol, side, quantity);
 
@@ -173,6 +176,7 @@ public class TradeStompController {
         }
 
         try {
+            logger.info("TRADE_PORTFOLIO: userId={}", userId);
             // VULN: If request contains userId, use that instead (IDOR)
             Long targetUserId = userId;
             if (request != null && request.containsKey("userId")) {
@@ -208,6 +212,7 @@ public class TradeStompController {
         }
 
         try {
+            logger.info("TRADE_BALANCE: userId={}", userId);
             var user = accountService.getUserWithBalance(userId);
 
             Map<String, Object> response = new HashMap<>();
@@ -246,6 +251,7 @@ public class TradeStompController {
         }
 
         try {
+            logger.info("TRADE_WITHDRAW_WS: userId={}, amount={}", userId, request.getAmount());
             // VULN: No 2FA verification
             // VULN: No rate limiting
             // VULN: Negative amount not checked
@@ -279,6 +285,7 @@ public class TradeStompController {
         }
 
         try {
+            logger.info("TRADE_DEPOSIT_WS: userId={}, amount={}", userId, request.getAmount());
             // VULN: No source verification - anyone can deposit any amount
             BigDecimal newBalance = accountService.deposit(
                     userId, request.getAmount(), request.getSourceAccount());
@@ -311,6 +318,7 @@ public class TradeStompController {
         }
 
         try {
+            logger.info("TRADE_HISTORY: userId={}, startDate={}, endDate={}, symbol={}", userId, request.getStartDate(), request.getEndDate(), request.getSymbol());
             // VULN: SQL injection via date parameters
             // VULN: No pagination - DoS possible
             List<Object[]> history = customQueryRepository.getTradeHistory(
@@ -354,6 +362,7 @@ public class TradeStompController {
         }
 
         try {
+            logger.info("TRADE_ALERT: userId={}, symbol={}, target={}", userId, request.getSymbol(), request.getTargetPrice());
             // VULN: No sanitization of symbol - stored XSS
             // VULN: No limit on alerts per user
             var alert = alertService.createAlert(

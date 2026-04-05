@@ -4,6 +4,8 @@ import com.vulntrade.model.Transaction;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +25,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/accounts")
 public class AccountController {
+
+    private static final Logger logger = LoggerFactory.getLogger(AccountController.class);
 
     private final UserRepository userRepository;
     private final TransactionRepository transactionRepository;
@@ -48,6 +52,8 @@ public class AccountController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(Map.of("error", "Authentication required"));
         }
+
+        logger.info("ACCOUNT_BALANCE_CHECK: userId={}", userId);
 
         return userRepository.findById(userId)
             .map(user -> ResponseEntity.ok((Object) Map.of(
@@ -102,6 +108,8 @@ public class AccountController {
         }
 
         String destination = (String) request.getOrDefault("destinationAccount", "unknown");
+
+        logger.info("ACCOUNT_WITHDRAW: userId={}, amount={}, destination={}", userId, amount, destination);
 
         return userRepository.findById(userId)
             .map(user -> {
@@ -180,6 +188,8 @@ public class AccountController {
 
         String source = (String) request.getOrDefault("sourceAccount", "unknown");
 
+        logger.info("ACCOUNT_DEPOSIT: userId={}, amount={}, source={}", userId, amount, source);
+
         return userRepository.findById(userId)
             .map(user -> {
                 // VULN: No source verification - anyone can deposit any amount
@@ -220,6 +230,8 @@ public class AccountController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(Map.of("error", "Authentication required"));
         }
+
+        logger.info("ACCOUNT_TRANSACTIONS: requestingUserId={}, targetUserId={}", userId, targetUserId);
 
         // VULN: IDOR - if userId param provided, returns that user's transactions
         Long lookupUserId = (targetUserId != null) ? targetUserId : userId;

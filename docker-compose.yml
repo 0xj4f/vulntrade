@@ -94,6 +94,7 @@ services:
     volumes:
       - ./flags:/opt/flags:ro   # Flag 5 for RCE challenge
       - uploads:/uploads/photos  # VULN #95: photo uploads - no type restrictions
+      - vulntrade-logs:/var/log/vulntrade  # Structured JSON logs for Wazuh/SIEM
 
   # ============================================================
   # Frontend - React + nginx
@@ -113,6 +114,7 @@ services:
 volumes:
   pgdata:
   uploads:
+  vulntrade-logs:
 
 networks:
   vulntrade-net:

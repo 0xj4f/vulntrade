@@ -9,6 +9,8 @@ import com.vulntrade.repository.PasswordResetTokenRepository;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,6 +29,8 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
 
     private final UserRepository userRepository;
     private final JwtTokenProvider jwtTokenProvider;
@@ -60,13 +64,16 @@ public class AuthController {
         if (userOpt.isEmpty()) {
             Map<String, String> error = new HashMap<>();
             error.put("error", "User not found");  // VULN: reveals user doesn't exist
+            logger.warn("AUTH_LOGIN_FAIL: username={}, reason=user_not_found", request.getUsername());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
         User user = userOpt.get();
+        String username = user.getUsername();
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             Map<String, String> error = new HashMap<>();
             error.put("error", "Invalid password");  // VULN: reveals password is wrong
+            logger.warn("AUTH_LOGIN_FAIL: username={}, reason=bad_password", username);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
@@ -91,6 +98,8 @@ public class AuthController {
         response.put("firstName", user.getFirstName());
         response.put("profilePic", user.getProfilePic());
 
+        logger.info("AUTH_LOGIN_SUCCESS: userId={}, username={}, role={}", user.getId(), user.getUsername(), user.getRole());
+
         return ResponseEntity.ok(response);
     }
 
@@ -114,6 +123,7 @@ public class AuthController {
     @PostMapping("/login-legacy")
     @SuppressWarnings("unchecked")
     public ResponseEntity<?> loginLegacy(@RequestBody LoginRequest request) {
+        logger.info("AUTH_LOGIN_LEGACY: username={}", request.getUsername());
         try {
             // VULN: SQL injection - username concatenated directly into query
             String sql = "SELECT * FROM users WHERE username = '" + request.getUsername() + "'";
@@ -168,6 +178,8 @@ public class AuthController {
         user.setAccountLevel(1);  // New users start at Level 1 (BASIC)
 
         User saved = userRepository.save(user);
+        User newUser = saved;
+        logger.info("AUTH_REGISTER: userId={}, username={}, role={}", newUser.getId(), newUser.getUsername(), newUser.getRole());
 
         // Record initial signup bonus in transaction history
         Transaction signupBonus = new Transaction();
@@ -204,6 +216,8 @@ public class AuthController {
     public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> request) {
         String email = request.get("email");
         Optional<User> userOpt = userRepository.findByEmail(email);
+
+        logger.info("AUTH_RESET_REQUEST: email={}", email);
 
         Map<String, Object> response = new HashMap<>();
         response.put("message", "If the email exists, a reset link has been sent");
@@ -307,6 +321,7 @@ public class AuthController {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         // VULN: Old JWT still valid
+        logger.info("AUTH_PASSWORD_CHANGE: userId={}", userId);
 
         return ResponseEntity.ok(Map.of(
             "message", "Password changed successfully",

