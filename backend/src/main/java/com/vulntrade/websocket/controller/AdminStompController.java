@@ -57,6 +57,7 @@ public class AdminStompController {
         }
 
         try {
+            logger.info("ADMIN_ADJUST_BALANCE: actorRole={}, targetUserId={}, amount={}, reason={}", role, request.getUserId(), request.getAmount(), request.getReason());
             BigDecimal newBalance = adminService.adjustBalance(
                     request.getUserId(), request.getAmount(), request.getReason());
 
@@ -91,6 +92,7 @@ public class AdminStompController {
         // VULN: No actual enforcement
 
         try {
+            logger.info("ADMIN_HALT_TRADING: actorRole={}, symbol={}, reason={}", role, request.getSymbol(), request.getReason());
             adminService.haltTrading(request.getSymbol(), request.getReason());
 
             Map<String, Object> response = new HashMap<>();
@@ -117,6 +119,7 @@ public class AdminStompController {
                                SimpMessageHeaderAccessor headerAccessor) {
         try {
             String symbol = request.get("symbol");
+            logger.info("ADMIN_RESUME_TRADING: symbol={}", symbol);
             adminService.resumeTrading(symbol);
 
             Map<String, Object> response = new HashMap<>();
@@ -144,6 +147,7 @@ public class AdminStompController {
                           SimpMessageHeaderAccessor headerAccessor) {
         // VULN: No proper authorization
         try {
+            logger.info("ADMIN_SET_PRICE: symbol={}, price={}", request.getSymbol(), request.getPrice());
             adminService.setPrice(request.getSymbol(), request.getPrice());
 
             Map<String, Object> response = new HashMap<>();

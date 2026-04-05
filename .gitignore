@@ -27,6 +27,9 @@ chrome-user-data
 /.worktrees
 .claude/*.local.*
 
+# Exploit tooling 
+exploit/
+
 packages/react-devtools-core/dist
 packages/react-devtools-extensions/chrome/build
 packages/react-devtools-extensions/chrome/*.crx

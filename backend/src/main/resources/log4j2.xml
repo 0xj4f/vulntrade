@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    VULN: Log4j2 2.14.1 configuration — vulnerable to Log4Shell (CVE-2021-44228).
+    No {nolookups} suffix on message patterns. JNDI lookups are enabled by default.
+    User-controlled input flows into logger.info() calls in AdminService, AlertService, AuditService.
+
+    Structured JSON logging for Wazuh/SIEM ingestion:
+      - /var/log/vulntrade/app.log     — all application logs (JSON, one per line)
+      - /var/log/vulntrade/security.log — auth and access control events (JSON)
+      - Console (stdout)               — human-readable for docker logs
+-->
+<Configuration status="WARN" monitorInterval="30">
+    <Properties>
+        <Property name="LOG_DIR">/var/log/vulntrade</Property>
+        <Property name="APP_NAME">vulntrade</Property>
+    </Properties>
+
+    <Appenders>
+        <!-- Console: human-readable for docker logs -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} - %m%n"/>
+        </Console>
+
+        <!-- JSON file: Wazuh/SIEM-compatible structured logs -->
+        <RollingFile name="JsonFile"
+                     fileName="${LOG_DIR}/app.log"
+                     filePattern="${LOG_DIR}/app-%d{yyyy-MM-dd}-%i.log.gz">
+            <JsonLayout complete="false" compact="true" eventEol="true"
+                        properties="true" stacktraceAsString="true">
+                <KeyValuePair key="application" value="${APP_NAME}"/>
+                <KeyValuePair key="environment" value="production"/>
+            </JsonLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="30"/>
+        </RollingFile>
+
+        <!-- Security log: auth and access events only -->
+        <RollingFile name="SecurityLog"
+                     fileName="${LOG_DIR}/security.log"
+                     filePattern="${LOG_DIR}/security-%d{yyyy-MM-dd}-%i.log.gz">
+            <JsonLayout complete="false" compact="true" eventEol="true"
+                        properties="true" stacktraceAsString="true">
+                <KeyValuePair key="application" value="${APP_NAME}"/>
+                <KeyValuePair key="log_type" value="security"/>
+            </JsonLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10"/>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <!-- Application logs -->
+        <Logger name="com.vulntrade" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="JsonFile"/>
+        </Logger>
+
+        <!-- Security-specific logs (auth, access control) — also written to SecurityLog -->
+        <Logger name="com.vulntrade.security" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="JsonFile"/>
+            <AppenderRef ref="SecurityLog"/>
+        </Logger>
+
+        <!-- Spring Security logs — to SecurityLog -->
+        <Logger name="org.springframework.security" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="SecurityLog"/>
+        </Logger>
+
+        <!-- Hibernate SQL logs -->
+        <Logger name="org.hibernate.SQL" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="JsonFile"/>
+        </Logger>
+
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="JsonFile"/>
+        </Root>
+    </Loggers>
+</Configuration>

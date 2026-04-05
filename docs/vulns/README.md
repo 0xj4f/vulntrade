@@ -67,6 +67,7 @@ Open `http://localhost:3001` and login with any default account:
 - alg:none JWT bypass
 
 ### Expert (Attack Chains)
+- **Log4Shell (CVE-2021-44228) via WebSocket** — inject JNDI payload in STOMP message, get RCE
 - Chain 3+ vulnerabilities for maximum impact
 - See [09-attack-chains.md](09-attack-chains.md) for multi-step scenarios
 
@@ -100,7 +101,7 @@ Open `http://localhost:3001` and login with any default account:
 | [07-frontend.md](07-frontend.md) | XSS, Client-Side Auth, localStorage, DOM Tampering | 15 |
 | [08-infrastructure.md](08-infrastructure.md) | Redis, PostgreSQL, Docker, Vulnerable Dependencies | 12 |
 | [09-attack-chains.md](09-attack-chains.md) | Multi-Step Scenarios | 7 chains |
-| [10-ctf-flags.md](10-ctf-flags.md) | All Flags with Hints | 11 flags |
+| [10-ctf-flags.md](10-ctf-flags.md) | All Flags with Hints | 12 flags |
 
 ---
 
