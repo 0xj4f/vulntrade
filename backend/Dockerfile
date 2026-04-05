@@ -13,7 +13,10 @@ COPY src ./src
 RUN mvn package -DskipTests -B
 
 # Runtime stage - still vulnerable
-FROM eclipse-temurin:11-jre
+# VULN: Using JDK 11.0.11 — trustURLCodebase flag works, enabling Log4Shell remote class loading.
+# Later JDK builds (11.0.16+) added ObjectFactoryBuilder restrictions that silently ignore the flag.
+# 11.0.11 is the sweet spot: modern enough for Spring Boot, old enough for Log4Shell RCE.
+FROM adoptopenjdk:11.0.11_9-jre-hotspot
 
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
