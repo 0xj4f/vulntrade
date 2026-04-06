@@ -1,0 +1,91 @@
+name: Build & Tag
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  MAJOR: 0
+  MINOR: 5
+
+jobs:
+  build-backend:
+    name: Build Backend Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: vulntrade-backend:${{ github.sha }}
+
+  build-frontend:
+    name: Build Frontend Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: vulntrade-frontend:${{ github.sha }}
+
+  tag:
+    name: Tag Release
+    needs: [build-backend, build-frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Calculate version
+        id: version
+        run: |
+          MAJOR=${{ env.MAJOR }}
+          MINOR=${{ env.MINOR }}
+          PREFIX="${MAJOR}.${MINOR}"
+
+          # Find the latest tag matching this MAJOR.MINOR
+          LATEST=$(git tag -l "${PREFIX}.*" --sort=-v:refname | head -1)
+
+          if [[ -n "$LATEST" ]]; then
+            # Extract patch number and increment
+            PATCH=$(echo "$LATEST" | awk -F. '{print $3}')
+            PATCH=$((PATCH + 1))
+          else
+            # First release for this MAJOR.MINOR
+            PATCH=0
+          fi
+
+          VERSION="${PREFIX}.${PATCH}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Calculated version: ${VERSION} (latest tag: ${LATEST:-none})"
+
+      - name: Create tag
+        run: |
+          git config user.name "0xj4f"
+          git config user.email "0xj4f.sh@gmail.com"
+          git tag -a "${{ steps.version.outputs.version }}" -m "Release ${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.version }}"
