@@ -119,6 +119,12 @@ export function AuthProvider({ children }) {
   // Refresh user data (e.g. balance) from backend.
   // Uses userIdRef + functional setUser so it never clobbers concurrent updates
   // (e.g. updatePhoto setting photoUrl while a balance refresh is in-flight).
+  // Refresh user data (e.g. balance) from backend.
+  // NOTE: The API response contains the REAL role from the database,
+  // which overwrites any forged JWT role in client state.
+  // This is realistic — most apps re-sync user state from the server.
+  // The forged JWT still works for API calls (the backend trusts it),
+  // but the frontend UI reverts to the DB role. Attack the API, not the UI.
   const refreshUser = useCallback(async () => {
     const userId = userIdRef.current;
     if (!userId) return;
