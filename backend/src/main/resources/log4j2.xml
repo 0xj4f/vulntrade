@@ -56,28 +56,27 @@
 
     <Loggers>
         <!-- Application logs -->
-        <Logger name="com.vulntrade" level="DEBUG" additivity="false">
+        <Logger name="com.vulntrade" level="INFO" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="JsonFile"/>
         </Logger>
 
         <!-- Security-specific logs (auth, access control) — also written to SecurityLog -->
-        <Logger name="com.vulntrade.security" level="DEBUG" additivity="false">
+        <Logger name="com.vulntrade.security" level="INFO" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="JsonFile"/>
             <AppenderRef ref="SecurityLog"/>
         </Logger>
 
         <!-- Spring Security logs — to SecurityLog -->
-        <Logger name="org.springframework.security" level="DEBUG" additivity="false">
+        <Logger name="org.springframework.security" level="INFO" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="SecurityLog"/>
         </Logger>
 
-        <!-- Hibernate SQL logs -->
-        <Logger name="org.hibernate.SQL" level="DEBUG" additivity="false">
+        <!-- Hibernate SQL logs — WARN to silence per-tick SELECT spam -->
+        <Logger name="org.hibernate.SQL" level="WARN" additivity="false">
             <AppenderRef ref="Console"/>
-            <AppenderRef ref="JsonFile"/>
         </Logger>
 
         <Root level="INFO">
