@@ -37,15 +37,32 @@
             <DefaultRolloverStrategy max="30"/>
         </RollingFile>
 
-        <!-- Security log: auth and access events only -->
+        <!-- Framework security log: Spring Security and com.vulntrade.security framework output.
+             Separate file from security.log so the SECURITY_EVENTS sink stays pure JSONL. -->
         <RollingFile name="SecurityLog"
-                     fileName="${LOG_DIR}/security.log"
-                     filePattern="${LOG_DIR}/security-%d{yyyy-MM-dd}-%i.log.gz">
+                     fileName="${LOG_DIR}/security-framework.log"
+                     filePattern="${LOG_DIR}/security-framework-%d{yyyy-MM-dd}-%i.log.gz">
             <JsonLayout complete="false" compact="true" eventEol="true"
                         properties="true" stacktraceAsString="true">
                 <KeyValuePair key="application" value="${APP_NAME}"/>
-                <KeyValuePair key="log_type" value="security"/>
+                <KeyValuePair key="log_type" value="security-framework"/>
             </JsonLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10"/>
+        </RollingFile>
+
+        <!-- SecurityEventFile: pure-JSONL sink for SecurityEventLogger emissions.
+             SecurityEventLogger builds the JSON itself (via Jackson) and passes
+             it as the log message — so we use PatternLayout "%m%n" to emit the
+             raw JSON unwrapped. One event per line. This is the file shipped to
+             S3 under the security/ prefix. -->
+        <RollingFile name="SecurityEventFile"
+                     fileName="${LOG_DIR}/security.log"
+                     filePattern="${LOG_DIR}/security-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="%m%n"/>
             <Policies>
                 <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
                 <SizeBasedTriggeringPolicy size="50 MB"/>
@@ -77,6 +94,14 @@
         <!-- Hibernate SQL logs — WARN to silence per-tick SELECT spam -->
         <Logger name="org.hibernate.SQL" level="WARN" additivity="false">
             <AppenderRef ref="Console"/>
+        </Logger>
+
+        <!-- Dedicated logger for SecurityEventLogger.
+             SECURITY_EVENTS -> SecurityEventFile (security.log) + Console.
+             Does NOT propagate to app.log (JsonFile) — keeps the two sinks distinct. -->
+        <Logger name="SECURITY_EVENTS" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="SecurityEventFile"/>
         </Logger>
 
         <Root level="INFO">

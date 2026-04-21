@@ -1,5 +1,6 @@
 package com.vulntrade.security;
 
+import com.vulntrade.security.logging.SecurityEventLogger;
 import io.jsonwebtoken.Claims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map;
 
 /**
  * STOMP channel interceptor for message-level authentication.
@@ -76,6 +78,8 @@ public class StompChannelInterceptor implements ChannelInterceptor {
             if (accessor.getUser() == null) {
                 accessor.setUser(new StompPrincipal("anonymous", null, "ANONYMOUS"));
                 logger.warn("Anonymous STOMP connection allowed");
+                SecurityEventLogger.log("WS_CONNECT_ANONYMOUS", "SUCCESS", Map.of(
+                        "sessionId", String.valueOf(accessor.getSessionId())));
             }
         }
 
@@ -88,6 +92,14 @@ public class StompChannelInterceptor implements ChannelInterceptor {
                         accessor.getUser() != null ? accessor.getUser().getName() : "unknown",
                         destination);
                 // VULN: Should check for ADMIN role but doesn't
+                String subjectRole = (accessor.getUser() instanceof StompPrincipal)
+                        ? ((StompPrincipal) accessor.getUser()).getRole() : "ANONYMOUS";
+                if (!"ADMIN".equalsIgnoreCase(subjectRole)) {
+                    SecurityEventLogger.log("WS_SUBSCRIBE_PRIVILEGED", "SUCCESS", Map.of(
+                            "destination", String.valueOf(destination),
+                            "sessionId", String.valueOf(accessor.getSessionId()),
+                            "subjectRole", String.valueOf(subjectRole)));
+                }
             }
         }
 
@@ -105,6 +117,10 @@ public class StompChannelInterceptor implements ChannelInterceptor {
                                 user.getName(), destination);
                         // VULN: We log but DON'T block the message
                         // In a real app, we should throw an exception here
+                        SecurityEventLogger.log("WS_SEND_ADMIN_BY_NONADMIN", "SUCCESS", Map.of(
+                                "destination", String.valueOf(destination),
+                                "sessionId", String.valueOf(accessor.getSessionId()),
+                                "subjectRole", String.valueOf(role)));
                     }
                 }
             }

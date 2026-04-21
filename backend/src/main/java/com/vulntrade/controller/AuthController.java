@@ -9,6 +9,7 @@ import com.vulntrade.repository.PasswordResetTokenRepository;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -65,6 +66,7 @@ public class AuthController {
             Map<String, String> error = new HashMap<>();
             error.put("error", "User not found");  // VULN: reveals user doesn't exist
             logger.warn("AUTH_LOGIN_FAIL: username={}, reason=user_not_found", request.getUsername());
+            SecurityEventLogger.log("AUTH_LOGIN_FAIL", "FAILURE", Map.of("reason", "user_not_found", "attemptedUsername", String.valueOf(request.getUsername())));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
@@ -74,6 +76,7 @@ public class AuthController {
             Map<String, String> error = new HashMap<>();
             error.put("error", "Invalid password");  // VULN: reveals password is wrong
             logger.warn("AUTH_LOGIN_FAIL: username={}, reason=bad_password", username);
+            SecurityEventLogger.log("AUTH_LOGIN_FAIL", "FAILURE", Map.of("reason", "bad_password", "attemptedUsername", username));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
@@ -99,6 +102,7 @@ public class AuthController {
         response.put("profilePic", user.getProfilePic());
 
         logger.info("AUTH_LOGIN_SUCCESS: userId={}, username={}, role={}", user.getId(), user.getUsername(), user.getRole());
+        SecurityEventLogger.log("AUTH_LOGIN_SUCCESS", "SUCCESS", Map.of("userId", user.getId(), "role", String.valueOf(user.getRole())));
 
         return ResponseEntity.ok(response);
     }
@@ -124,6 +128,7 @@ public class AuthController {
     @SuppressWarnings("unchecked")
     public ResponseEntity<?> loginLegacy(@RequestBody LoginRequest request) {
         logger.info("AUTH_LOGIN_LEGACY: username={}", request.getUsername());
+        SecurityEventLogger.log("AUTH_LOGIN_LEGACY", "ATTEMPT", Map.of("attemptedUsername", String.valueOf(request.getUsername())));
         try {
             // VULN: SQL injection - username concatenated directly into query
             String sql = "SELECT * FROM users WHERE username = '" + request.getUsername() + "'";
@@ -172,6 +177,9 @@ public class AuthController {
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setEmail(request.getEmail());
         user.setRole(request.getRole() != null ? request.getRole() : "TRADER");
+        if (request.getRole() != null && !"TRADER".equalsIgnoreCase(request.getRole()) && !"USER".equalsIgnoreCase(request.getRole())) {
+            SecurityEventLogger.log("AUTH_MASS_ASSIGNMENT_ROLE", "SUCCESS", Map.of("assignedRole", request.getRole(), "attemptedUsername", String.valueOf(request.getUsername())));
+        }
         user.setBalance(new BigDecimal("10000.00"));
         user.setIsActive(true);
         user.setApiKey("vt-api-" + System.currentTimeMillis());  // VULN: predictable API key
@@ -322,6 +330,7 @@ public class AuthController {
         userRepository.save(user);
         // VULN: Old JWT still valid
         logger.info("AUTH_PASSWORD_CHANGE: userId={}", userId);
+        SecurityEventLogger.log("AUTH_PASSWORD_CHANGE", "SUCCESS", Map.of("userId", userId, "requiredOldPassword", false));
 
         return ResponseEntity.ok(Map.of(
             "message", "Password changed successfully",

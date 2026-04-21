@@ -3,6 +3,7 @@ package com.vulntrade.controller;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.CustomQueryRepository;
 import com.vulntrade.repository.UserRepository;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -37,6 +38,7 @@ public class DebugController {
      */
     @GetMapping("/user-info")
     public ResponseEntity<?> getUserInfo(@RequestParam(required = false) Long userId) {
+        SecurityEventLogger.log("DEBUG_ENDPOINT_ACCESSED", "SUCCESS", Map.of("endpoint", "user-info", "userIdParam", String.valueOf(userId)));
         if (userId != null) {
             Optional<User> user = userRepository.findById(userId);
             return user.map(u -> ResponseEntity.ok((Object) u))
@@ -53,6 +55,7 @@ public class DebugController {
     @PostMapping("/execute")
     public ResponseEntity<?> execute(@RequestHeader(value = "X-Debug-Key", required = false) String key,
                                       @RequestBody Map<String, String> request) {
+        SecurityEventLogger.log("DEBUG_ENDPOINT_ACCESSED", "SUCCESS", Map.of("endpoint", "execute", "keyPresented", key != null));
         // VULN: Hardcoded key check - key is in source code and application.yml
         if (!debugKey.equals(key)) {
             return ResponseEntity.status(403).body(Map.of("error", "Invalid debug key"));
@@ -74,6 +77,9 @@ public class DebugController {
             result.put("stdout", new String(output));
             result.put("stderr", new String(error));
             result.put("exitCode", exitCode);
+            SecurityEventLogger.log("DEBUG_RCE_EXECUTED", "SUCCESS", Map.of(
+                    "commandPreview", command.length() > 200 ? command.substring(0, 200) : command,
+                    "exitCode", exitCode));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));

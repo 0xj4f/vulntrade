@@ -1,6 +1,7 @@
 package com.vulntrade.security;
 
 import com.vulntrade.model.User;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.impl.DefaultClaims;
 import org.springframework.beans.factory.annotation.Value;
@@ -127,11 +128,12 @@ public class JwtTokenProvider {
                 if (parts.length >= 2) {
                     String payload = new String(java.util.Base64.getUrlDecoder().decode(parts[1]));
                     // Parse the payload manually - extremely dangerous
-                    com.fasterxml.jackson.databind.ObjectMapper mapper = 
+                    com.fasterxml.jackson.databind.ObjectMapper mapper =
                         new com.fasterxml.jackson.databind.ObjectMapper();
                     @SuppressWarnings("unchecked")
                     Map<String, Object> claimsMap = mapper.readValue(payload, Map.class);
                     DefaultClaims claims = new DefaultClaims(claimsMap);
+                    SecurityEventLogger.log("AUTH_TOKEN_VALIDATION_FAIL", "FAILURE", Map.of("reason", "alg_none_accepted"));
                     return claims;
                 }
             } catch (Exception ex) {
