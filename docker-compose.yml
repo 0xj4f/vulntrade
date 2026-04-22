@@ -111,9 +111,35 @@ services:
     networks:
       - vulntrade-net
 
+  # ============================================================
+  # Log shipper - Fluent Bit sidecar, ships JSON logs to S3
+  # Every 1 minute → s3://$S3_BUCKET/vulntrade/...
+  # ============================================================
+  log-shipper:
+    image: fluent/fluent-bit:3.1
+    container_name: vulntrade-log-shipper
+    volumes:
+      - ./logs/vulntrade:/var/log/vulntrade:ro
+      - ./log-shipper/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./log-shipper/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - fluent-bit-buffer:/var/log/fluent-bit
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
+      AWS_REGION: ${AWS_REGION:-eu-west-2}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-eu-west-2}
+      S3_BUCKET: ${S3_BUCKET:-wazuh-application-logs}
+    depends_on:
+      - backend
+    networks:
+      - vulntrade-net
+    restart: unless-stopped
+
 volumes:
   pgdata:
   uploads:
+  fluent-bit-buffer:
 
 networks:
   vulntrade-net:

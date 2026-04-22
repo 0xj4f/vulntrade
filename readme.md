@@ -139,6 +139,8 @@ The idea is simple: attack the application, then switch hats and build the detec
 
 Logs are bind-mounted to `./logs/vulntrade/` on the host for easy SIEM agent pickup (filebeat, fluentd, `aws s3 cp`, etc.).
 
+A Fluent Bit sidecar (`log-shipper` service) tails `security.log` and `app.log` and ships gzipped batches to `s3://$S3_BUCKET/vulntrade/...` every minute. This keeps data fresh for Wazuh (which polls S3 every 5 min) — new security events are searchable in under 6 minutes end-to-end, which matters for active threat hunting. Set `AWS_*` and `S3_BUCKET` in `.env` to enable it. Leave them blank and the container will start but fail auth — no impact on the rest of the stack.
+
 ## Architecture
 
 ```
