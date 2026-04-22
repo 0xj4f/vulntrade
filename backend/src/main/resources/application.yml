@@ -21,11 +21,11 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true  # VULN: SQL queries logged
+    show-sql: false  # quieted — Hibernate SQL was flooding stdout (MessageBroker-1 SELECTs on symbols every tick)
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
+        format_sql: false
 
   # H2 Console - VULN: enabled and accessible
   h2:
@@ -121,6 +121,6 @@ debug:
 # Logging
 logging:
   level:
-    com.vulntrade: DEBUG
-    org.springframework.security: DEBUG  # VULN: security debug logging
-    org.hibernate.SQL: DEBUG
+    com.vulntrade: INFO                  # was DEBUG; quieted for normal ops
+    org.springframework.security: INFO   # was DEBUG; quieted for normal ops
+    org.hibernate.SQL: WARN              # was DEBUG; quieted to stop per-tick SELECT flood

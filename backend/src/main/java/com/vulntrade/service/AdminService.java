@@ -4,6 +4,7 @@ import com.vulntrade.model.Transaction;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -72,6 +73,11 @@ public class AdminService {
         // VULN: Log injection via reason field
         logger.info("Admin balance adjustment: userId={}, amount={}, reason={}, newBalance={}",
                 userId, amount, reason, newBalance);
+        SecurityEventLogger.log("ADMIN_BALANCE_ADJUST", "SUCCESS", Map.of(
+                "targetUserId", userId,
+                "amount", amount,
+                "reason", String.valueOf(reason),
+                "newBalance", newBalance));
 
         // Broadcast to admin channel
         Map<String, Object> alert = new HashMap<>();
@@ -95,6 +101,9 @@ public class AdminService {
 
         // VULN: Log injection via reason field
         logger.info("Trading halted: symbol={}, reason={}", symbol, reason);
+        SecurityEventLogger.log("ADMIN_HALT_TRADING", "SUCCESS", Map.of(
+                "symbol", String.valueOf(symbol),
+                "reason", String.valueOf(reason)));
 
         // Broadcast to admin channel
         // VULN: /topic/admin/alerts subscribable by any user
@@ -135,6 +144,9 @@ public class AdminService {
      */
     public void setPrice(String symbol, BigDecimal price) {
         priceSimulator.setPrice(symbol, price);
+        SecurityEventLogger.log("ADMIN_SET_PRICE", "SUCCESS", Map.of(
+                "symbol", String.valueOf(symbol),
+                "newPrice", price));
 
         // VULN: No audit trail
         Map<String, Object> alert = new HashMap<>();

@@ -4,12 +4,14 @@ import com.vulntrade.model.Transaction;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * Account management service for deposits and withdrawals.
@@ -90,6 +92,11 @@ public class AccountService {
         // VULN: No audit logging of withdrawal
         logger.info("Withdrawal: userId={}, amount={}, destination={}, newBalance={}",
                 userId, amount, destinationAccount, newBalance);
+        SecurityEventLogger.log("ACCOUNT_WITHDRAW", "SUCCESS", Map.of(
+                "userId", userId,
+                "amount", amount,
+                "destination", String.valueOf(destinationAccount),
+                "balanceAfter", newBalance));
 
         return newBalance;
     }
@@ -124,6 +131,11 @@ public class AccountService {
 
         logger.info("Deposit: userId={}, amount={}, source={}, newBalance={}",
                 userId, amount, sourceAccount, newBalance);
+        SecurityEventLogger.log("ACCOUNT_DEPOSIT", "SUCCESS", Map.of(
+                "userId", userId,
+                "amount", amount,
+                "source", String.valueOf(sourceAccount),
+                "balanceAfter", newBalance));
 
         return newBalance;
     }

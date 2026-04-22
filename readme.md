@@ -53,6 +53,18 @@ docker compose up
 
 That's it. The full stack starts in under a minute.
 
+### Using prebuilt images (no local build)
+
+If you just want to run the lab without compiling anything, use the prebuilt images published to Docker Hub:
+
+```bash
+git clone https://github.com/0xj4f/vulntrade.git
+cd vulntrade
+docker compose -f docker-compose.prod.yml up -d
+```
+
+The `prod` compose file pulls `0xj4f/vulntrade-backend:latest` and `0xj4f/vulntrade-frontend:latest` instead of building from source. Everything else — ports, DB seed, flags, vulnerabilities — is identical. To pin to a specific release, replace `:latest` with a version tag (e.g. `:0.5.3`).
+
 | Service    | Host Port | URL                                 |
 |------------|-----------|-------------------------------------|
 | Frontend   | **3001**  | http://localhost:3001               |
@@ -125,7 +137,9 @@ Every attack you perform generates structured log data:
 
 The idea is simple: attack the application, then switch hats and build the detection. Write Wazuh rules that catch what you just did. Every offensive technique has a defensive counterpart waiting to be built.
 
-Log volumes are mounted at `vulntrade-logs` for easy SIEM agent configuration.
+Logs are bind-mounted to `./logs/vulntrade/` on the host for easy SIEM agent pickup (filebeat, fluentd, `aws s3 cp`, etc.).
+
+A Fluent Bit sidecar (`log-shipper` service) tails `security.log` and `app.log` and ships gzipped batches to `s3://$S3_BUCKET/vulntrade/...` every minute. This keeps data fresh for Wazuh (which polls S3 every 5 min) — new security events are searchable in under 6 minutes end-to-end, which matters for active threat hunting. Set `AWS_*` and `S3_BUCKET` in `.env` to enable it. Leave them blank and the container will start but fail auth — no impact on the rest of the stack.
 
 ## Architecture
 
