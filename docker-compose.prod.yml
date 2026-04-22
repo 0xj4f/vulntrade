@@ -1,3 +1,14 @@
+# Production compose — uses pre-built images from Docker Hub.
+# No local build step; backend and frontend are pulled from 0xj4f/vulntrade-*.
+#
+# Usage:
+#   git clone https://github.com/0xj4f/vulntrade.git
+#   cd vulntrade
+#   cp .env.example .env   # if .env doesn't exist
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# To pin a specific release, replace `:latest` with a version tag (e.g. `:0.5.3`).
+
 services:
   # ============================================================
   # PostgreSQL - VULN: default creds, exposed port
@@ -58,13 +69,12 @@ services:
       - vulntrade-net
 
   # ============================================================
-  # Backend - Spring Boot (Java 11)
+  # Backend - prebuilt image from Docker Hub
   # ============================================================
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: 0xj4f/vulntrade-backend:latest
     container_name: vulntrade-backend
+    pull_policy: always
     ports:
       - "8085:8080"    # Main API (mapped to 8085 to avoid conflicts)
       - "5005:5005"    # VULN: debug port exposed
@@ -90,20 +100,18 @@ services:
         condition: service_healthy
     networks:
       - vulntrade-net
-    # VULN: no resource limits
     volumes:
-      - ./flags:/opt/flags:ro   # Flag 5 for RCE challenge
-      - uploads:/uploads/photos  # VULN #95: photo uploads - no type restrictions
+      - ./flags:/opt/flags:ro              # Flag 5 for RCE challenge
+      - uploads:/uploads/photos            # VULN: photo uploads - no type restrictions
       - ./logs/vulntrade:/var/log/vulntrade  # Structured JSON logs (bind mount for SIEM/S3)
 
   # ============================================================
-  # Frontend - React + nginx
+  # Frontend - prebuilt image from Docker Hub
   # ============================================================
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: 0xj4f/vulntrade-frontend:latest
     container_name: vulntrade-frontend
+    pull_policy: always
     ports:
       - "3001:80"
     depends_on:

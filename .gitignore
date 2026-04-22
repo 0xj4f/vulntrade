@@ -27,8 +27,16 @@ chrome-user-data
 /.worktrees
 .claude/*.local.*
 
-# Exploit tooling 
-exploit/
+# Exploit tooling — framework committed, local scripts gitignored
+exploit/exploits/
+exploit/*.sh
+exploit/*.jar
+exploit/jwt.py
+exploit/marshalsec*
+exploit/.venv/
+
+# Runtime logs (bind-mounted from docker-compose)
+logs/
 
 packages/react-devtools-core/dist
 packages/react-devtools-extensions/chrome/build
