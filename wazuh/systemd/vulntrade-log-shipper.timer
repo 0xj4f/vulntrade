@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic run of VulnTrade log shipper
+Requires=vulntrade-log-shipper.service
+
+[Timer]
+# Fire 30s after boot so we don't race docker + volume mounts, then every minute.
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=vulntrade-log-shipper.service
+
+[Install]
+WantedBy=timers.target
