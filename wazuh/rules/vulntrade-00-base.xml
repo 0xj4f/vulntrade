@@ -1,0 +1,41 @@
+<!--
+  VulnTrade — base anchors (ids 110090-110099).
+
+  Pipeline: Log4j2 JSON -> Fluent Bit (Parser json) -> S3 -> SQS -> aws-s3 wodle.
+  The wodle wraps each record as {"integration":"aws","aws":{...record...}},
+  so the stock `json` decoder exposes every field as aws.<field> and nested
+  details as aws.details.<key>. Every such event lands on stock rule 80200
+  (AWS alert, level 0) — that is our anchor. Verified with wazuh-logtest on
+  npr dev2, Wazuh 4.14.5, 2026-09-29.
+
+  Scalars arrive as strings (numbers and booleans are stringified by the wodle).
+
+  Files load alphabetically from etc/rules/, hence the numeric prefixes:
+  anchors must load before the files that chain off them.
+
+  Do NOT add a level-0 child under 110090: Wazuh evaluates level-0 siblings
+  before all others, so a silent anchor would swallow every event before the
+  content rules (Log4Shell, XSS, traversal) get a chance. Among non-zero
+  siblings the higher level is tried first, which is why a Log4Shell string in
+  a security event wins over that event's own eventType rule.
+-->
+<group name="vulntrade,">
+
+  <!-- Any VulnTrade record, either sink. Silent; anchors content rules. -->
+  <rule id="110090" level="0">
+    <if_sid>80200</if_sid>
+    <field name="aws.source_file">^/var/log/vulntrade/</field>
+    <description>VulnTrade: application log record</description>
+  </rule>
+
+  <!-- security.log: one canonical event per line (SecurityEventLogger). -->
+  <rule id="110091" level="3">
+    <if_sid>110090</if_sid>
+    <field name="aws.source_file">^/var/log/vulntrade/security\.log$</field>
+    <field name="aws.eventType" type="pcre2">^[A-Z_]+$</field>
+    <description>VulnTrade: security event $(aws.eventType) ($(aws.outcome))</description>
+    <group>vulntrade_security,</group>
+  </rule>
+
+
+</group>

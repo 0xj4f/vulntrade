@@ -1,0 +1,68 @@
+<!--
+  VulnTrade — WebSocket / STOMP (ids 110400-110499).
+  STOMP events carry no clientIp (no HTTP request in scope); correlate on
+  aws.details.sessionId instead. Loads last, so it may chain off trading rules.
+-->
+<group name="vulntrade,vulntrade_websocket,">
+
+  <rule id="110401" level="8">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^WS_CONNECT_ANONYMOUS$</field>
+    <description>VulnTrade: unauthenticated STOMP CONNECT, session $(aws.details.sessionId)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <rule id="110430" level="10" frequency="10" timeframe="60">
+    <if_matched_sid>110401</if_matched_sid>
+    <same_field>aws.eventType</same_field>
+    <description>VulnTrade: 10 anonymous STOMP CONNECTs in 60s — scripted WebSocket access</description>
+    <group>attack,</group>
+  </rule>
+
+  <rule id="110410" level="10">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^WS_SUBSCRIBE_PRIVILEGED$</field>
+    <description>VulnTrade: $(aws.details.subjectRole) subscribed to privileged $(aws.details.destination) — broadcast leak</description>
+    <mitre>
+      <id>T1530</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <rule id="110412" level="12" frequency="5" timeframe="60">
+    <if_matched_sid>110410</if_matched_sid>
+    <same_field>aws.details.sessionId</same_field>
+    <description>VulnTrade: 5 privileged subscriptions on STOMP session $(aws.details.sessionId) in 60s — topic sweep</description>
+    <mitre>
+      <id>T1530</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <rule id="110440" level="12">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^WS_SEND_ADMIN_BY_NONADMIN$</field>
+    <description>VulnTrade: $(aws.details.subjectRole) sent STOMP admin command $(aws.details.destination) — WebSocket admin bypass</description>
+    <mitre>
+      <id>T1078</id>
+      <id>T1548</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ADMIN_* events carry no sessionId, so correlate by time: an admin action
+       within 30s of a non-admin STOMP admin SEND confirms the bypass worked. -->
+  <rule id="110441" level="13" timeframe="30">
+    <if_sid>110335,110337</if_sid>
+    <if_matched_sid>110440</if_matched_sid>
+    <description>VulnTrade: $(aws.eventType) executed right after a non-admin STOMP admin SEND — confirmed admin bypass</description>
+    <mitre>
+      <id>T1548</id>
+      <id>T1565.001</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+</group>

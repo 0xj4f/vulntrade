@@ -136,16 +136,22 @@ public class AuthController {
             List<User> users = query.getResultList();
 
             if (users.isEmpty()) {
+                SecurityEventLogger.log("AUTH_LOGIN_LEGACY_FAIL", "FAILURE", Map.of(
+                    "reason", "user_not_found", "attemptedUsername", String.valueOf(request.getUsername())));
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "User not found"));
             }
 
             User user = users.get(0);
             if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+                SecurityEventLogger.log("AUTH_LOGIN_LEGACY_FAIL", "FAILURE", Map.of(
+                    "reason", "bad_password", "attemptedUsername", String.valueOf(request.getUsername())));
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid password"));
             }
 
+            SecurityEventLogger.log("AUTH_LOGIN_LEGACY_SUCCESS", "SUCCESS", Map.of(
+                "userId", user.getId(), "role", String.valueOf(user.getRole())));
             String token = jwtTokenProvider.generateToken(user);  // VULN #92/#93: fat JWT
 
             Map<String, Object> response = new HashMap<>();
@@ -188,6 +194,10 @@ public class AuthController {
         User saved = userRepository.save(user);
         User newUser = saved;
         logger.info("AUTH_REGISTER: userId={}, username={}, role={}", newUser.getId(), newUser.getUsername(), newUser.getRole());
+        SecurityEventLogger.log("AUTH_REGISTER", "SUCCESS", Map.of(
+            "userId", newUser.getId(),
+            "username", String.valueOf(newUser.getUsername()),
+            "assignedRole", String.valueOf(newUser.getRole())));
 
         // Record initial signup bonus in transaction history
         Transaction signupBonus = new Transaction();
@@ -226,6 +236,8 @@ public class AuthController {
         Optional<User> userOpt = userRepository.findByEmail(email);
 
         logger.info("AUTH_RESET_REQUEST: email={}", email);
+        SecurityEventLogger.log("AUTH_RESET_REQUEST", "ATTEMPT", Map.of(
+            "email", String.valueOf(email), "userFound", userOpt.isPresent()));
 
         Map<String, Object> response = new HashMap<>();
         response.put("message", "If the email exists, a reset link has been sent");
@@ -284,6 +296,8 @@ public class AuthController {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         // VULN: Old JWT tokens are NOT invalidated
+        SecurityEventLogger.log("AUTH_PASSWORD_RESET", "SUCCESS", Map.of(
+            "targetUserId", user.getId(), "viaResetToken", true));
 
         return ResponseEntity.ok(Map.of(
             "message", "Password reset successful",
@@ -336,6 +350,24 @@ public class AuthController {
             "message", "Password changed successfully",
             "warning", "You may want to re-login for a new token"
         ));
+    }
+
+    /**
+     * Logout endpoint. JWT is stateless, so this is a client-initiated logout:
+     * we log it as a security event (the client drops its token).
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        Long userId = null;
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            userId = jwtTokenProvider.getUserIdFromToken(authHeader.substring(7));
+        }
+        Map<String, Object> details = new HashMap<>();
+        if (userId != null) details.put("userId", userId);
+        SecurityEventLogger.log("AUTH_LOGOUT", "SUCCESS", details);
+        logger.info("AUTH_LOGOUT: userId={}", userId);
+        return ResponseEntity.ok(Map.of("message", "Logged out"));
     }
 
     /**

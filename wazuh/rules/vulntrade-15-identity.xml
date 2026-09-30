@@ -1,0 +1,55 @@
+<!--
+  VulnTrade — identity / IAM mutations (ids 110050-110069).
+  Chains off 110091 (security.log event). User/profile updates and admin actions
+  on accounts. Correlation key: aws.clientIp (HTTP events).
+-->
+<group name="vulntrade,vulntrade_identity,">
+
+  <!-- Any profile/attribute update (email, notes, profilePic). IDOR-prone: no
+       ownership check, so the acting aws.username may differ from targetUserId. -->
+  <rule id="110050" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^USER_PROFILE_UPDATE$</field>
+    <description>VulnTrade: profile update on userId $(aws.details.targetUserId) [$(aws.details.changedFields)] by $(aws.username) from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>identity,</group>
+  </rule>
+
+  <!-- Verification/PII write that also auto-elevates the account to level 2. -->
+  <rule id="110051" level="8">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^USER_VERIFICATION_UPDATE$</field>
+    <description>VulnTrade: verification/account-level change on userId $(aws.details.targetUserId) — newLevel $(aws.details.newAccountLevel), verified $(aws.details.verified)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>identity,attack,</group>
+  </rule>
+
+  <!-- Profile photo upload — no content-type/extension restriction on the endpoint. -->
+  <rule id="110052" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^USER_PHOTO_UPLOAD$</field>
+    <description>VulnTrade: photo upload for userId $(aws.details.targetUserId) — $(aws.details.filename) ($(aws.details.contentType), $(aws.details.size)B)</description>
+    <mitre>
+      <id>T1105</id>
+    </mitre>
+    <group>identity,</group>
+  </rule>
+
+  <!-- Admin enabled/disabled an account. -->
+  <rule id="110053" level="8">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^ADMIN_USER_TOGGLE$</field>
+    <description>VulnTrade: admin toggled account userId $(aws.details.targetUserId) — isActive now $(aws.details.newIsActive)</description>
+    <mitre>
+      <id>T1531</id>
+    </mitre>
+    <group>identity,</group>
+  </rule>
+
+  <!-- NOTE: ADMIN_BALANCE_ADJUST (controller path) is covered by 110330/110331. -->
+
+</group>

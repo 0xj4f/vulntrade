@@ -3,6 +3,7 @@ package com.vulntrade.controller;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import com.vulntrade.service.PortfolioService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -141,6 +142,10 @@ public class UserController {
 
         userRepository.save(user);
 
+        SecurityEventLogger.log("USER_PROFILE_UPDATE", "SUCCESS", Map.of(
+            "targetUserId", userId,
+            "changedFields", String.join(",", updates.keySet())));
+
         return ResponseEntity.ok(Map.of(
             "message", "Profile updated",
             "userId", userId
@@ -215,6 +220,12 @@ public class UserController {
 
         userRepository.save(user);
 
+        SecurityEventLogger.log("USER_VERIFICATION_UPDATE", "SUCCESS", Map.of(
+            "targetUserId", userId,
+            "changedFields", String.join(",", profileData.keySet()),
+            "newAccountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1,
+            "verified", user.getVerifiedAt() != null));
+
         // Generate new JWT with updated level/PII
         String newToken = jwtTokenProvider.generateToken(user);
 
@@ -272,6 +283,12 @@ public class UserController {
             user.setPhotoFilename(filename);
             user.setProfilePic(publicUrl);      // persisted public URL — used by leaderboard/chat
             userRepository.save(user);
+
+            SecurityEventLogger.log("USER_PHOTO_UPLOAD", "SUCCESS", Map.of(
+                "targetUserId", userId,
+                "filename", String.valueOf(filename),
+                "size", file.getSize(),
+                "contentType", String.valueOf(file.getContentType())));
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("message", "Photo uploaded successfully");

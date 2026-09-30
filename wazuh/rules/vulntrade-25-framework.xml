@@ -1,0 +1,55 @@
+<!--
+  VulnTrade — framework / infrastructure surfaces (ids 110160-110179).
+  App-layer detection of famous Spring Boot framework exposures. Fed by the
+  backend FrameworkAccessLogFilter, which emits a security event on every
+  /actuator, /h2-console and swagger request. Chains off 110091.
+  (Edge-layer equivalents live in adaptive-rules for the WAF/CloudFront path.)
+-->
+<group name="vulntrade,vulntrade_framework,">
+
+  <!-- Any actuator endpoint hit — recon of the management surface. -->
+  <rule id="110160" level="6">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^FRAMEWORK_ACTUATOR_ACCESS$</field>
+    <description>VulnTrade: Spring Actuator endpoint /actuator/$(aws.details.endpoint) accessed from $(aws.details.clientIp)</description>
+    <mitre>
+      <id>T1592</id>
+    </mitre>
+    <group>framework,attack,</group>
+  </rule>
+
+  <!-- Dangerous actuator endpoints: secret/memory disclosure or shutdown DoS. -->
+  <rule id="110161" level="10">
+    <if_sid>110160</if_sid>
+    <field name="aws.details.endpoint" type="pcre2">^(env|heapdump|shutdown|threaddump|beans|configprops|loggers)$</field>
+    <description>VulnTrade: sensitive actuator endpoint /actuator/$(aws.details.endpoint) accessed from $(aws.details.clientIp) — secret/memory disclosure or shutdown</description>
+    <mitre>
+      <id>T1082</id>
+      <id>T1552.001</id>
+    </mitre>
+    <group>framework,attack,</group>
+  </rule>
+
+  <!-- H2 database web console — JDBC-URL RCE surface (CVE-2021-42392 class). -->
+  <rule id="110162" level="8">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^FRAMEWORK_H2_CONSOLE_ACCESS$</field>
+    <description>VulnTrade: H2 console accessed ($(aws.details.path)) from $(aws.details.clientIp) — JDBC-URL RCE surface</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>framework,attack,</group>
+  </rule>
+
+  <!-- Swagger / OpenAPI doc access — API surface enumeration (low signal). -->
+  <rule id="110163" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType">^FRAMEWORK_SWAGGER_ACCESS$</field>
+    <description>VulnTrade: API docs/Swagger accessed ($(aws.details.path)) from $(aws.details.clientIp)</description>
+    <mitre>
+      <id>T1592</id>
+    </mitre>
+    <group>framework,</group>
+  </rule>
+
+</group>

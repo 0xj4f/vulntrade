@@ -1,0 +1,15 @@
+[Unit]
+Description=Ship VulnTrade rotated logs to S3
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/vulntrade/log-shipper.env
+ExecStart=/usr/local/bin/ship-logs-to-s3.sh
+# Non-fatal failures (single file) are handled inside the script;
+# process-level failures surface here.
+TimeoutStartSec=120
+Nice=10
+IOSchedulingClass=idle
+# No network restart loop — the timer reschedules us.
