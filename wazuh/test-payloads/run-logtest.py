@@ -30,7 +30,7 @@ def wrap(case):
     sink = case["sink"]
     aws = {
         "log_info": {"log_file": f"vulntrade/vulntrade.{sink}/2026/09/29/11_00_00-TEST.gz",
-                     "s3bucket": "wazuh-application-logs-872515260040"},
+                     "s3bucket": "vulntrade-logs"},
         "timestamp": "2026-09-29T11:00:00.000000Z",
     }
     aws.update(stringify(case["log"]))

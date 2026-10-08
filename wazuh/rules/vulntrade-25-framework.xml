@@ -5,7 +5,6 @@
   Fed by: framework_endpoint_accessed (FrameworkAccessLogFilter, one event per
   /actuator, /h2-console or swagger request, with details.surface) and
   audit_configuration_changed (POST /actuator/loggers/*).
-  (Edge-layer equivalents live in adaptive-rules for the WAF/CloudFront path.)
 
   Tree:
     110160 surface=actuator      110161 sensitive endpoint

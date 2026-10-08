@@ -1,15 +1,12 @@
-# VulnTrade — Wazuh Detection Pack (temporary home)
+# VulnTrade — Wazuh Detection Pack
 
-> **SYNCED WITH THE DEPLOYED CLUSTER (2026-09-30), THEN CHANGED HERE (2026-10-08).** On 2026-09-30
-> `rules/` and `test-payloads/` mirrored the working deployed ruleset at
-> `infrastructure-security/wazuh/configs/rules/applications/vulntrade/` (the `110xxx`,
-> nested-`aws.details.*` scheme fed by the `aws-s3` wodle, no custom decoder).
-> The 2026-10-08 security-events refactor rewrote the rules **here first** for the new lower snake case
-> event names (`login_failure`, `withdrawal_completed`, ...). **The deployed copy must be re-mirrored from
-> here** (copy `rules/*.xml`, `test-payloads/cases.jsonl`, `test-payloads/run-logtest.py` and this README),
-> and shipped together with the backend that emits the new names.
+Reference Wazuh rules for VulnTrade's logs, plus a test harness that replays sample events through
+`wazuh-logtest`. Load them into any Wazuh 4.x manager that reads VulnTrade's logs from S3 with the `aws-s3`
+wodle (the `110xxx` rules, nested `aws.details.*` fields, no custom decoder). How the logs get to S3 is
+described in [`../docs/log-shipping.md`](../docs/log-shipping.md).
 
-> **This directory is a parking lot.** These rules and test payloads are destined to move to a separate Wazuh-focused repository. VulnTrade itself should only ever own *application logging* and the path to S3 (see [`../docs/log-shipping.md`](../docs/log-shipping.md)).
+The rules match the event names the backend emits (`login_failure`, `withdrawal_completed`, ...). When you
+change event names in the backend, change the rules and `test-payloads/cases.jsonl` in the same commit.
 
 The application side (event names, fields, the rule conventions) is specified in [`../docs/logging-guide.md`](../docs/logging-guide.md). The team sheet behind the event names is `../data/Security Events Baseline.xlsm`; the VulnTrade sheet is `../data/VulnTrade Security Events.xlsx`.
 
@@ -105,7 +102,7 @@ docker cp wazuh/rules/. vt-wazuh:/var/ossec/etc/rules/
 
 Each logtest session loads the rule files fresh, so after editing a rule just `docker cp` again and re-run.
 
-**Against the deployed manager over SSM** (needs AWS credentials for the manager's account):
+**Against a Wazuh manager on EC2, over SSM** (needs AWS credentials that can run SSM commands on that instance):
 
 ```bash
 ./wazuh/test-payloads/run-logtest.py <instance-id> [--region eu-west-1]
@@ -119,4 +116,4 @@ Output is one `ok`/`FAIL` line per case and a summary; the exit code is non-zero
 2. Add the rule under its base rule (convention 2). For a burst, add the burst and put extra conditions on a child of it (convention 3).
 3. Add cases to `cases.jsonl`: a positive case, and for a burst an N-1 case plus the Nth event, all with their own IP/user/session.
 4. Run `run-logtest.py --docker vt-wazuh`: every case passes, no warnings.
-5. Commit the rule and its cases together, then re-mirror to `infrastructure-security`.
+5. Commit the rule and its cases together.
