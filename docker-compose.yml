@@ -127,9 +127,9 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
-      AWS_REGION: ${AWS_REGION:-eu-west-2}
-      AWS_DEFAULT_REGION: ${AWS_REGION:-eu-west-2}
-      S3_BUCKET: ${S3_BUCKET:-wazuh-application-logs}
+      AWS_REGION: ${AWS_REGION}
+      AWS_DEFAULT_REGION: ${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
     depends_on:
       - backend
     networks:
