@@ -1,6 +1,6 @@
 # Log Shipping to S3
 
-How VulnTrade's structured JSON logs reach an S3 bucket so a downstream SIEM (Wazuh, in your case, in a separate repo) can consume them.
+How VulnTrade's structured JSON logs reach an S3 bucket so a downstream SIEM (for example Wazuh) can consume them.
 
 Design goal: **simplest possible shipping path**. No sidecars. No streaming daemons. Rotated files, a single shell script, a systemd timer on the EC2 host. The VulnTrade stack itself only cares about writing good logs — shipping is a host-level concern bolted on.
 
@@ -28,7 +28,7 @@ s3://vulntrade-logs/
 | Immutability | objects never overwritten; unique filename per rotation |
 | Metadata | S3 object metadata includes `x-amz-meta-host` and `x-amz-meta-sink` |
 
-An S3 event notification (`s3:ObjectCreated:*`) on this bucket feeds SQS; Wazuh's `aws-s3` wodle consumes from SQS. All of that lives in your Wazuh / infra repo, not here.
+An S3 event notification (`s3:ObjectCreated:*`) on this bucket feeds SQS; Wazuh's `aws-s3` wodle consumes from SQS. Setting up the queue and the SIEM side is outside VulnTrade's scope.
 
 ---
 
@@ -120,20 +120,18 @@ Both are additions; we don't default to them.
 
 ---
 
-## 6. Terraform hand-off
+## 6. Infrastructure you provide
 
-Your Terraform is the source of truth for:
+Provision these yourself (for example with Terraform):
 
 - The S3 bucket (`vulntrade-logs`), with server-side encryption, lifecycle to Glacier/deep-archive, and object-lock if you want WORM.
 - The SQS queue + S3 event notification.
 - The EC2 instance profile with the IAM policy in §3.
 - Cloud-init: install `docker`, `docker compose plugin`, `awscli`, then `systemctl enable --now vulntrade-log-shipper.timer` after copying the three files from this repo.
 
-This repo does NOT own those resources — it owns only:
+VulnTrade does not create those resources. It provides only:
 1. The app emitting the right log shape.
-2. The shipping script + systemd units under `scripts/` and `systemd/`.
-
-Terraform clones this repo at provision time, references those three files via a local path, and drops them into `/usr/local/bin/` and `/etc/systemd/system/` during cloud-init.
+2. The shipping script + systemd units under `scripts/` and `systemd/`, which your provisioning copies into `/usr/local/bin/` and `/etc/systemd/system/`.
 
 ---
 

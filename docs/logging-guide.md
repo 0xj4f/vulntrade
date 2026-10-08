@@ -446,7 +446,7 @@ To investigate something noisy, follow `requestId` from `security.log` into `app
    docker cp wazuh/rules/. vt-wazuh:/var/ossec/etc/rules/
    ./wazuh/test-payloads/run-logtest.py --docker vt-wazuh
    ```
-   All cases must pass with no WARNING lines. To test on the AWS manager instead, pass its instance id (`run-logtest.py <instance-id>`, runs over SSM).
+   All cases must pass with no WARNING lines. To test against a Wazuh manager on EC2 instead, pass its instance id (`run-logtest.py <instance-id>`, runs over SSM).
 
 ### The `SecurityEventLogger` API
 
