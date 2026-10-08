@@ -2,6 +2,7 @@ package com.vulntrade.controller;
 
 import com.vulntrade.model.User;
 import com.vulntrade.repository.UserRepository;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import com.vulntrade.repository.CustomQueryRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -103,6 +104,8 @@ public class AdminController {
             .map(user -> {
                 user.setIsActive(!user.getIsActive());
                 userRepository.save(user);
+                SecurityEventLogger.log("ADMIN_USER_TOGGLE", "SUCCESS", Map.of(
+                    "targetUserId", userId, "newIsActive", user.getIsActive()));
                 return ResponseEntity.ok(Map.of(
                     "message", "User " + (user.getIsActive() ? "enabled" : "disabled"),
                     "userId", userId,
@@ -131,6 +134,12 @@ public class AdminController {
                 // VULN: reason field logged without sanitization (log injection)
                 System.out.println("[ADMIN] Balance adjusted for user " + userId
                     + " by " + amount + " reason: " + reason);
+
+                SecurityEventLogger.log("ADMIN_BALANCE_ADJUST", "SUCCESS", Map.of(
+                    "targetUserId", userId,
+                    "amount", amount,
+                    "reason", String.valueOf(reason),
+                    "newBalance", user.getBalance()));
 
                 return ResponseEntity.ok(Map.of(
                     "message", "Balance adjusted",
