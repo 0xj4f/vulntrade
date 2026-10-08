@@ -4,6 +4,8 @@ import com.vulntrade.model.Transaction;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -13,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Map;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * REST Account Controller for deposits, withdrawals, and balance.
@@ -90,6 +94,8 @@ public class AccountController {
         // VULN #92/#94: Check account level from JWT claim ONLY - never queries DB
         Integer accountLevel = extractAccountLevel(authHeader);
         if (accountLevel < 2) {
+            log(SecurityEvent.WITHDRAWAL_REJECTED, Outcome.DENIED,
+                    details("reason", "account_level_required"));
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(Map.of(
                     "error", "Account Level 2 (Verified) required for withdrawals",
@@ -104,6 +110,8 @@ public class AccountController {
         try {
             amount = new BigDecimal(request.get("amount").toString());
         } catch (Exception e) {
+            log(SecurityEvent.WITHDRAWAL_REJECTED, Outcome.DENIED,
+                    details("reason", "invalid_amount"));
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid amount"));
         }
 
@@ -119,6 +127,8 @@ public class AccountController {
 
                 // "Check" balance (but another thread could be doing the same)
                 if (currentBalance.compareTo(amount) < 0 && amount.compareTo(BigDecimal.ZERO) > 0) {
+                    log(SecurityEvent.WITHDRAWAL_REJECTED, Outcome.DENIED,
+                            details("reason", "insufficient_balance", "amount", amount));
                     return ResponseEntity.badRequest()
                         .body((Object) Map.of("error", "Insufficient balance"));
                 }
@@ -137,6 +147,11 @@ public class AccountController {
                 tx.setCreatedAt(LocalDateTime.now());
                 transactionRepository.save(tx);
 
+                log(SecurityEvent.WITHDRAWAL_COMPLETED, Outcome.SUCCESS,
+                        details("amount", amount,
+                                "destination", destination,
+                                "balanceAfter", user.getBalance(),
+                                "transactionId", tx.getId()));
                 return ResponseEntity.ok((Object) Map.of(
                     "status", "success",
                     "message", "Withdrawal processed",
@@ -146,7 +161,12 @@ public class AccountController {
                     "transactionId", tx.getId()
                 ));
             })
-            .orElse(ResponseEntity.notFound().build());
+            // orElseGet (not orElse) so the event is only logged when the user is missing
+            .orElseGet(() -> {
+                log(SecurityEvent.WITHDRAWAL_REJECTED, Outcome.DENIED,
+                        details("reason", "user_not_found"));
+                return ResponseEntity.notFound().build();
+            });
     }
 
     /**
@@ -169,6 +189,8 @@ public class AccountController {
         // VULN #92/#94: Check account level from JWT claim ONLY - never queries DB
         Integer accountLevel = extractAccountLevel(authHeader);
         if (accountLevel < 2) {
+            log(SecurityEvent.DEPOSIT_FAILED, Outcome.FAILURE,
+                    details("reason", "account_level_required", "accountLevel", accountLevel));
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(Map.of(
                     "error", "Account Level 2 (Verified) required for deposits",
@@ -183,6 +205,8 @@ public class AccountController {
         try {
             amount = new BigDecimal(request.get("amount").toString());
         } catch (Exception e) {
+            log(SecurityEvent.DEPOSIT_FAILED, Outcome.FAILURE,
+                    details("reason", "invalid_amount"));
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid amount"));
         }
 
@@ -205,6 +229,11 @@ public class AccountController {
                 tx.setCreatedAt(LocalDateTime.now());
                 transactionRepository.save(tx);
 
+                log(SecurityEvent.DEPOSIT_COMPLETED, Outcome.SUCCESS,
+                        details("amount", amount,
+                                "source", source,
+                                "balanceAfter", user.getBalance(),
+                                "transactionId", tx.getId()));
                 return ResponseEntity.ok((Object) Map.of(
                     "status", "success",
                     "message", "Deposit processed",
@@ -214,7 +243,12 @@ public class AccountController {
                     "transactionId", tx.getId()
                 ));
             })
-            .orElse(ResponseEntity.notFound().build());
+            // orElseGet (not orElse) so the event is only logged when the user is missing
+            .orElseGet(() -> {
+                log(SecurityEvent.DEPOSIT_FAILED, Outcome.FAILURE,
+                        details("reason", "user_not_found"));
+                return ResponseEntity.notFound().build();
+            });
     }
 
     /**
@@ -235,6 +269,10 @@ public class AccountController {
 
         // VULN: IDOR - if userId param provided, returns that user's transactions
         Long lookupUserId = (targetUserId != null) ? targetUserId : userId;
+        if (targetUserId != null && !isOwner(targetUserId)) {
+            log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                    details("resource", "transactions", "targetUserId", targetUserId));
+        }
         return ResponseEntity.ok(transactionRepository.findByUserId(lookupUserId));
     }
 

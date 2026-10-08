@@ -2,6 +2,8 @@ package com.vulntrade.service;
 
 import com.vulntrade.model.PriceAlert;
 import com.vulntrade.repository.PriceAlertRepository;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -11,6 +13,8 @@ import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Price alert service.
@@ -53,6 +57,11 @@ public class AlertService {
         logger.info("Alert created: userId={}, symbol={}, target={}, direction={}",
                 userId, symbol, targetPrice, direction);
 
+        log(SecurityEvent.PRICE_ALERT_CREATED, Outcome.SUCCESS,
+                details("alertId", alert.getId(),
+                        "symbol", symbol,              // raw user input, on purpose
+                        "targetPrice", targetPrice,
+                        "direction", direction));
         return alert;
     }
 

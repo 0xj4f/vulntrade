@@ -1,5 +1,6 @@
 package com.vulntrade.security;
 
+import com.vulntrade.security.logging.SecurityEventLogger;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
@@ -7,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
+import javax.servlet.http.HttpServletRequest;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -45,6 +47,8 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
         if (request instanceof ServletServerHttpRequest) {
             ServletServerHttpRequest servletRequest = (ServletServerHttpRequest) request;
 
+            rememberForSecurityLogging(servletRequest.getServletRequest(), attributes);
+
             // VULN: Token in URL query parameter
             token = servletRequest.getServletRequest().getParameter("token");
 
@@ -74,6 +78,23 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
         attributes.put("username", "anonymous");
         attributes.put("role", "ANONYMOUS");
         return true;
+    }
+
+    /**
+     * Keep the client's IP, user agent and Origin on the WebSocket session, so every later
+     * STOMP security event can show them (STOMP frames have no HTTP request of their own).
+     * Never put a null: the session map becomes a ConcurrentHashMap, which rejects nulls.
+     */
+    private void rememberForSecurityLogging(HttpServletRequest http, Map<String, Object> attributes) {
+        String clientIp = SecurityEventLogger.clientIp(http);
+        if (clientIp != null) {
+            attributes.put(SecurityEventLogger.STOMP_CLIENT_IP, clientIp);
+        }
+        attributes.put(SecurityEventLogger.STOMP_USER_AGENT, SecurityEventLogger.userAgent(http));
+        String origin = http.getHeader("Origin");
+        if (origin != null) {
+            attributes.put(SecurityEventLogger.STOMP_ORIGIN, origin);
+        }
     }
 
     @Override

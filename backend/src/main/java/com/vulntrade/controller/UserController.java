@@ -3,7 +3,8 @@ package com.vulntrade.controller;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
-import com.vulntrade.security.logging.SecurityEventLogger;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import com.vulntrade.service.PortfolioService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -20,6 +21,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.*;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * User profile controller.
@@ -87,6 +90,11 @@ public class UserController {
         profile.put("country", user.getCountry());
         profile.put("photoPath", user.getPhotoPath());   // VULN: server filesystem path leaked
 
+        // Own-profile reads (and /me) are not logged; cross-user reads are (IDOR).
+        if (!isOwner(userId)) {
+            log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                    details("resource", "user_profile", "targetUserId", userId));
+        }
         return ResponseEntity.ok(profile);
     }
 
@@ -142,9 +150,12 @@ public class UserController {
 
         userRepository.save(user);
 
-        SecurityEventLogger.log("USER_PROFILE_UPDATE", "SUCCESS", Map.of(
-            "targetUserId", userId,
-            "changedFields", String.join(",", updates.keySet())));
+        // Email is a security attribute: /api/auth/reset looks accounts up by it.
+        log(updates.containsKey("email") ? SecurityEvent.SECURITY_ATTRIBUTE_UPDATED : SecurityEvent.PROFILE_UPDATED,
+                Outcome.SUCCESS,
+                details("targetUserId", userId,
+                        "changedFields", String.join(",", updates.keySet()),
+                        "isOwner", isOwner(userId)));
 
         return ResponseEntity.ok(Map.of(
             "message", "Profile updated",
@@ -174,6 +185,10 @@ public class UserController {
         List<Map<String, Object>> positions = portfolioService.getPortfolio(userId);
         portfolio.put("positions", positions);
 
+        if (!isOwner(userId)) {
+            log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                    details("resource", "portfolio", "targetUserId", userId));
+        }
         return ResponseEntity.ok(portfolio);
     }
 
@@ -210,6 +225,9 @@ public class UserController {
         if (profileData.containsKey("zipCode")) user.setZipCode(profileData.get("zipCode"));
         if (profileData.containsKey("country")) user.setCountry(profileData.get("country"));
 
+        // Level before auto-verify, so permission_changed is logged only on the change to level 2.
+        Integer oldLevel = user.getAccountLevel();
+
         // VULN #98: Auto-verification logic - intentionally weak
         // Any non-empty firstName is enough to trigger verification!
         // No document review, no approval process, no real validation
@@ -219,12 +237,6 @@ public class UserController {
         }
 
         userRepository.save(user);
-
-        SecurityEventLogger.log("USER_VERIFICATION_UPDATE", "SUCCESS", Map.of(
-            "targetUserId", userId,
-            "changedFields", String.join(",", profileData.keySet()),
-            "newAccountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1,
-            "verified", user.getVerifiedAt() != null));
 
         // Generate new JWT with updated level/PII
         String newToken = jwtTokenProvider.generateToken(user);
@@ -237,6 +249,20 @@ public class UserController {
         response.put("verifiedAt", user.getVerifiedAt());
         response.put("userId", user.getId());
 
+        // changedFields = key names only, never the PII values.
+        log(SecurityEvent.SENSITIVE_DATA_UPDATED, Outcome.SUCCESS,
+                details("resource", "kyc_profile",
+                        "targetUserId", userId,
+                        "changedFields", String.join(",", profileData.keySet()),
+                        "isOwner", isOwner(userId)));
+        boolean wasBelowLevel2 = oldLevel == null || oldLevel < 2;
+        boolean isNowLevel2 = user.getAccountLevel() != null && user.getAccountLevel() >= 2;
+        if (wasBelowLevel2 && isNowLevel2) {
+            log(SecurityEvent.PERMISSION_CHANGED, Outcome.SUCCESS,
+                    details("targetUserId", userId,
+                            "accountLevel", user.getAccountLevel(),
+                            "isOwner", isOwner(userId)));
+        }
         return ResponseEntity.ok(response);
     }
 
@@ -284,11 +310,13 @@ public class UserController {
             user.setProfilePic(publicUrl);      // persisted public URL — used by leaderboard/chat
             userRepository.save(user);
 
-            SecurityEventLogger.log("USER_PHOTO_UPLOAD", "SUCCESS", Map.of(
-                "targetUserId", userId,
-                "filename", String.valueOf(filename),
-                "size", file.getSize(),
-                "contentType", String.valueOf(file.getContentType())));
+            // originalFilename and contentType are raw client input, on purpose (Wazuh scans them).
+            log(SecurityEvent.FILE_CREATED_OR_UPLOADED, Outcome.SUCCESS,
+                    details("targetUserId", userId,
+                            "isOwner", isOwner(userId),
+                            "contentType", file.getContentType(),
+                            "originalFilename", file.getOriginalFilename(),
+                            "size", file.getSize()));
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("message", "Photo uploaded successfully");
@@ -381,6 +409,10 @@ public class UserController {
         // VULN #100: SSN leaked in verification status too
         status.put("ssn", user.getSsn());
 
+        if (!isOwner(userId)) {
+            log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                    details("resource", "verification_status", "targetUserId", userId));
+        }
         return ResponseEntity.ok(status);
     }
 }

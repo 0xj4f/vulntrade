@@ -4,6 +4,8 @@ import com.vulntrade.model.Order;
 import com.vulntrade.model.dto.OrderRequest;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import com.vulntrade.service.OrderService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +14,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * REST Order Controller - alternative order placement to WebSocket/STOMP.
@@ -100,6 +104,10 @@ public class OrderController {
                 response.put("clientOrderId", order.getClientOrderId());
                 response.put("createdAt", order.getCreatedAt());
                 response.put("executedAt", order.getExecutedAt());
+                if (!isOwner(order.getUserId())) {
+                    log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                            details("resource", "order", "targetUserId", order.getUserId()));
+                }
                 return ResponseEntity.ok((Object) response);
             })
             .orElse(ResponseEntity.notFound().build());
@@ -122,6 +130,10 @@ public class OrderController {
         // VULN: IDOR - if userId param provided, returns that user's orders
         Long lookupUserId = (targetUserId != null) ? targetUserId : userId;
         List<Order> orders = orderRepository.findByUserId(lookupUserId);
+        if (targetUserId != null && !isOwner(targetUserId)) {
+            log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                    details("resource", "orders", "targetUserId", targetUserId));
+        }
         return ResponseEntity.ok(orders);
     }
 
@@ -142,6 +154,12 @@ public class OrderController {
             .map(order -> {
                 // VULN: No ownership check - any user can cancel any order
                 if ("FILLED".equals(order.getStatus()) || "CANCELLED".equals(order.getStatus())) {
+                    log(SecurityEvent.ORDER_CANCELLED, Outcome.FAILURE,
+                            details("reason", "already_closed",
+                                    "orderId", order.getId(),
+                                    "symbol", order.getSymbol(),
+                                    "targetUserId", order.getUserId(),
+                                    "isOwner", isOwner(order.getUserId())));
                     return ResponseEntity.badRequest()
                         .body((Object) Map.of("error", "Order already " + order.getStatus()));
                 }
@@ -154,6 +172,11 @@ public class OrderController {
                 response.put("status", "CANCELLED");
                 response.put("message", "Order cancelled");
                 response.put("originalUserId", order.getUserId()); // VULN: leaks original owner
+                log(SecurityEvent.ORDER_CANCELLED, Outcome.SUCCESS,
+                        details("orderId", order.getId(),
+                                "symbol", order.getSymbol(),
+                                "targetUserId", order.getUserId(),
+                                "isOwner", isOwner(order.getUserId())));
                 return ResponseEntity.ok((Object) response);
             })
             .orElse(ResponseEntity.notFound().build());
@@ -175,6 +198,8 @@ public class OrderController {
         // VULN: No ownership check - any user can delete any order
         if (orderRepository.existsById(orderId)) {
             orderRepository.deleteById(orderId);
+            log(SecurityEvent.SENSITIVE_DATA_DELETED, Outcome.SUCCESS,
+                    details("resource", "order", "orderId", orderId));
             return ResponseEntity.ok(Map.of("message", "Order deleted", "orderId", orderId));
         }
         return ResponseEntity.notFound().build();

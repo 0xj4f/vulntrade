@@ -1,5 +1,7 @@
 package com.vulntrade.websocket;
 
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import com.vulntrade.service.AdminService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +17,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Listens for STOMP session events (connect, disconnect, subscribe).
@@ -79,6 +83,15 @@ public class StompEventListener {
     public void handleSessionDisconnect(SessionDisconnectEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String sessionId = accessor.getSessionId();
+
+        // 1009 = frame too big, 1002 = protocol error (e.g. a malformed STOMP frame)
+        int closeCode = event.getCloseStatus() == null ? 0 : event.getCloseStatus().getCode();
+        if (closeCode == 1009) {
+            log(SecurityEvent.WEBSOCKET_MESSAGE_SIZE_EXCEEDED, Outcome.DENIED, details("closeCode", closeCode));
+        } else if (closeCode == 1002) {
+            log(SecurityEvent.WEBSOCKET_INVALID_MESSAGE, Outcome.DENIED, details("closeCode", closeCode));
+        }
+
         Map<String, Object> sessionInfo = activeSessions.remove(sessionId);
 
         String user = sessionInfo != null ? (String) sessionInfo.get("user") : "unknown";

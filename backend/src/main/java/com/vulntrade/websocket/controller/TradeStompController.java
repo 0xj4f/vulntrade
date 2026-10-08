@@ -4,6 +4,8 @@ import com.vulntrade.model.Order;
 import com.vulntrade.model.dto.*;
 import com.vulntrade.repository.CustomQueryRepository;
 import com.vulntrade.security.StompChannelInterceptor.StompPrincipal;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import com.vulntrade.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +20,8 @@ import java.security.Principal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * STOMP controller for trading operations.
@@ -64,7 +68,7 @@ public class TradeStompController {
                            SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -101,7 +105,7 @@ public class TradeStompController {
                             SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -135,7 +139,7 @@ public class TradeStompController {
                                     SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -171,7 +175,7 @@ public class TradeStompController {
                              SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -185,6 +189,10 @@ public class TradeStompController {
             }
 
             List<Map<String, Object>> portfolio = portfolioService.getPortfolio(targetUserId);
+            if (!isOwner(targetUserId)) {
+                logStomp(headerAccessor, SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                        details("resource", "portfolio", "targetUserId", targetUserId));
+            }
 
             Map<String, Object> response = new HashMap<>();
             response.put("type", "PORTFOLIO");
@@ -207,7 +215,7 @@ public class TradeStompController {
     public void getBalance(SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -246,7 +254,7 @@ public class TradeStompController {
                          SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -280,7 +288,7 @@ public class TradeStompController {
                         SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -313,7 +321,7 @@ public class TradeStompController {
                                  SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -326,6 +334,12 @@ public class TradeStompController {
                     request.getStartDate(),   // VULN: SQL injection
                     request.getEndDate(),     // VULN: SQL injection
                     request.getSymbol());     // VULN: SQL injection
+            // Raw dates and symbol on purpose: Wazuh scans them for SQL injection
+            logStomp(headerAccessor, SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                    details("resource", "trade_history",
+                            "startDate", request.getStartDate(),
+                            "endDate", request.getEndDate(),
+                            "symbol", request.getSymbol()));
 
             Map<String, Object> response = new HashMap<>();
             response.put("type", "TRADE_HISTORY");
@@ -336,6 +350,12 @@ public class TradeStompController {
                     extractUsername(headerAccessor), "/queue/history", response);
 
         } catch (Exception e) {
+            logStomp(headerAccessor, SecurityEvent.SENSITIVE_DATA_READ, Outcome.FAILURE,
+                    details("resource", "trade_history",
+                            "startDate", request.getStartDate(),
+                            "endDate", request.getEndDate(),
+                            "symbol", request.getSymbol(),
+                            "errorType", e.getClass().getSimpleName()));
             // VULN: Error message reveals database structure
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("type", "ERROR");
@@ -357,7 +377,7 @@ public class TradeStompController {
                          SimpMessageHeaderAccessor headerAccessor) {
         Long userId = extractUserId(headerAccessor);
         if (userId == null) {
-            sendError(headerAccessor, "Authentication required");
+            denyUnauthenticated(headerAccessor);
             return;
         }
 
@@ -424,5 +444,11 @@ public class TradeStompController {
         error.put("timestamp", System.currentTimeMillis());
 
         messagingTemplate.convertAndSendToUser(target, "/queue/errors", error);
+    }
+
+    /** Logs authorization_denied and sends the same "Authentication required" error as before. */
+    private void denyUnauthenticated(SimpMessageHeaderAccessor headerAccessor) {
+        logStomp(headerAccessor, SecurityEvent.AUTHORIZATION_DENIED, Outcome.DENIED, null);
+        sendError(headerAccessor, "Authentication required");
     }
 }
