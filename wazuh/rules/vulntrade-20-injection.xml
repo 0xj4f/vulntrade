@@ -1,26 +1,41 @@
 <!--
-  VulnTrade — injection / content (ids 110100-110199).
-  Content rules chain off 110090 (either sink) and match the whole event with
-  <regex type="pcre2">, so a payload is caught in whichever field carried it
-  (details.reason, attemptedUsername, app.log message, ...).
+  VulnTrade - injection, content and errors (ids 110100-110159).
+  Conventions: see vulntrade-00-base.xml.
+
+  Content rules (110100-110103, 110120, 110150) chain off 110090 (either file)
+  and match the whole event with <regex>, so a payload is caught in whichever
+  field carried it (details.reason, details.attemptedUsername, app.log
+  message, ...). They are level 8-12, so they beat the event's own rule.
+
+  Fed by: any event (content rules), app.log (110113), login_success /
+  login_failure attemptedUsername (110112), details.symbol / startDate /
+  endDate of any event (110110, 110111, 110114), input_validation_failed,
+  unexpected_exception, debug_command_executed, debug_query_executed.
+
+  SQLi rules do not scan details.query: admin and debug SQL are raw SQL by
+  design, so the regex would flag every admin query.
+
+  Retired: 110141, 110142 (old debug endpoint hits).
 -->
 <group name="vulntrade,vulntrade_injection,">
+
+  <!-- ===== Content rules (unchanged) ===== -->
 
   <rule id="110100" level="12">
     <if_sid>110090</if_sid>
     <regex type="pcre2">(?i)\$\{\s*jndi\s*:</regex>
-    <description>VulnTrade: Log4Shell JNDI lookup string in $(aws.source_file)</description>
+    <description>VulnTrade: log4shell_detected - JNDI lookup string in $(aws.source_file)</description>
     <mitre>
       <id>T1190</id>
     </mitre>
     <group>attack,log4shell,</group>
   </rule>
 
-  <!-- Nested lookups (${lower:j}, ${::-j}, ${env:...}) — Log4Shell evasion. -->
+  <!-- Nested lookups (${lower:j}, ${::-j}, ${env:...}): Log4Shell evasion. -->
   <rule id="110101" level="12">
     <if_sid>110090</if_sid>
     <regex type="pcre2">(?i)\$\{[^}]*\$\{\s*(lower|upper|::-|env|sys|date|base64|main)</regex>
-    <description>VulnTrade: obfuscated Log4j lookup in $(aws.source_file) — Log4Shell evasion</description>
+    <description>VulnTrade: log4shell_detected - obfuscated Log4j lookup in $(aws.source_file)</description>
     <mitre>
       <id>T1190</id>
       <id>T1027</id>
@@ -28,12 +43,11 @@
     <group>attack,log4shell,</group>
   </rule>
 
-  <!-- Java native serialized object: base64 "rO0AB" or magic bytes AC ED 00 05.
-       A deserialization gadget (ysoserial / commons-collections) arriving in any field. -->
+  <!-- Java native serialized object: base64 "rO0AB" or magic bytes AC ED 00 05. -->
   <rule id="110102" level="10">
     <if_sid>110090</if_sid>
     <regex type="pcre2">rO0AB[Qw]|\xac\xed\x00\x05</regex>
-    <description>VulnTrade: Java serialized object in $(aws.source_file) — deserialization attack</description>
+    <description>VulnTrade: unsafe_deserialization_detected - Java serialized object in $(aws.source_file)</description>
     <mitre>
       <id>T1190</id>
     </mitre>
@@ -44,36 +58,26 @@
   <rule id="110103" level="12">
     <if_sid>110090</if_sid>
     <regex type="pcre2">(?i)class\.module\.classLoader|class\[[^\]]*module|classLoader\.resources</regex>
-    <description>VulnTrade: Spring4Shell classloader binding in $(aws.source_file) — CVE-2022-22965</description>
+    <description>VulnTrade: unsafe_deserialization_detected - Spring4Shell classloader binding in $(aws.source_file) (CVE-2022-22965)</description>
     <mitre>
       <id>T1190</id>
     </mitre>
     <group>attack,deserialization,</group>
   </rule>
 
-  <rule id="110112" level="10">
-    <if_sid>110004</if_sid>
-    <field name="aws.details.attemptedUsername" type="pcre2">(?i)('|%27)\s*(or|and|union|;|--|#)|union\s+(all\s+)?select|\bor\s+\d+\s*=\s*\d+|sleep\s*\(|--\s*$</field>
-    <description>VulnTrade: SQL injection in legacy-login username from $(aws.clientIp): $(aws.details.attemptedUsername)</description>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
-    <group>attack,sqli,</group>
-  </rule>
-
-  <!-- DB errors surfacing in app.log usually mean someone is shaping SQL. -->
+  <!-- DB errors in app.log usually mean someone is shaping SQL. -->
   <rule id="110113" level="6">
     <if_sid>110090</if_sid>
-    <field name="aws.source_file">^/var/log/vulntrade/app\.log$</field>
+    <field name="aws.source_file" type="pcre2">^/var/log/vulntrade/app\.log$</field>
     <field name="aws.loggerName" type="pcre2">SqlExceptionHelper|PSQLException|BadSqlGrammar</field>
-    <description>VulnTrade: SQL error in app.log — possible injection probing: $(aws.message)</description>
+    <description>VulnTrade: sql_injection_detected - SQL error in app.log (possible probing): $(aws.message)</description>
     <group>sqli,</group>
   </rule>
 
   <rule id="110120" level="8">
     <if_sid>110090</if_sid>
     <regex type="pcre2">(?i)\x3c\s*script|on(error|load|mouseover)\s*=|javascript\s*:|\x3c\s*(img|svg|iframe)[^\x3e]*(src|onload)</regex>
-    <description>VulnTrade: XSS payload in $(aws.source_file)</description>
+    <description>VulnTrade: script_injection_detected - XSS payload in $(aws.source_file)</description>
     <mitre>
       <id>T1059.007</id>
     </mitre>
@@ -84,50 +88,125 @@
   <rule id="110131" level="10">
     <if_sid>110090</if_sid>
     <field name="aws.details.reason" type="pcre2">[\r\n]|(?i)%0[ad]</field>
-    <description>VulnTrade: log injection — CR/LF in reason field ($(aws.eventType))</description>
+    <description>VulnTrade: log_injection_detected - CR/LF in details.reason of $(aws.eventType)</description>
     <mitre>
       <id>T1070</id>
     </mitre>
     <group>attack,</group>
   </rule>
 
-  <rule id="110140" level="12">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^DEBUG_RCE_EXECUTED$</field>
-    <description>VulnTrade: debug RCE executed (exit $(aws.details.exitCode)): $(aws.details.commandPreview)</description>
+  <rule id="110150" level="10">
+    <if_sid>110090</if_sid>
+    <regex type="pcre2">(?i)(\.\./|\.\.\\\\|%2e%2e(%2f|/)|%252e%252e|/etc/passwd|/proc/self/)</regex>
+    <description>VulnTrade: path_traversal_detected - traversal pattern in $(aws.source_file)</description>
     <mitre>
-      <id>T1059</id>
-      <id>T1190</id>
-    </mitre>
-    <group>attack,rce,</group>
-  </rule>
-
-  <rule id="110141" level="8">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^DEBUG_ENDPOINT_ACCESSED$</field>
-    <description>VulnTrade: debug endpoint $(aws.details.endpoint) accessed by $(aws.username) from $(aws.clientIp)</description>
-    <mitre>
-      <id>T1190</id>
+      <id>T1083</id>
     </mitre>
     <group>attack,</group>
   </rule>
 
-  <rule id="110142" level="10">
-    <if_sid>110141</if_sid>
-    <field name="aws.details.endpoint">^execute$</field>
-    <description>VulnTrade: debug command-execution endpoint hit from $(aws.clientIp) (key presented: $(aws.details.keyPresented))</description>
+  <!-- ===== SQL injection in user input fields =====
+       Children of 110091 at level 10, so they beat the event's own rule.
+       All four use the same regex. -->
+
+  <rule id="110112" level="10">
+    <if_sid>110091</if_sid>
+    <field name="aws.details.attemptedUsername" type="pcre2">(?i)('|%27)\s*(or|and|union|;|--|#)|union\s+(all\s+)?select|\bor\s+\d+\s*=\s*\d+|sleep\s*\(|--\s*$</field>
+    <description>VulnTrade: sql_injection_detected - SQL in login username from $(aws.clientIp): $(aws.details.attemptedUsername)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>attack,sqli,</group>
+  </rule>
+
+  <rule id="110110" level="10">
+    <if_sid>110091</if_sid>
+    <field name="aws.details.symbol" type="pcre2">(?i)('|%27)\s*(or|and|union|;|--|#)|union\s+(all\s+)?select|\bor\s+\d+\s*=\s*\d+|sleep\s*\(|--\s*$</field>
+    <description>VulnTrade: sql_injection_detected - SQL in symbol of $(aws.eventType) from $(aws.clientIp): $(aws.details.symbol)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>attack,sqli,</group>
+  </rule>
+
+  <rule id="110111" level="10">
+    <if_sid>110091</if_sid>
+    <field name="aws.details.startDate" type="pcre2">(?i)('|%27)\s*(or|and|union|;|--|#)|union\s+(all\s+)?select|\bor\s+\d+\s*=\s*\d+|sleep\s*\(|--\s*$</field>
+    <description>VulnTrade: sql_injection_detected - SQL in startDate of $(aws.eventType) from $(aws.clientIp): $(aws.details.startDate)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>attack,sqli,</group>
+  </rule>
+
+  <rule id="110114" level="10">
+    <if_sid>110091</if_sid>
+    <field name="aws.details.endDate" type="pcre2">(?i)('|%27)\s*(or|and|union|;|--|#)|union\s+(all\s+)?select|\bor\s+\d+\s*=\s*\d+|sleep\s*\(|--\s*$</field>
+    <description>VulnTrade: sql_injection_detected - SQL in endDate of $(aws.eventType) from $(aws.clientIp): $(aws.details.endDate)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>attack,sqli,</group>
+  </rule>
+
+  <!-- ===== Request fallbacks (RequestLoggingFilter) ===== -->
+
+  <rule id="110104" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^input_validation_failed$</field>
+    <description>VulnTrade: bad request (HTTP $(aws.httpStatus)) on $(aws.httpMethod) $(aws.path) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110105" level="8" frequency="10" timeframe="60">
+    <if_matched_sid>110104</if_matched_sid>
+    <same_field>aws.clientIp</same_field>
+    <description>VulnTrade: 10 bad requests in 60s from $(aws.clientIp) (fuzzing or scanning)</description>
+    <mitre>
+      <id>T1595.002</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <rule id="110106" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^unexpected_exception$</field>
+    <description>VulnTrade: server error $(aws.details.exception) (HTTP $(aws.httpStatus)) on $(aws.httpMethod) $(aws.path) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110107" level="8" frequency="10" timeframe="60">
+    <if_matched_sid>110106</if_matched_sid>
+    <same_field>aws.clientIp</same_field>
+    <description>VulnTrade: 10 server errors in 60s from $(aws.clientIp) (payloads breaking the app)</description>
+    <mitre>
+      <id>T1595.002</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ===== Debug endpoints ===== -->
+
+  <!-- Child of 110090, not 110091, at level 13: it is tried before every
+       content rule, so "cat /etc/passwd" is command injection, not traversal. -->
+  <rule id="110140" level="13">
+    <if_sid>110090</if_sid>
+    <field name="aws.source_file" type="pcre2">^/var/log/vulntrade/security\.log$</field>
+    <field name="aws.eventType" type="pcre2">^debug_command_executed$</field>
+    <description>VulnTrade: command_injection_detected - debug endpoint ran a shell command for $(aws.clientIp): $(aws.details.command)</description>
     <mitre>
       <id>T1059</id>
+      <id>T1190</id>
     </mitre>
     <group>attack,rce,</group>
   </rule>
 
-  <rule id="110150" level="10">
-    <if_sid>110090</if_sid>
-    <regex type="pcre2">(?i)(\.\./|\.\.\\\\|%2e%2e(%2f|/)|%252e%252e|/etc/passwd|/proc/self/)</regex>
-    <description>VulnTrade: path traversal pattern in $(aws.source_file)</description>
+  <!-- Both outcomes: a failed query is still raw SQL run through the debug
+       backdoor, and the description shows which one it was. -->
+  <rule id="110143" level="10">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^debug_query_executed$</field>
+    <description>VulnTrade: debug endpoint ran SQL ($(aws.outcome)) for $(aws.clientIp): $(aws.details.query)</description>
     <mitre>
-      <id>T1083</id>
+      <id>T1190</id>
     </mitre>
     <group>attack,</group>
   </rule>

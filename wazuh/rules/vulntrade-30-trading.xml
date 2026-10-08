@@ -1,15 +1,57 @@
 <!--
-  VulnTrade — trading / economic abuse (ids 110300-110399).
-  Amounts arrive as strings; Java doubles may render as 1.0E7, hence the
-  exponent alternatives in the "large" patterns.
+  VulnTrade - funding, admin, orders and trades (ids 110300-110399).
+  Chains off 110091. Conventions: see vulntrade-00-base.xml.
+
+  Fed by: withdrawal_completed, deposit_completed, admin_action,
+  order_created, order_rejected, order_cancelled, trade_executed.
+  A normal deposit or withdrawal has no rule of its own and stays on 110091.
+
+  Amounts arrive as strings and may look like 1.0E7, 1E+7 or 1e+20, so the
+  "large" pattern (1,000,000 or more) is: 7+ digits, or a mantissa with an
+  exponent of 6 or more.
+
+  Tree:
+    110301 / 110350 / 110303 withdrawal: negative / large / balance below 0
+    110302 / 110360          deposit: negative / large
+    110320 admin_action      110330 adjust_balance (110331 large),
+                             110335 set_price, 110337 halt_trading,
+                             110338 resume_trading,
+                             110339 execute_query (110340 destructive SQL)
+    110370 order_created
+    110371 order_rejected    110372 burst
+    110373 order_cancelled   110374 isOwner=false
+    110375 trade_executed    110376 selfTrade=true
 -->
 <group name="vulntrade,vulntrade_trading,">
 
+  <!-- ===== Withdrawals and deposits ===== -->
+
   <rule id="110301" level="12">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ACCOUNT_WITHDRAW$</field>
+    <field name="aws.eventType" type="pcre2">^withdrawal_completed$</field>
     <field name="aws.details.amount" type="pcre2">^-</field>
-    <description>VulnTrade: negative withdrawal $(aws.details.amount) by userId $(aws.details.userId) — sign-flip exploit</description>
+    <description>VulnTrade: sign_flip_detected - negative withdrawal $(aws.details.amount) by $(aws.username) (balance now $(aws.details.balanceAfter))</description>
+    <mitre>
+      <id>T1565.001</id>
+    </mitre>
+    <group>attack,fraud,</group>
+  </rule>
+
+  <rule id="110350" level="8">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^withdrawal_completed$</field>
+    <field name="aws.details.amount" type="pcre2">(?i)^\+?([0-9]{7,}|[0-9.]+e\+?([6-9]|[1-9][0-9]))</field>
+    <description>VulnTrade: large withdrawal $(aws.details.amount) by $(aws.username) to $(aws.details.destination)</description>
+    <group>fraud,</group>
+  </rule>
+
+  <!-- A withdrawal that left the balance below zero: two withdrawals raced
+       past the same balance check. -->
+  <rule id="110303" level="12">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^withdrawal_completed$</field>
+    <field name="aws.details.balanceAfter" type="pcre2">^-</field>
+    <description>VulnTrade: double_spend_detected - withdrawal $(aws.details.amount) by $(aws.username) left balance $(aws.details.balanceAfter)</description>
     <mitre>
       <id>T1565.001</id>
     </mitre>
@@ -18,25 +60,41 @@
 
   <rule id="110302" level="12">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ACCOUNT_DEPOSIT$</field>
+    <field name="aws.eventType" type="pcre2">^deposit_completed$</field>
     <field name="aws.details.amount" type="pcre2">^-</field>
-    <description>VulnTrade: negative deposit $(aws.details.amount) by userId $(aws.details.userId) — sign-flip exploit</description>
+    <description>VulnTrade: sign_flip_detected - negative deposit $(aws.details.amount) by $(aws.username) (balance now $(aws.details.balanceAfter))</description>
     <mitre>
       <id>T1565.001</id>
     </mitre>
     <group>attack,fraud,</group>
   </rule>
 
-  <rule id="110330" level="8">
+  <rule id="110360" level="8">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ADMIN_BALANCE_ADJUST$</field>
-    <description>VulnTrade: admin balance adjustment $(aws.details.amount) on userId $(aws.details.targetUserId) — reason "$(aws.details.reason)"</description>
+    <field name="aws.eventType" type="pcre2">^deposit_completed$</field>
+    <field name="aws.details.amount" type="pcre2">(?i)^\+?([0-9]{7,}|[0-9.]+e\+?([6-9]|[1-9][0-9]))</field>
+    <description>VulnTrade: large deposit $(aws.details.amount) by $(aws.username) from $(aws.details.source)</description>
+    <group>fraud,</group>
+  </rule>
+
+  <!-- ===== Admin actions (details.action says which) ===== -->
+
+  <rule id="110320" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^admin_action$</field>
+    <description>VulnTrade: admin action $(aws.details.action) ($(aws.outcome)) by $(aws.username) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110330" level="8">
+    <if_sid>110320</if_sid>
+    <field name="aws.details.action" type="pcre2">^adjust_balance$</field>
+    <description>VulnTrade: admin balance adjustment $(aws.details.amount) on userId $(aws.details.targetUserId) by $(aws.username), reason "$(aws.details.reason)"</description>
   </rule>
 
   <rule id="110331" level="10">
     <if_sid>110330</if_sid>
-    <field name="aws.details.amount" type="pcre2">^-?([0-9]{7,}|[0-9.]+E([6-9]|[1-9][0-9]))</field>
-    <description>VulnTrade: large admin balance adjustment $(aws.details.amount) on userId $(aws.details.targetUserId)</description>
+    <field name="aws.details.amount" type="pcre2">(?i)^[+-]?([0-9]{7,}|[0-9.]+e\+?([6-9]|[1-9][0-9]))</field>
+    <description>VulnTrade: large admin balance adjustment $(aws.details.amount) on userId $(aws.details.targetUserId) by $(aws.username)</description>
     <mitre>
       <id>T1565.001</id>
     </mitre>
@@ -44,36 +102,98 @@
   </rule>
 
   <rule id="110335" level="10">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ADMIN_SET_PRICE$</field>
-    <description>VulnTrade: admin price override on $(aws.details.symbol) to $(aws.details.newPrice)</description>
+    <if_sid>110320</if_sid>
+    <field name="aws.details.action" type="pcre2">^set_price$</field>
+    <description>VulnTrade: admin price override on $(aws.details.symbol) to $(aws.details.newPrice) by $(aws.username)</description>
     <mitre>
       <id>T1565.001</id>
     </mitre>
   </rule>
 
   <rule id="110337" level="10">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ADMIN_HALT_TRADING$</field>
-    <description>VulnTrade: trading halted on $(aws.details.symbol) — reason "$(aws.details.reason)"</description>
+    <if_sid>110320</if_sid>
+    <field name="aws.details.action" type="pcre2">^halt_trading$</field>
+    <description>VulnTrade: trading halted on $(aws.details.symbol) by $(aws.username), reason "$(aws.details.reason)"</description>
     <mitre>
       <id>T1489</id>
     </mitre>
   </rule>
 
-  <rule id="110350" level="8">
+  <rule id="110338" level="6">
+    <if_sid>110320</if_sid>
+    <field name="aws.details.action" type="pcre2">^resume_trading$</field>
+    <description>VulnTrade: trading resumed on $(aws.details.symbol) by $(aws.username)</description>
+  </rule>
+
+  <!-- Raw SQL from the admin panel, either outcome. -->
+  <rule id="110339" level="8">
+    <if_sid>110320</if_sid>
+    <field name="aws.details.action" type="pcre2">^execute_query$</field>
+    <description>VulnTrade: admin ran SQL ($(aws.outcome)) by $(aws.username) from $(aws.clientIp): $(aws.details.query)</description>
+  </rule>
+
+  <rule id="110340" level="12">
+    <if_sid>110339</if_sid>
+    <field name="aws.details.query" type="pcre2">(?i)\b(drop|truncate|delete|alter|update|grant)\b</field>
+    <description>VulnTrade: destructive admin SQL ($(aws.outcome)) by $(aws.username) from $(aws.clientIp): $(aws.details.query)</description>
+    <mitre>
+      <id>T1485</id>
+      <id>T1565.001</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ===== Orders and trades ===== -->
+
+  <!-- Level 2: remembered, no alert (normal trading). -->
+  <rule id="110370" level="2">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ACCOUNT_WITHDRAW$</field>
-    <field name="aws.details.amount" type="pcre2">^([0-9]{7,}|[0-9.]+E([6-9]|[1-9][0-9]))</field>
-    <description>VulnTrade: large withdrawal $(aws.details.amount) by userId $(aws.details.userId) to $(aws.details.destination)</description>
+    <field name="aws.eventType" type="pcre2">^order_created$</field>
+    <description>VulnTrade: order $(aws.details.orderId) created: $(aws.details.side) $(aws.details.quantity) $(aws.details.symbol) by $(aws.username)</description>
+  </rule>
+
+  <rule id="110371" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^order_rejected$</field>
+    <description>VulnTrade: order rejected ($(aws.details.reason)): $(aws.details.side) $(aws.details.quantity) $(aws.details.symbol) by $(aws.username)</description>
+  </rule>
+
+  <rule id="110372" level="8" frequency="10" timeframe="60">
+    <if_matched_sid>110371</if_matched_sid>
+    <same_field>aws.username</same_field>
+    <description>VulnTrade: 10 rejected orders in 60s for $(aws.username) (risk-limit probing)</description>
     <group>fraud,</group>
   </rule>
 
-  <rule id="110360" level="8">
+  <!-- Either outcome: a failure (already_closed) on someone else's order is
+       still an attempt. -->
+  <rule id="110373" level="3">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ACCOUNT_DEPOSIT$</field>
-    <field name="aws.details.amount" type="pcre2">^([0-9]{7,}|[0-9.]+E([6-9]|[1-9][0-9]))</field>
-    <description>VulnTrade: large deposit $(aws.details.amount) by userId $(aws.details.userId)</description>
+    <field name="aws.eventType" type="pcre2">^order_cancelled$</field>
+    <description>VulnTrade: cancel of order $(aws.details.orderId) ($(aws.outcome)) by $(aws.username)</description>
+  </rule>
+
+  <rule id="110374" level="10">
+    <if_sid>110373</if_sid>
+    <field name="aws.details.isOwner" type="pcre2">(?i)^false$</field>
+    <description>VulnTrade: idor_enumeration_detected - $(aws.username) cancelled order $(aws.details.orderId) of userId $(aws.details.targetUserId) ($(aws.outcome))</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- Level 2: remembered, no alert (one per fill). -->
+  <rule id="110375" level="2">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^trade_executed$</field>
+    <description>VulnTrade: trade $(aws.details.tradeId): $(aws.details.quantity) $(aws.details.symbol) at $(aws.details.price), buyer $(aws.details.buyerId), seller $(aws.details.sellerId)</description>
+  </rule>
+
+  <rule id="110376" level="10">
+    <if_sid>110375</if_sid>
+    <field name="aws.details.selfTrade" type="pcre2">(?i)^true$</field>
+    <description>VulnTrade: wash_trade_detected - userId $(aws.details.buyerId) traded with itself: $(aws.details.quantity) $(aws.details.symbol) at $(aws.details.price)</description>
     <group>fraud,</group>
   </rule>
 
