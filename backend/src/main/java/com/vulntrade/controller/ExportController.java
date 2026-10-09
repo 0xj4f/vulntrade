@@ -4,6 +4,8 @@ import com.vulntrade.model.Order;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.CustomQueryRepository;
 import com.vulntrade.security.JwtTokenProvider;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +14,8 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Export controller for trade/order data.
@@ -95,6 +99,9 @@ public class ExportController {
                 order.getExecutedAt() != null ? order.getExecutedAt() : "");
         }
 
+        log(SecurityEvent.DATA_EXPORTED, Outcome.SUCCESS,
+                details("resource", "trades", "targetUserId", lookupUserId,
+                        "isOwner", isOwner(lookupUserId), "rowCount", orders.size()));
         writer.flush();
     }
 
@@ -144,7 +151,12 @@ public class ExportController {
                 }
                 writer.println(line);
             }
+            log(SecurityEvent.DATA_EXPORTED, Outcome.SUCCESS,
+                    details("resource", "all_trades", "rowCount", results.size(), "symbol", symbol));
         } catch (Exception e) {
+            log(SecurityEvent.DATA_EXPORTED, Outcome.FAILURE,
+                    details("resource", "all_trades", "symbol", symbol,
+                            "errorType", e.getClass().getSimpleName()));
             // VULN: Error message reveals database structure
             writer.println("ERROR: " + e.getMessage());
         }
@@ -177,6 +189,9 @@ public class ExportController {
 
             List<Object[]> results = customQueryRepository.executeRawQuery(sql);
 
+            log(SecurityEvent.DATA_EXPORTED, Outcome.SUCCESS,
+                    details("resource", "portfolio", "targetUserId", lookupUserId,
+                            "isOwner", isOwner(lookupUserId), "rowCount", results.size()));
             return ResponseEntity.ok(Map.of(
                 "userId", lookupUserId,
                 "positions", results,
@@ -184,6 +199,9 @@ public class ExportController {
                 "exportedBy", userId  // VULN: reveals who requested
             ));
         } catch (Exception e) {
+            log(SecurityEvent.DATA_EXPORTED, Outcome.FAILURE,
+                    details("resource", "portfolio", "targetUserId", lookupUserId,
+                            "errorType", e.getClass().getSimpleName()));
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }

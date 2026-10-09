@@ -1,5 +1,6 @@
 package com.vulntrade.security;
 
+import com.vulntrade.security.logging.SecurityEventLogger;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,7 +32,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String token = extractToken(request);
 
         if (token != null) {
-            io.jsonwebtoken.Claims claims = jwtTokenProvider.validateToken(token);
+            // Logs token_validation_failed once per request when the token is bad
+            // (expired / alg:none tokens are still accepted below - that's the vuln).
+            io.jsonwebtoken.Claims claims = jwtTokenProvider.validateTokenAndLogFailure(token);
             if (claims != null) {
                 String username = claims.getSubject();
                 // VULN: Role comes from JWT token body - client can modify
@@ -48,6 +51,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 // Store claims in auth details for controllers to access
                 auth.setDetails(claims);
                 SecurityContextHolder.getContext().setAuthentication(auth);
+                SecurityEventLogger.rememberUser(claims.get("userId"), username);
             }
         }
 

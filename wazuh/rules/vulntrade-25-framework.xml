@@ -1,28 +1,35 @@
 <!--
-  VulnTrade — framework / infrastructure surfaces (ids 110160-110179).
-  App-layer detection of famous Spring Boot framework exposures. Fed by the
-  backend FrameworkAccessLogFilter, which emits a security event on every
-  /actuator, /h2-console and swagger request. Chains off 110091.
-  (Edge-layer equivalents live in adaptive-rules for the WAF/CloudFront path.)
+  VulnTrade - framework surfaces and audit config (ids 110160-110179).
+  Chains off 110091. Conventions: see vulntrade-00-base.xml.
+
+  Fed by: framework_endpoint_accessed (FrameworkAccessLogFilter, one event per
+  /actuator, /h2-console or swagger request, with details.surface) and
+  audit_configuration_changed (POST /actuator/loggers/*).
+
+  Tree:
+    110160 surface=actuator      110161 sensitive endpoint
+    110162 surface=h2_console    110164 RCE payload in jdbcUrl
+    110163 surface=swagger
+    110165 audit_configuration_changed
 -->
 <group name="vulntrade,vulntrade_framework,">
 
-  <!-- Any actuator endpoint hit — recon of the management surface. -->
   <rule id="110160" level="6">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^FRAMEWORK_ACTUATOR_ACCESS$</field>
-    <description>VulnTrade: Spring Actuator endpoint /actuator/$(aws.details.endpoint) accessed from $(aws.details.clientIp)</description>
+    <field name="aws.eventType" type="pcre2">^framework_endpoint_accessed$</field>
+    <field name="aws.details.surface" type="pcre2">^actuator$</field>
+    <description>VulnTrade: Spring Actuator /actuator/$(aws.details.endpoint) accessed from $(aws.clientIp)</description>
     <mitre>
       <id>T1592</id>
     </mitre>
     <group>framework,attack,</group>
   </rule>
 
-  <!-- Dangerous actuator endpoints: secret/memory disclosure or shutdown DoS. -->
+  <!-- Secret or memory disclosure, logger control, or shutdown. -->
   <rule id="110161" level="10">
     <if_sid>110160</if_sid>
-    <field name="aws.details.endpoint" type="pcre2">^(env|heapdump|shutdown|threaddump|beans|configprops|loggers)$</field>
-    <description>VulnTrade: sensitive actuator endpoint /actuator/$(aws.details.endpoint) accessed from $(aws.details.clientIp) — secret/memory disclosure or shutdown</description>
+    <field name="aws.details.endpoint" type="pcre2">^(env|heapdump|shutdown|threaddump|beans|configprops|loggers)(/|$)</field>
+    <description>VulnTrade: sensitive actuator endpoint /actuator/$(aws.details.endpoint) accessed from $(aws.clientIp)</description>
     <mitre>
       <id>T1082</id>
       <id>T1552.001</id>
@@ -30,26 +37,53 @@
     <group>framework,attack,</group>
   </rule>
 
-  <!-- H2 database web console — JDBC-URL RCE surface (CVE-2021-42392 class). -->
+  <!-- H2 web console: JDBC-URL RCE surface (CVE-2021-42392 class). -->
   <rule id="110162" level="8">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^FRAMEWORK_H2_CONSOLE_ACCESS$</field>
-    <description>VulnTrade: H2 console accessed ($(aws.details.path)) from $(aws.details.clientIp) — JDBC-URL RCE surface</description>
+    <field name="aws.eventType" type="pcre2">^framework_endpoint_accessed$</field>
+    <field name="aws.details.surface" type="pcre2">^h2_console$</field>
+    <description>VulnTrade: H2 console $(aws.path) accessed from $(aws.clientIp)</description>
     <mitre>
       <id>T1190</id>
     </mitre>
     <group>framework,attack,</group>
   </rule>
 
-  <!-- Swagger / OpenAPI doc access — API surface enumeration (low signal). -->
+  <!-- jdbcUrl is the url parameter of /h2-console/*.do. These keywords make
+       H2 run SQL or a remote script on connect. -->
+  <rule id="110164" level="12">
+    <if_sid>110162</if_sid>
+    <field name="aws.details.jdbcUrl" type="pcre2">(?i)INIT=|RUNSCRIPT|CREATE\s+ALIAS</field>
+    <description>VulnTrade: h2_console_rce_detected - H2 JDBC URL with code execution from $(aws.clientIp): $(aws.details.jdbcUrl)</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1059</id>
+    </mitre>
+    <group>framework,attack,rce,</group>
+  </rule>
+
+  <!-- API docs (low signal). -->
   <rule id="110163" level="3">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^FRAMEWORK_SWAGGER_ACCESS$</field>
-    <description>VulnTrade: API docs/Swagger accessed ($(aws.details.path)) from $(aws.details.clientIp)</description>
+    <field name="aws.eventType" type="pcre2">^framework_endpoint_accessed$</field>
+    <field name="aws.details.surface" type="pcre2">^swagger$</field>
+    <description>VulnTrade: API docs $(aws.path) accessed from $(aws.clientIp)</description>
     <mitre>
       <id>T1592</id>
     </mitre>
     <group>framework,</group>
+  </rule>
+
+  <!-- Written before the request runs, so it survives an attacker switching
+       the SECURITY_EVENTS logger off with this very request. -->
+  <rule id="110165" level="12">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^audit_configuration_changed$</field>
+    <description>VulnTrade: log_tampering_detected - log level change for logger $(aws.details.loggerName) requested from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1562</id>
+    </mitre>
+    <group>framework,attack,</group>
   </rule>
 
 </group>

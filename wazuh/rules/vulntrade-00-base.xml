@@ -1,41 +1,71 @@
 <!--
-  VulnTrade — base anchors (ids 110090-110099).
+  VulnTrade - base anchors (ids 110090-110099).
 
-  Pipeline: Log4j2 JSON -> Fluent Bit (Parser json) -> S3 -> SQS -> aws-s3 wodle.
+  Pipeline: Log4j2 JSON -> Fluent Bit -> S3 -> SQS -> aws-s3 wodle.
   The wodle wraps each record as {"integration":"aws","aws":{...record...}},
-  so the stock `json` decoder exposes every field as aws.<field> and nested
-  details as aws.details.<key>. Every such event lands on stock rule 80200
-  (AWS alert, level 0) — that is our anchor. Verified with wazuh-logtest on
-  npr dev2, Wazuh 4.14.5, 2026-09-29.
+  so the stock json decoder exposes every top-level field as aws.<field>
+  (aws.eventType, aws.clientIp) and every details key as aws.details.<key>
+  (aws.details.reason). Every such event lands on stock rule 80200 (AWS,
+  level 0), which is our anchor. All scalars arrive as strings: "7", "true",
+  "1E+7".
 
-  Scalars arrive as strings (numbers and booleans are stringified by the wodle).
+  Files load alphabetically from etc/rules/, hence the numeric prefixes.
 
-  Files load alphabetically from etc/rules/, hence the numeric prefixes:
-  anchors must load before the files that chain off them.
+  RULE CONVENTIONS (all 7 files follow these; also in docs/logging-guide.md 6.2)
+   1. Every <field> and <regex> uses type="pcre2", with (?i) where case does
+      not matter (roles, booleans, user agents, SQL keywords, amounts).
+   2. One base rule per eventType, directly under 110091. Refinements
+      (reason, path, isOwner, amount, action) are children of that base rule.
+   3. Bursts (frequency + timeframe) count the base rule. Extra conditions go
+      on a child of the burst. Wazuh remembers an event only under the rule it
+      finally lands on, so an event that lands on a refinement child is not
+      counted by a burst on the base rule.
+      If the burst must count those children too, tag the base rule and the
+      children with one vt_* group and count the group:
+      <if_sid>base</if_sid> + <if_matched_group>vt_group</if_matched_group>
+      (the login bursts in vulntrade-10-auth.xml). Never also point an
+      if_matched_sid at a rule in that group: Wazuh then keeps the rule's
+      events only for the if_matched_sid, and the group count misses them.
+   4. Never use level 0 below 110090 (level-0 events are not remembered).
+      Level 2 = remembered for correlation, no alert.
+   5. Neutral-name events (password_changed, api_key_used, refresh_token_used,
+      sensitive_data_read, data_exported, ...) carry their result only in
+      aws.outcome. A rule that means one result filters on aws.outcome.
+   6. Correlation keys: aws.requestId (two facts from one HTTP request),
+      aws.sessionId (STOMP), aws.clientIp / aws.username /
+      aws.details.attemptedUsername (bursts).
+   7. A rule may reference only ids in its own file or an earlier file, and a
+      parent rule must appear above its children.
+   8. Booleans match (?i)^(true|false)$. Amounts may look like 1E+7 or 1e+20,
+      so amount patterns accept e or E and an optional +.
 
-  Do NOT add a level-0 child under 110090: Wazuh evaluates level-0 siblings
-  before all others, so a silent anchor would swallow every event before the
-  content rules (Log4Shell, XSS, traversal) get a chance. Among non-zero
-  siblings the higher level is tried first, which is why a Log4Shell string in
-  a security event wins over that event's own eventType rule.
+  Descriptions start with "VulnTrade: ". A detection from the team sheet puts
+  its sheet name right after, e.g. "VulnTrade: brute_force_detected - ...".
+
+  Rule order: among the children of one rule, Wazuh tries the higher level
+  first. That is why a Log4Shell string (110100, level 12) beats the event's
+  own eventType rule (110091, level 3), and why 110140 is level 13.
 -->
 <group name="vulntrade,">
 
-  <!-- Any VulnTrade record, either sink. Silent; anchors content rules. -->
+  <!-- Any VulnTrade line, either file. Level 0: a silent anchor for the
+       content rules in vulntrade-20-injection.xml. -->
   <rule id="110090" level="0">
     <if_sid>80200</if_sid>
-    <field name="aws.source_file">^/var/log/vulntrade/</field>
+    <field name="aws.source_file" type="pcre2">^/var/log/vulntrade/</field>
     <description>VulnTrade: application log record</description>
   </rule>
 
-  <!-- security.log: one canonical event per line (SecurityEventLogger). -->
+  <!-- Any security.log event. Accepts any \w+ name, so it works whichever
+       side (app or rules) deploys first; the naming rule (lower snake case)
+       lives in the Java SecurityEvent enum. Events with no rule of their own
+       (session_created, price_alert_created, ...) stop here. -->
   <rule id="110091" level="3">
     <if_sid>110090</if_sid>
-    <field name="aws.source_file">^/var/log/vulntrade/security\.log$</field>
-    <field name="aws.eventType" type="pcre2">^[A-Z_]+$</field>
+    <field name="aws.source_file" type="pcre2">^/var/log/vulntrade/security\.log$</field>
+    <field name="aws.eventType" type="pcre2">^\w+$</field>
     <description>VulnTrade: security event $(aws.eventType) ($(aws.outcome))</description>
     <group>vulntrade_security,</group>
   </rule>
-
 
 </group>

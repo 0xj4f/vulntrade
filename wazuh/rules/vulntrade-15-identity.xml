@@ -1,55 +1,143 @@
 <!--
-  VulnTrade — identity / IAM mutations (ids 110050-110069).
-  Chains off 110091 (security.log event). User/profile updates and admin actions
-  on accounts. Correlation key: aws.clientIp (HTTP events).
+  VulnTrade - identity, files and sensitive data (ids 110050-110089).
+  Chains off 110091. Conventions: see vulntrade-00-base.xml.
+
+  Fed by: profile_updated, security_attribute_updated, permission_changed,
+  file_created_or_uploaded, account_disabled, account_enabled,
+  sensitive_data_read, sensitive_data_updated, data_exported,
+  sensitive_data_deleted.
+
+  Tree:
+    110050 profile_updated
+    110054 security_attribute_updated
+    110051 permission_changed
+    110052 file_created_or_uploaded     110056 risky file name or type
+    110053 account_enabled / account_disabled
+    110060 sensitive_data_read success  110061 burst: one user, many targets
+    110062 sensitive_data_updated
+    110064 data_exported success
+    110066 sensitive_data_deleted
+    110055 isOwner=false, one shared child of 110050, 110051, 110052,
+           110054, 110062, 110064 (the events that carry isOwner)
 -->
 <group name="vulntrade,vulntrade_identity,">
 
-  <!-- Any profile/attribute update (email, notes, profilePic). IDOR-prone: no
-       ownership check, so the acting aws.username may differ from targetUserId. -->
-  <rule id="110050" level="5">
+  <rule id="110050" level="3">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^USER_PROFILE_UPDATE$</field>
-    <description>VulnTrade: profile update on userId $(aws.details.targetUserId) [$(aws.details.changedFields)] by $(aws.username) from $(aws.clientIp)</description>
+    <field name="aws.eventType" type="pcre2">^profile_updated$</field>
+    <description>VulnTrade: profile of userId $(aws.details.targetUserId) updated [$(aws.details.changedFields)] by $(aws.username) from $(aws.clientIp)</description>
     <mitre>
       <id>T1098</id>
     </mitre>
     <group>identity,</group>
   </rule>
 
-  <!-- Verification/PII write that also auto-elevates the account to level 2. -->
-  <rule id="110051" level="8">
+  <!-- Email change: a password reset goes to this address. -->
+  <rule id="110054" level="5">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^USER_VERIFICATION_UPDATE$</field>
-    <description>VulnTrade: verification/account-level change on userId $(aws.details.targetUserId) — newLevel $(aws.details.newAccountLevel), verified $(aws.details.verified)</description>
+    <field name="aws.eventType" type="pcre2">^security_attribute_updated$</field>
+    <description>VulnTrade: security attribute of userId $(aws.details.targetUserId) updated [$(aws.details.changedFields)] by $(aws.username) from $(aws.clientIp)</description>
     <mitre>
       <id>T1098</id>
     </mitre>
-    <group>identity,attack,</group>
+    <group>identity,</group>
   </rule>
 
-  <!-- Profile photo upload — no content-type/extension restriction on the endpoint. -->
-  <rule id="110052" level="5">
+  <!-- Auto-verification to account level 2. Level 5: the user simulator
+       verifies users all the time. -->
+  <rule id="110051" level="5">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^USER_PHOTO_UPLOAD$</field>
-    <description>VulnTrade: photo upload for userId $(aws.details.targetUserId) — $(aws.details.filename) ($(aws.details.contentType), $(aws.details.size)B)</description>
+    <field name="aws.eventType" type="pcre2">^permission_changed$</field>
+    <description>VulnTrade: userId $(aws.details.targetUserId) raised to account level $(aws.details.accountLevel) by $(aws.username)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>identity,</group>
+  </rule>
+
+  <rule id="110052" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^file_created_or_uploaded$</field>
+    <description>VulnTrade: file uploaded for userId $(aws.details.targetUserId): "$(aws.details.originalFilename)" ($(aws.details.contentType), $(aws.details.size) bytes) by $(aws.username)</description>
     <mitre>
       <id>T1105</id>
     </mitre>
     <group>identity,</group>
   </rule>
 
-  <!-- Admin enabled/disabled an account. -->
+  <!-- A script or web-page extension in originalFilename, or a contentType
+       that is text, SVG or application/*. One <regex> over the whole event
+       so either key is enough (two <field> tags would mean AND). -->
+  <rule id="110056" level="12">
+    <if_sid>110052</if_sid>
+    <regex type="pcre2">(?i)"originalFilename":\s*"[^"]*\.(jsp|jspx|php\d?|phtml|aspx?|html?|svg|js|sh|exe|war|jar)"|"contentType":\s*"(text/|image/svg|application/)</regex>
+    <description>VulnTrade: malicious_file_upload_detected - "$(aws.details.originalFilename)" ($(aws.details.contentType)) uploaded for userId $(aws.details.targetUserId) by $(aws.username)</description>
+    <mitre>
+      <id>T1105</id>
+      <id>T1505.003</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
   <rule id="110053" level="8">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^ADMIN_USER_TOGGLE$</field>
-    <description>VulnTrade: admin toggled account userId $(aws.details.targetUserId) — isActive now $(aws.details.newIsActive)</description>
+    <field name="aws.eventType" type="pcre2">^account_(enabled|disabled)$</field>
+    <description>VulnTrade: $(aws.eventType) for userId $(aws.details.targetUserId) by $(aws.username)</description>
     <mitre>
       <id>T1531</id>
     </mitre>
     <group>identity,</group>
   </rule>
 
-  <!-- NOTE: ADMIN_BALANCE_ADJUST (controller path) is covered by 110330/110331. -->
+  <!-- Only cross-user reads (and admin/debug reads) are logged, so each one
+       already means "someone else's data". -->
+  <rule id="110060" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^sensitive_data_read$</field>
+    <field name="aws.outcome" type="pcre2">^success$</field>
+    <description>VulnTrade: $(aws.username) read $(aws.details.resource) of userId $(aws.details.targetUserId) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110061" level="10" frequency="5" timeframe="60">
+    <if_matched_sid>110060</if_matched_sid>
+    <same_field>aws.username</same_field>
+    <different_field>aws.details.targetUserId</different_field>
+    <description>VulnTrade: idor_enumeration_detected - $(aws.username) read data of 5 different users in 60s</description>
+    <mitre>
+      <id>T1213</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <rule id="110062" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^sensitive_data_updated$</field>
+    <description>VulnTrade: $(aws.details.resource) of userId $(aws.details.targetUserId) updated [$(aws.details.changedFields)] by $(aws.username)</description>
+  </rule>
+
+  <rule id="110064" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^data_exported$</field>
+    <field name="aws.outcome" type="pcre2">^success$</field>
+    <description>VulnTrade: $(aws.details.resource) exported ($(aws.details.rowCount) rows) by $(aws.username) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110066" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^sensitive_data_deleted$</field>
+    <description>VulnTrade: $(aws.details.resource) $(aws.details.orderId) deleted by $(aws.username) from $(aws.clientIp)</description>
+  </rule>
+
+  <!-- Shared child: the actor worked on another user's data. Must stay below
+       all its parents in this file. -->
+  <rule id="110055" level="10">
+    <if_sid>110050, 110051, 110052, 110054, 110062, 110064</if_sid>
+    <field name="aws.details.isOwner" type="pcre2">(?i)^false$</field>
+    <description>VulnTrade: idor_enumeration_detected - $(aws.eventType) on userId $(aws.details.targetUserId) by $(aws.username), not their own</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
 
 </group>

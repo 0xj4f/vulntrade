@@ -1,67 +1,147 @@
 <!--
-  VulnTrade — authentication (ids 110001-110029).
-  Chains off 110091 (security.log event). Correlation keys: aws.clientIp (HTTP events).
+  VulnTrade - authentication, tokens, credentials, accounts (ids 110001-110049).
+  Chains off 110091. Conventions: see vulntrade-00-base.xml.
+
+  Fed by: login_failure, login_success, logout, token_validation_failed,
+  password_changed, password_reset_requested, password_reset_completed,
+  account_created, api_key_used, refresh_token_used, authorization_denied.
+
+  Tree (parents first, as Wazuh needs):
+    110001 login_failure
+      110006 user_not_found          110003 burst: 6 different unknown names / IP
+      110014 legacy endpoint
+      110002 burst: 8 / IP           110015 child: non-browser userAgent
+      110016 burst: 8 / attemptedUsername
+    110007 login_success
+      110013 legacy endpoint
+      110005 right after a vt_brute_force burst from the same IP
+    110008 logout
+    110009 token_validation_failed (expired stops here)
+      110010 not expired             110011 alg_none
+                                     110012 burst: 5 bad_signature/malformed / IP
+    110020 password_changed success  110017 same requestId as 110011
+    110021 / 110022 reset requested / completed (success)
+    110023 reset completed failure   110024 burst
+    110026 account_created           110025 role not TRADER/USER
+    110027 api_key_used failure      110028 burst
+    110030 refresh_token_used success  110031 same requestId as 110011
+    110032 authorization_denied      110033 burst
+  Retired: 110004 (legacy endpoint hit; now 110013/110014 and 110112).
+
+  Login bursts count groups, not rule ids (convention 3):
+    vt_login_failure = 110001, 110006, 110014 (every login failure)
+    vt_unknown_user  = 110006 (user_not_found)
+  So a failure that lands on the user_not_found or legacy child still counts.
+  A failure whose username is SQL (110112) or a Log4Shell / serialized payload
+  (110100-110103) lands on that rule instead and is not counted; each of those
+  alerts on its own.
 -->
 <group name="vulntrade,vulntrade_auth,">
 
+  <!-- ===== Login failures ===== -->
+
   <rule id="110001" level="5">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_LOGIN_FAIL$</field>
+    <field name="aws.eventType" type="pcre2">^login_failure$</field>
     <description>VulnTrade: login failure for "$(aws.details.attemptedUsername)" ($(aws.details.reason)) from $(aws.clientIp)</description>
-    <group>authentication_failed,</group>
+    <group>authentication_failed,vt_login_failure,</group>
   </rule>
 
   <!-- user_not_found is the app's enumeration oracle (distinct error message). -->
   <rule id="110006" level="5">
     <if_sid>110001</if_sid>
-    <field name="aws.details.reason">^user_not_found$</field>
+    <field name="aws.details.reason" type="pcre2">^user_not_found$</field>
     <description>VulnTrade: login for unknown user "$(aws.details.attemptedUsername)" from $(aws.clientIp)</description>
-    <group>authentication_failed,</group>
+    <group>authentication_failed,vt_login_failure,vt_unknown_user,</group>
   </rule>
 
-  <rule id="110007" level="3">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_LOGIN_SUCCESS$</field>
-    <description>VulnTrade: login success userId $(aws.details.userId) role $(aws.details.role) from $(aws.clientIp)</description>
-    <group>authentication_success,</group>
+  <!-- Legacy endpoint (string-concatenated SQL). SQLi there is 110112. -->
+  <rule id="110014" level="5">
+    <if_sid>110001</if_sid>
+    <field name="aws.path" type="pcre2">^/api/auth/login-legacy/?$</field>
+    <description>VulnTrade: legacy-login failure for "$(aws.details.attemptedUsername)" ($(aws.details.reason)) from $(aws.clientIp)</description>
+    <group>authentication_failed,vt_login_failure,</group>
   </rule>
 
+  <!-- Counts the vt_login_failure group (110001, 110006, 110014), so a
+       user_not_found or legacy-endpoint failure counts too. -->
   <rule id="110002" level="10" frequency="8" timeframe="60">
-    <if_matched_sid>110001</if_matched_sid>
+    <if_sid>110001</if_sid>
+    <if_matched_group>vt_login_failure</if_matched_group>
     <same_field>aws.clientIp</same_field>
-    <description>VulnTrade: brute force — 8 failed logins in 60s from $(aws.clientIp)</description>
+    <description>VulnTrade: brute_force_detected - 8 failed logins in 60s from $(aws.clientIp)</description>
     <mitre>
       <id>T1110.001</id>
     </mitre>
-    <group>authentication_failures,attack,</group>
+    <group>authentication_failures,attack,vt_brute_force,</group>
   </rule>
 
+  <!-- Child of the burst: the burst came from a script, not a browser.
+       Every browser sends "Mozilla/5.0 ..."; curl, python and hydra do not.
+       The app writes userAgent "" when the header is missing, because a
+       missing field never matches, not even a negated one. -->
+  <rule id="110015" level="12">
+    <if_sid>110002</if_sid>
+    <field name="aws.userAgent" type="pcre2" negate="yes">(?i)^mozilla/</field>
+    <description>VulnTrade: credential_stuffing_detected - login burst from non-browser client "$(aws.userAgent)" at $(aws.clientIp)</description>
+    <mitre>
+      <id>T1110.004</id>
+    </mitre>
+    <group>authentication_failures,attack,vt_brute_force,</group>
+  </rule>
+
+  <!-- Same account from any IP: rotating the spoofable X-Forwarded-For IP
+       does not evade this one. Counts the same group as 110002. -->
+  <rule id="110016" level="10" frequency="8" timeframe="60">
+    <if_sid>110001</if_sid>
+    <if_matched_group>vt_login_failure</if_matched_group>
+    <same_field>aws.details.attemptedUsername</same_field>
+    <description>VulnTrade: brute_force_detected - 8 failed logins in 60s for "$(aws.details.attemptedUsername)" (any IP)</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>authentication_failures,attack,vt_brute_force,</group>
+  </rule>
+
+  <!-- Counts the vt_unknown_user group (110006). -->
   <rule id="110003" level="8" frequency="6" timeframe="60">
-    <if_matched_sid>110006</if_matched_sid>
+    <if_sid>110006</if_sid>
+    <if_matched_group>vt_unknown_user</if_matched_group>
     <same_field>aws.clientIp</same_field>
     <different_field>aws.details.attemptedUsername</different_field>
-    <description>VulnTrade: username enumeration — 6 distinct unknown usernames in 60s from $(aws.clientIp)</description>
+    <description>VulnTrade: credential_stuffing_detected - 6 different unknown usernames in 60s from $(aws.clientIp)</description>
     <mitre>
+      <id>T1110.004</id>
       <id>T1589.003</id>
     </mitre>
-    <group>attack,</group>
+    <group>attack,vt_brute_force,</group>
   </rule>
 
-  <rule id="110004" level="8">
+  <!-- ===== Login success, logout ===== -->
+
+  <rule id="110007" level="3">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_LOGIN_LEGACY$</field>
-    <description>VulnTrade: legacy login endpoint used (SQLi-exposed) by $(aws.clientIp), username "$(aws.details.attemptedUsername)"</description>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
-    <group>attack,</group>
+    <field name="aws.eventType" type="pcre2">^login_success$</field>
+    <description>VulnTrade: login success for $(aws.username) (role $(aws.details.role)) from $(aws.clientIp)</description>
+    <group>authentication_success,</group>
   </rule>
 
-  <rule id="110005" level="12" timeframe="120">
+  <rule id="110013" level="6">
     <if_sid>110007</if_sid>
-    <if_matched_sid>110002</if_matched_sid>
+    <field name="aws.path" type="pcre2">^/api/auth/login-legacy/?$</field>
+    <description>VulnTrade: legacy-login success for $(aws.username) (role $(aws.details.role)) from $(aws.clientIp)</description>
+    <group>authentication_success,</group>
+  </rule>
+
+  <!-- A success from an IP that just fired any vt_brute_force burst (110002,
+       110015, 110016, 110003). if_matched_group, because burst events land on
+       several rules. Window 360s: windows count at ingest time, and Wazuh
+       polls S3 every 5 minutes. -->
+  <rule id="110005" level="12" timeframe="360">
+    <if_sid>110007</if_sid>
+    <if_matched_group>vt_brute_force</if_matched_group>
     <same_field>aws.clientIp</same_field>
-    <description>VulnTrade: successful login from $(aws.clientIp) after brute-force burst — probable credential compromise</description>
+    <description>VulnTrade: brute_force_detected - login success for $(aws.username) from $(aws.clientIp) right after a brute-force burst (probable compromise)</description>
     <mitre>
       <id>T1110</id>
       <id>T1078</id>
@@ -69,99 +149,194 @@
     <group>authentication_success,attack,</group>
   </rule>
 
-  <rule id="110010" level="5">
+  <rule id="110008" level="3">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_TOKEN_VALIDATION_FAIL$</field>
-    <description>VulnTrade: JWT validation failed ($(aws.details.reason)) on $(aws.path) from $(aws.clientIp)</description>
+    <field name="aws.eventType" type="pcre2">^logout$</field>
+    <description>VulnTrade: logout of $(aws.username) from $(aws.clientIp)</description>
+    <group>authentication_success,</group>
+  </rule>
+
+  <!-- ===== Tokens ===== -->
+
+  <!-- Base for token_validation_failed. Expired tokens stop here at level 3:
+       a day-old browser session is normal, not an attack. -->
+  <rule id="110009" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^token_validation_failed$</field>
+    <description>VulnTrade: token validation failed ($(aws.details.reason)) on $(aws.path) from $(aws.clientIp)</description>
+  </rule>
+
+  <!-- Any reason except expired: bad_signature, malformed, alg_none. -->
+  <rule id="110010" level="5">
+    <if_sid>110009</if_sid>
+    <field name="aws.details.reason" type="pcre2" negate="yes">^expired$</field>
+    <description>VulnTrade: token_forgery_detected - invalid token ($(aws.details.reason)) on $(aws.path) from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1550.001</id>
+    </mitre>
   </rule>
 
   <rule id="110011" level="12">
     <if_sid>110010</if_sid>
-    <field name="aws.details.reason">^alg_none</field>
-    <description>VulnTrade: JWT alg:none token presented on $(aws.path) from $(aws.clientIp) — token forgery</description>
+    <field name="aws.details.reason" type="pcre2">^alg_none</field>
+    <description>VulnTrade: token_forgery_detected - JWT alg:none token on $(aws.path) from $(aws.clientIp)</description>
     <mitre>
       <id>T1550.001</id>
     </mitre>
     <group>attack,</group>
   </rule>
 
+  <!-- Counts events that land on 110010: bad_signature and malformed.
+       Expired tokens stop on 110009 and alg_none lands on 110011 (which
+       alerts on its own), so neither is counted. -->
   <rule id="110012" level="10" frequency="5" timeframe="60">
     <if_matched_sid>110010</if_matched_sid>
     <same_field>aws.clientIp</same_field>
-    <description>VulnTrade: token tampering — 5 JWT validation failures in 60s from $(aws.clientIp)</description>
+    <description>VulnTrade: token_forgery_detected - 5 bad_signature/malformed tokens in 60s from $(aws.clientIp)</description>
     <mitre>
       <id>T1550.001</id>
     </mitre>
     <group>attack,</group>
   </rule>
 
-  <rule id="110020" level="10">
+  <!-- ===== Passwords and resets ===== -->
+
+  <rule id="110020" level="5">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_PASSWORD_CHANGE$</field>
-    <field name="aws.details.requiredOldPassword" type="pcre2">(?i)^false$</field>
-    <description>VulnTrade: password changed for userId $(aws.details.userId) without old-password check — account takeover</description>
+    <field name="aws.eventType" type="pcre2">^password_changed$</field>
+    <field name="aws.outcome" type="pcre2">^success$</field>
+    <description>VulnTrade: password changed for $(aws.username) from $(aws.clientIp)</description>
     <mitre>
       <id>T1098</id>
+    </mitre>
+  </rule>
+
+  <!-- The same HTTP request also logged an alg:none token (110011): the
+       password was changed with a forged token. -->
+  <rule id="110017" level="13" timeframe="360">
+    <if_sid>110020</if_sid>
+    <if_matched_sid>110011</if_matched_sid>
+    <same_field>aws.requestId</same_field>
+    <description>VulnTrade: account_takeover_detected - password of $(aws.username) changed with a forged alg:none token from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1550.001</id>
     </mitre>
     <group>attack,</group>
   </rule>
 
-  <rule id="110025" level="12">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_MASS_ASSIGNMENT_ROLE$</field>
-    <description>VulnTrade: registration self-assigned role $(aws.details.assignedRole) for "$(aws.details.attemptedUsername)" — mass-assignment privilege escalation</description>
-    <mitre>
-      <id>T1098</id>
-    </mitre>
-    <group>attack,</group>
-  </rule>
-
-  <!-- Logout (client-initiated; JWT is stateless). -->
-  <rule id="110008" level="3">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_LOGOUT$</field>
-    <description>VulnTrade: logout userId $(aws.details.userId) from $(aws.clientIp)</description>
-    <group>authentication_success,</group>
-  </rule>
-
-  <!-- Normal user registration (user-create). Mass-assignment case is 110025. -->
-  <rule id="110026" level="3">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_REGISTER$</field>
-    <description>VulnTrade: user registered "$(aws.details.username)" (userId $(aws.details.userId), role $(aws.details.assignedRole)) from $(aws.clientIp)</description>
-    <group>identity,</group>
-  </rule>
-
-  <!-- Legacy login outcomes (the endpoint itself is 110004). -->
-  <rule id="110013" level="6">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_LOGIN_LEGACY_SUCCESS$</field>
-    <description>VulnTrade: legacy-login success userId $(aws.details.userId) role $(aws.details.role) from $(aws.clientIp)</description>
-    <group>authentication_success,</group>
-  </rule>
-
-  <rule id="110014" level="5">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_LOGIN_LEGACY_FAIL$</field>
-    <description>VulnTrade: legacy-login failure ($(aws.details.reason)) for "$(aws.details.attemptedUsername)" from $(aws.clientIp)</description>
-    <group>authentication_failed,</group>
-  </rule>
-
-  <!-- Password reset request (predictable/leaked token vuln). -->
   <rule id="110021" level="5">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_RESET_REQUEST$</field>
-    <description>VulnTrade: password reset requested for "$(aws.details.email)" (userFound $(aws.details.userFound)) from $(aws.clientIp)</description>
-    <group>identity,</group>
+    <field name="aws.eventType" type="pcre2">^password_reset_requested$</field>
+    <field name="aws.outcome" type="pcre2">^success$</field>
+    <description>VulnTrade: password reset requested for "$(aws.details.email)" from $(aws.clientIp)</description>
   </rule>
 
-  <!-- Password actually reset via a reset token (reusable/non-expiring token vuln). -->
-  <rule id="110022" level="8">
+  <rule id="110022" level="5">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^AUTH_PASSWORD_RESET$</field>
-    <description>VulnTrade: password reset applied for userId $(aws.details.targetUserId) via reset token — credential change</description>
+    <field name="aws.eventType" type="pcre2">^password_reset_completed$</field>
+    <field name="aws.outcome" type="pcre2">^success$</field>
+    <description>VulnTrade: password reset completed for userId $(aws.details.targetUserId) (reset token $(aws.details.resetTokenId)) from $(aws.clientIp)</description>
     <mitre>
       <id>T1098</id>
+    </mitre>
+  </rule>
+
+  <rule id="110023" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^password_reset_completed$</field>
+    <field name="aws.outcome" type="pcre2">^failure$</field>
+    <description>VulnTrade: password reset failed ($(aws.details.reason)) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110024" level="10" frequency="5" timeframe="60">
+    <if_matched_sid>110023</if_matched_sid>
+    <same_field>aws.clientIp</same_field>
+    <description>VulnTrade: brute_force_detected - 5 failed password resets in 60s from $(aws.clientIp) (reset-token guessing)</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ===== Accounts ===== -->
+
+  <rule id="110026" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^account_created$</field>
+    <description>VulnTrade: account created for $(aws.username) (role $(aws.details.role)) from $(aws.clientIp)</description>
+  </rule>
+
+  <!-- role is logged raw, as the client sent it. A missing role does not
+       match (a missing field never matches), so it stays on 110026. -->
+  <rule id="110025" level="12">
+    <if_sid>110026</if_sid>
+    <field name="aws.details.role" type="pcre2" negate="yes">(?i)^(TRADER|USER)$</field>
+    <description>VulnTrade: mass_assignment_detected - registration sent role "$(aws.details.role)" for $(aws.username) from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ===== API keys ===== -->
+
+  <rule id="110027" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^api_key_used$</field>
+    <field name="aws.outcome" type="pcre2">^failure$</field>
+    <description>VulnTrade: invalid API key (in $(aws.details.source)) on $(aws.path) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110028" level="10" frequency="5" timeframe="60">
+    <if_matched_sid>110027</if_matched_sid>
+    <same_field>aws.clientIp</same_field>
+    <description>VulnTrade: brute_force_detected - 5 invalid API keys in 60s from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ===== Refresh tokens ===== -->
+
+  <rule id="110030" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^refresh_token_used$</field>
+    <field name="aws.outcome" type="pcre2">^success$</field>
+    <description>VulnTrade: token refreshed for $(aws.username) from $(aws.clientIp)</description>
+  </rule>
+
+  <!-- The same HTTP request also logged an alg:none token (110011): a forged
+       token was swapped for a real, signed one. -->
+  <rule id="110031" level="12" timeframe="360">
+    <if_sid>110030</if_sid>
+    <if_matched_sid>110011</if_matched_sid>
+    <same_field>aws.requestId</same_field>
+    <description>VulnTrade: token_laundering_detected - forged alg:none token exchanged for a signed token for $(aws.username) from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1550.001</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ===== Authorization ===== -->
+
+  <!-- Fallback for every HTTP 401/403, plus unauthenticated STOMP trade calls.
+       One denial is normal (an expired session); only the burst 110033 is
+       the sheet's unauthorized_access_attempt. -->
+  <rule id="110032" level="3">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^authorization_denied$</field>
+    <description>VulnTrade: access denied $(aws.httpStatus) on $(aws.path) for $(aws.username) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110033" level="10" frequency="10" timeframe="60">
+    <if_matched_sid>110032</if_matched_sid>
+    <same_field>aws.clientIp</same_field>
+    <description>VulnTrade: unauthorized_access_attempt - 10 denied requests in 60s from $(aws.clientIp)</description>
+    <mitre>
+      <id>T1595.003</id>
     </mitre>
     <group>attack,</group>
   </rule>

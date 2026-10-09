@@ -3,7 +3,8 @@ package com.vulntrade.controller;
 import com.vulntrade.model.User;
 import com.vulntrade.repository.CustomQueryRepository;
 import com.vulntrade.repository.UserRepository;
-import com.vulntrade.security.logging.SecurityEventLogger;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +13,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * VULN: Debug endpoints with RCE, info disclosure.
@@ -38,13 +41,17 @@ public class DebugController {
      */
     @GetMapping("/user-info")
     public ResponseEntity<?> getUserInfo(@RequestParam(required = false) Long userId) {
-        SecurityEventLogger.log("DEBUG_ENDPOINT_ACCESSED", "SUCCESS", Map.of("endpoint", "user-info", "userIdParam", String.valueOf(userId)));
         if (userId != null) {
             Optional<User> user = userRepository.findById(userId);
+            if (user.isPresent()) {
+                log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                        details("resource", "users", "targetUserId", userId));
+            }
             return user.map(u -> ResponseEntity.ok((Object) u))
                     .orElse(ResponseEntity.notFound().build());
         }
         // Return all users if no ID specified
+        log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS, details("resource", "users"));
         return ResponseEntity.ok(userRepository.findAll());
     }
 
@@ -55,7 +62,6 @@ public class DebugController {
     @PostMapping("/execute")
     public ResponseEntity<?> execute(@RequestHeader(value = "X-Debug-Key", required = false) String key,
                                       @RequestBody Map<String, String> request) {
-        SecurityEventLogger.log("DEBUG_ENDPOINT_ACCESSED", "SUCCESS", Map.of("endpoint", "execute", "keyPresented", key != null));
         // VULN: Hardcoded key check - key is in source code and application.yml
         if (!debugKey.equals(key)) {
             return ResponseEntity.status(403).body(Map.of("error", "Invalid debug key"));
@@ -67,6 +73,8 @@ public class DebugController {
         }
 
         try {
+            // Logged before exec, so a command that never returns still shows up.
+            log(SecurityEvent.DEBUG_COMMAND_EXECUTED, Outcome.SUCCESS, details("command", shorten(command)));
             // VULN: Direct command execution - RCE
             Process process = Runtime.getRuntime().exec(new String[]{"/bin/sh", "-c", command});
             byte[] output = process.getInputStream().readAllBytes();
@@ -77,9 +85,6 @@ public class DebugController {
             result.put("stdout", new String(output));
             result.put("stderr", new String(error));
             result.put("exitCode", exitCode);
-            SecurityEventLogger.log("DEBUG_RCE_EXECUTED", "SUCCESS", Map.of(
-                    "commandPreview", command.length() > 200 ? command.substring(0, 200) : command,
-                    "exitCode", exitCode));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
@@ -103,8 +108,11 @@ public class DebugController {
 
         try {
             List<Object[]> results = customQueryRepository.executeRawQuery(sql);
+            log(SecurityEvent.DEBUG_QUERY_EXECUTED, Outcome.SUCCESS, details("query", shorten(sql)));
             return ResponseEntity.ok(results);
         } catch (Exception e) {
+            log(SecurityEvent.DEBUG_QUERY_EXECUTED, Outcome.FAILURE,
+                    details("query", shorten(sql), "errorType", e.getClass().getSimpleName()));
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }

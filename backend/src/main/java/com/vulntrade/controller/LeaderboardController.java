@@ -7,6 +7,8 @@ import com.vulntrade.repository.PositionRepository;
 import com.vulntrade.repository.SymbolRepository;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import io.jsonwebtoken.Claims;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -17,6 +19,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Leaderboard endpoint — ranks traders by ROI%.
@@ -59,6 +63,10 @@ public class LeaderboardController {
             Map<String, Object> stats = computeTraderStats(userOpt.get());
             if (stats == null) return ResponseEntity.notFound().build();
             stats.put("rank", 0);
+            if (!isOwner(userId)) {
+                log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                        details("resource", "trader_stats", "targetUserId", userId));
+            }
             return ResponseEntity.ok(stats);
         }
 
