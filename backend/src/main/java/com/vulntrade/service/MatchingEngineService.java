@@ -7,6 +7,8 @@ import com.vulntrade.model.Transaction;
 import com.vulntrade.model.dto.TradeNotification;
 import com.vulntrade.model.dto.OrderBookEntry;
 import com.vulntrade.repository.*;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -16,8 +18,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Order matching engine.
@@ -156,6 +161,16 @@ public class MatchingEngineService {
         trade.setPrice(price);
         trade.setExecutedAt(LocalDateTime.now());
         final Trade savedTrade = tradeRepository.save(trade);
+        log(SecurityEvent.TRADE_EXECUTED, Outcome.SUCCESS,
+                details("tradeId", savedTrade.getId(),
+                        "symbol", savedTrade.getSymbol(),
+                        "quantity", quantity,
+                        "price", price,
+                        "buyerId", actualBuy.getUserId(),
+                        "sellerId", actualSell.getUserId(),
+                        "buyOrderId", actualBuy.getId(),
+                        "sellOrderId", actualSell.getId(),
+                        "selfTrade", Objects.equals(actualBuy.getUserId(), actualSell.getUserId())));
 
         // Update order fill quantities
         actualBuy.setFilledQty((actualBuy.getFilledQty() != null ? actualBuy.getFilledQty() : BigDecimal.ZERO).add(quantity));

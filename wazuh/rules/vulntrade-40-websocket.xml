@@ -1,14 +1,31 @@
 <!--
-  VulnTrade — WebSocket / STOMP (ids 110400-110499).
-  STOMP events carry no clientIp (no HTTP request in scope); correlate on
-  aws.details.sessionId instead. Loads last, so it may chain off trading rules.
+  VulnTrade - WebSocket / STOMP (ids 110400-110499).
+  Chains off 110091. Conventions: see vulntrade-00-base.xml.
+  STOMP events have no requestId; correlate on aws.sessionId. They do carry
+  aws.clientIp and aws.userAgent from the WebSocket handshake. Loads last, so
+  110441 may chain off the trading rules (110320).
+
+  Fed by: websocket_authentication_failed, websocket_authorization_failed,
+  websocket_message_size_exceeded, websocket_invalid_message, admin_action.
+  session_created has no rule on purpose (110091 is enough; every UI login
+  makes one).
+
+  Tree:
+    110401 websocket_authentication_failed   110430 burst / IP
+    110410 websocket_authorization_failed
+      110440 SEND to /app/admin.*            (above 110412, see its comment)
+      110412 sweep / session
+    110441 admin_action on the same session as a 110440
+    110450 websocket_message_size_exceeded
+    110451 websocket_invalid_message         110452 burst / IP
 -->
 <group name="vulntrade,vulntrade_websocket,">
 
-  <rule id="110401" level="8">
+  <!-- CONNECT with no valid identity. The app still lets it in (anonymous). -->
+  <rule id="110401" level="5">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^WS_CONNECT_ANONYMOUS$</field>
-    <description>VulnTrade: unauthenticated STOMP CONNECT, session $(aws.details.sessionId)</description>
+    <field name="aws.eventType" type="pcre2">^websocket_authentication_failed$</field>
+    <description>VulnTrade: STOMP CONNECT without a valid identity ($(aws.details.reason)) on session $(aws.sessionId) from $(aws.clientIp)</description>
     <mitre>
       <id>T1078</id>
     </mitre>
@@ -16,35 +33,31 @@
 
   <rule id="110430" level="10" frequency="10" timeframe="60">
     <if_matched_sid>110401</if_matched_sid>
-    <same_field>aws.eventType</same_field>
-    <description>VulnTrade: 10 anonymous STOMP CONNECTs in 60s — scripted WebSocket access</description>
+    <same_field>aws.clientIp</same_field>
+    <description>VulnTrade: 10 STOMP CONNECTs without a valid identity in 60s from $(aws.clientIp) (scripted WebSocket access)</description>
     <group>attack,</group>
   </rule>
 
-  <rule id="110410" level="10">
+  <!-- Base for websocket_authorization_failed: a non-admin used an admin
+       destination. Level 3 because the UI subscribes every user to
+       /topic/admin/alerts. Sends to /app/admin.* are 110440. -->
+  <rule id="110410" level="3">
     <if_sid>110091</if_sid>
-    <field name="aws.eventType">^WS_SUBSCRIBE_PRIVILEGED$</field>
-    <description>VulnTrade: $(aws.details.subjectRole) subscribed to privileged $(aws.details.destination) — broadcast leak</description>
+    <field name="aws.eventType" type="pcre2">^websocket_authorization_failed$</field>
+    <description>VulnTrade: non-admin $(aws.username) ($(aws.details.role)) used admin destination $(aws.path) on session $(aws.sessionId)</description>
     <mitre>
       <id>T1530</id>
     </mitre>
-    <group>attack,</group>
   </rule>
 
-  <rule id="110412" level="12" frequency="5" timeframe="60">
-    <if_matched_sid>110410</if_matched_sid>
-    <same_field>aws.details.sessionId</same_field>
-    <description>VulnTrade: 5 privileged subscriptions on STOMP session $(aws.details.sessionId) in 60s — topic sweep</description>
-    <mitre>
-      <id>T1530</id>
-    </mitre>
-    <group>attack,</group>
-  </rule>
-
+  <!-- Must stay ABOVE 110412. Both are level-12 children of 110410, and
+       Wazuh tries children of equal level in file order. If 110412 came
+       first, an admin SEND after a topic sweep would land on 110412, and
+       110441 could not link the admin_action that follows. -->
   <rule id="110440" level="12">
-    <if_sid>110091</if_sid>
-    <field name="aws.eventType">^WS_SEND_ADMIN_BY_NONADMIN$</field>
-    <description>VulnTrade: $(aws.details.subjectRole) sent STOMP admin command $(aws.details.destination) — WebSocket admin bypass</description>
+    <if_sid>110410</if_sid>
+    <field name="aws.path" type="pcre2">^/app/admin\.</field>
+    <description>VulnTrade: admin_channel_bypass_detected - non-admin $(aws.username) ($(aws.details.role)) sent STOMP admin command $(aws.path) on session $(aws.sessionId)</description>
     <mitre>
       <id>T1078</id>
       <id>T1548</id>
@@ -52,16 +65,50 @@
     <group>attack,</group>
   </rule>
 
-  <!-- ADMIN_* events carry no sessionId, so correlate by time: an admin action
-       within 30s of a non-admin STOMP admin SEND confirms the bypass worked. -->
-  <rule id="110441" level="13" timeframe="30">
-    <if_sid>110335,110337</if_sid>
+  <rule id="110412" level="12" frequency="5" timeframe="60">
+    <if_matched_sid>110410</if_matched_sid>
+    <same_field>aws.sessionId</same_field>
+    <different_field>aws.path</different_field>
+    <description>VulnTrade: 5 different admin destinations in 60s on STOMP session $(aws.sessionId) by $(aws.username) (topic sweep)</description>
+    <mitre>
+      <id>T1530</id>
+    </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- The admin command really ran: an admin_action on the same STOMP session
+       after a 110440. Window 360s: windows count at ingest time, and Wazuh
+       polls S3 every 5 minutes. -->
+  <rule id="110441" level="13" timeframe="360">
+    <if_sid>110320</if_sid>
     <if_matched_sid>110440</if_matched_sid>
-    <description>VulnTrade: $(aws.eventType) executed right after a non-admin STOMP admin SEND — confirmed admin bypass</description>
+    <same_field>aws.sessionId</same_field>
+    <description>VulnTrade: admin_channel_bypass_detected - admin action $(aws.details.action) ran on STOMP session $(aws.sessionId) of non-admin $(aws.username)</description>
     <mitre>
       <id>T1548</id>
       <id>T1565.001</id>
     </mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- Close code 1009: a frame bigger than the broker allows. -->
+  <rule id="110450" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^websocket_message_size_exceeded$</field>
+    <description>VulnTrade: STOMP session $(aws.sessionId) closed for an oversized message (code $(aws.details.closeCode)) from $(aws.clientIp)</description>
+  </rule>
+
+  <!-- Close code 1002: a malformed STOMP frame. -->
+  <rule id="110451" level="5">
+    <if_sid>110091</if_sid>
+    <field name="aws.eventType" type="pcre2">^websocket_invalid_message$</field>
+    <description>VulnTrade: STOMP session $(aws.sessionId) closed for an invalid frame (code $(aws.details.closeCode)) from $(aws.clientIp)</description>
+  </rule>
+
+  <rule id="110452" level="10" frequency="5" timeframe="60">
+    <if_matched_sid>110451</if_matched_sid>
+    <same_field>aws.clientIp</same_field>
+    <description>VulnTrade: 5 invalid STOMP frames in 60s from $(aws.clientIp) (protocol fuzzing)</description>
     <group>attack,</group>
   </rule>
 

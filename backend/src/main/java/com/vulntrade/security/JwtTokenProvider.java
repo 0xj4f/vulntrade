@@ -1,6 +1,8 @@
 package com.vulntrade.security;
 
 import com.vulntrade.model.User;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import com.vulntrade.security.logging.SecurityEventLogger;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.impl.DefaultClaims;
@@ -105,11 +107,25 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Validate and parse JWT token.
+     * Validate and parse JWT token. Silent: logs nothing.
      * VULN: Accepts alg:none tokens.
      * VULN: Doesn't properly validate expiration.
      */
     public Claims validateToken(String token) {
+        return parse(token, false);
+    }
+
+    /**
+     * Same as validateToken, but also logs token_validation_failed when the token is bad.
+     * Call it once per request / connection: JwtAuthFilter and the STOMP CONNECT check.
+     * Blank tokens are not logged (the frontend sends an empty "token" header when logged out).
+     */
+    public Claims validateTokenAndLogFailure(String token) {
+        boolean blank = token == null || token.trim().isEmpty();
+        return parse(token, !blank);
+    }
+
+    private Claims parse(String token, boolean logFailures) {
         try {
             // VULN: This parser configuration accepts alg:none
             // In jjwt 0.9.1, if you don't set the signing key properly,
@@ -120,6 +136,7 @@ public class JwtTokenProvider {
                     .getBody();
         } catch (ExpiredJwtException e) {
             // VULN: Return claims even if token is expired!
+            if (logFailures) logTokenFailure("expired");
             return e.getClaims();
         } catch (UnsupportedJwtException e) {
             // VULN: Try parsing as unsigned token (alg:none)
@@ -133,16 +150,26 @@ public class JwtTokenProvider {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> claimsMap = mapper.readValue(payload, Map.class);
                     DefaultClaims claims = new DefaultClaims(claimsMap);
-                    SecurityEventLogger.log("AUTH_TOKEN_VALIDATION_FAIL", "FAILURE", Map.of("reason", "alg_none_accepted"));
+                    if (logFailures) logTokenFailure("alg_none");
                     return claims;
                 }
             } catch (Exception ex) {
                 // Fall through
             }
+            if (logFailures) logTokenFailure("malformed");
+            return null;
+        } catch (SignatureException e) {
+            if (logFailures) logTokenFailure("bad_signature");
             return null;
         } catch (Exception e) {
+            if (logFailures) logTokenFailure("malformed");
             return null;
         }
+    }
+
+    private void logTokenFailure(String reason) {
+        SecurityEventLogger.log(SecurityEvent.TOKEN_VALIDATION_FAILED, Outcome.FAILURE,
+                SecurityEventLogger.details("reason", reason));
     }
 
     public String getUsernameFromToken(String token) {

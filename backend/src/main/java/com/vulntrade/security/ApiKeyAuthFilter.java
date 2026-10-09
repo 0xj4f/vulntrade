@@ -2,6 +2,9 @@ package com.vulntrade.security;
 
 import com.vulntrade.model.User;
 import com.vulntrade.repository.UserRepository;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
+import com.vulntrade.security.logging.SecurityEventLogger;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -62,11 +65,23 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
                     // Store user ID in details
                     auth.setDetails(user);
                     SecurityContextHolder.getContext().setAuthentication(auth);
+                    SecurityEventLogger.rememberUser(user.getId(), user.getUsername());
+                    SecurityEventLogger.log(SecurityEvent.API_KEY_USED, Outcome.SUCCESS,
+                            SecurityEventLogger.details("source", keySource(request)));
+                } else {
+                    // Unknown key. Never log the key itself.
+                    SecurityEventLogger.log(SecurityEvent.API_KEY_USED, Outcome.FAILURE,
+                            SecurityEventLogger.details("source", keySource(request)));
                 }
             }
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /** Where the key came from: "header" (X-API-Key) or "query" (?api_key=). */
+    private String keySource(HttpServletRequest request) {
+        return request.getHeader("X-API-Key") != null ? "header" : "query";
     }
 
     private String extractApiKey(HttpServletRequest request) {

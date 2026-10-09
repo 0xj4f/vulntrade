@@ -9,7 +9,8 @@ import com.vulntrade.repository.PasswordResetTokenRepository;
 import com.vulntrade.repository.TransactionRepository;
 import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.JwtTokenProvider;
-import com.vulntrade.security.logging.SecurityEventLogger;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -66,7 +69,8 @@ public class AuthController {
             Map<String, String> error = new HashMap<>();
             error.put("error", "User not found");  // VULN: reveals user doesn't exist
             logger.warn("AUTH_LOGIN_FAIL: username={}, reason=user_not_found", request.getUsername());
-            SecurityEventLogger.log("AUTH_LOGIN_FAIL", "FAILURE", Map.of("reason", "user_not_found", "attemptedUsername", String.valueOf(request.getUsername())));
+            logAs(null, null, SecurityEvent.LOGIN_FAILURE, Outcome.FAILURE,
+                    details("reason", "user_not_found", "attemptedUsername", request.getUsername()));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
@@ -76,11 +80,14 @@ public class AuthController {
             Map<String, String> error = new HashMap<>();
             error.put("error", "Invalid password");  // VULN: reveals password is wrong
             logger.warn("AUTH_LOGIN_FAIL: username={}, reason=bad_password", username);
-            SecurityEventLogger.log("AUTH_LOGIN_FAIL", "FAILURE", Map.of("reason", "bad_password", "attemptedUsername", username));
+            logAs(null, null, SecurityEvent.LOGIN_FAILURE, Outcome.FAILURE,
+                    details("reason", "bad_password", "attemptedUsername", request.getUsername()));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
         if (!user.getIsActive()) {
+            logAs(null, null, SecurityEvent.LOGIN_FAILURE, Outcome.FAILURE,
+                    details("reason", "account_disabled", "attemptedUsername", request.getUsername()));
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(Map.of("error", "Account is disabled"));
         }
@@ -102,7 +109,8 @@ public class AuthController {
         response.put("profilePic", user.getProfilePic());
 
         logger.info("AUTH_LOGIN_SUCCESS: userId={}, username={}, role={}", user.getId(), user.getUsername(), user.getRole());
-        SecurityEventLogger.log("AUTH_LOGIN_SUCCESS", "SUCCESS", Map.of("userId", user.getId(), "role", String.valueOf(user.getRole())));
+        logAs(user.getId(), user.getUsername(), SecurityEvent.LOGIN_SUCCESS, Outcome.SUCCESS,
+                details("role", user.getRole()));
 
         return ResponseEntity.ok(response);
     }
@@ -128,7 +136,6 @@ public class AuthController {
     @SuppressWarnings("unchecked")
     public ResponseEntity<?> loginLegacy(@RequestBody LoginRequest request) {
         logger.info("AUTH_LOGIN_LEGACY: username={}", request.getUsername());
-        SecurityEventLogger.log("AUTH_LOGIN_LEGACY", "ATTEMPT", Map.of("attemptedUsername", String.valueOf(request.getUsername())));
         try {
             // VULN: SQL injection - username concatenated directly into query
             String sql = "SELECT * FROM users WHERE username = '" + request.getUsername() + "'";
@@ -136,22 +143,20 @@ public class AuthController {
             List<User> users = query.getResultList();
 
             if (users.isEmpty()) {
-                SecurityEventLogger.log("AUTH_LOGIN_LEGACY_FAIL", "FAILURE", Map.of(
-                    "reason", "user_not_found", "attemptedUsername", String.valueOf(request.getUsername())));
+                logAs(null, null, SecurityEvent.LOGIN_FAILURE, Outcome.FAILURE,
+                        details("reason", "user_not_found", "attemptedUsername", request.getUsername()));
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "User not found"));
             }
 
             User user = users.get(0);
             if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-                SecurityEventLogger.log("AUTH_LOGIN_LEGACY_FAIL", "FAILURE", Map.of(
-                    "reason", "bad_password", "attemptedUsername", String.valueOf(request.getUsername())));
+                logAs(null, null, SecurityEvent.LOGIN_FAILURE, Outcome.FAILURE,
+                        details("reason", "bad_password", "attemptedUsername", request.getUsername()));
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid password"));
             }
 
-            SecurityEventLogger.log("AUTH_LOGIN_LEGACY_SUCCESS", "SUCCESS", Map.of(
-                "userId", user.getId(), "role", String.valueOf(user.getRole())));
             String token = jwtTokenProvider.generateToken(user);  // VULN #92/#93: fat JWT
 
             Map<String, Object> response = new HashMap<>();
@@ -160,9 +165,14 @@ public class AuthController {
             response.put("username", user.getUsername());
             response.put("role", user.getRole());
             response.put("accountLevel", user.getAccountLevel() != null ? user.getAccountLevel() : 1);
+            logAs(user.getId(), user.getUsername(), SecurityEvent.LOGIN_SUCCESS, Outcome.SUCCESS,
+                    details("role", user.getRole(), "attemptedUsername", request.getUsername()));
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
+            // Never log e.getMessage() here: it can echo the SQL (and the injected payload).
+            logAs(null, null, SecurityEvent.LOGIN_FAILURE, Outcome.FAILURE,
+                    details("reason", "error", "attemptedUsername", request.getUsername()));
             // VULN: Stack trace in error response aids SQL injection
             Map<String, String> error = new HashMap<>();
             error.put("error", "Login failed: " + e.getMessage());
@@ -183,9 +193,6 @@ public class AuthController {
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setEmail(request.getEmail());
         user.setRole(request.getRole() != null ? request.getRole() : "TRADER");
-        if (request.getRole() != null && !"TRADER".equalsIgnoreCase(request.getRole()) && !"USER".equalsIgnoreCase(request.getRole())) {
-            SecurityEventLogger.log("AUTH_MASS_ASSIGNMENT_ROLE", "SUCCESS", Map.of("assignedRole", request.getRole(), "attemptedUsername", String.valueOf(request.getUsername())));
-        }
         user.setBalance(new BigDecimal("10000.00"));
         user.setIsActive(true);
         user.setApiKey("vt-api-" + System.currentTimeMillis());  // VULN: predictable API key
@@ -194,10 +201,6 @@ public class AuthController {
         User saved = userRepository.save(user);
         User newUser = saved;
         logger.info("AUTH_REGISTER: userId={}, username={}, role={}", newUser.getId(), newUser.getUsername(), newUser.getRole());
-        SecurityEventLogger.log("AUTH_REGISTER", "SUCCESS", Map.of(
-            "userId", newUser.getId(),
-            "username", String.valueOf(newUser.getUsername()),
-            "assignedRole", String.valueOf(newUser.getRole())));
 
         // Record initial signup bonus in transaction history
         Transaction signupBonus = new Transaction();
@@ -221,6 +224,9 @@ public class AuthController {
         response.put("verified", false);
         response.put("message", "Registration successful");
 
+        // role is what the client sent (mass assignment): Wazuh flags anything but TRADER/USER
+        logAs(saved.getId(), saved.getUsername(), SecurityEvent.ACCOUNT_CREATED, Outcome.SUCCESS,
+                details("role", saved.getRole()));
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -236,8 +242,6 @@ public class AuthController {
         Optional<User> userOpt = userRepository.findByEmail(email);
 
         logger.info("AUTH_RESET_REQUEST: email={}", email);
-        SecurityEventLogger.log("AUTH_RESET_REQUEST", "ATTEMPT", Map.of(
-            "email", String.valueOf(email), "userFound", userOpt.isPresent()));
 
         Map<String, Object> response = new HashMap<>();
         response.put("message", "If the email exists, a reset link has been sent");
@@ -258,6 +262,10 @@ public class AuthController {
             response.put("reset_url", "/api/auth/reset-confirm?token=" + resetToken);
         }
 
+        // Success only if the email belongs to an account. The reset token is never logged.
+        logAs(null, null, SecurityEvent.PASSWORD_RESET_REQUESTED,
+                userOpt.isPresent() ? Outcome.SUCCESS : Outcome.FAILURE,
+                details("email", email));
         return ResponseEntity.ok(response);
     }
 
@@ -278,6 +286,8 @@ public class AuthController {
 
         Optional<PasswordResetToken> tokenOpt = resetTokenRepository.findByToken(token);
         if (tokenOpt.isEmpty()) {
+            logAs(null, null, SecurityEvent.PASSWORD_RESET_COMPLETED, Outcome.FAILURE,
+                    details("reason", "invalid_token"));
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("error", "Invalid reset token"));
         }
@@ -288,6 +298,8 @@ public class AuthController {
 
         Optional<User> userOpt = userRepository.findById(prt.getUserId());
         if (userOpt.isEmpty()) {
+            logAs(null, null, SecurityEvent.PASSWORD_RESET_COMPLETED, Outcome.FAILURE,
+                    details("reason", "user_not_found"));
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", "User not found"));
         }
@@ -296,9 +308,10 @@ public class AuthController {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         // VULN: Old JWT tokens are NOT invalidated
-        SecurityEventLogger.log("AUTH_PASSWORD_RESET", "SUCCESS", Map.of(
-            "targetUserId", user.getId(), "viaResetToken", true));
 
+        // The requester is anonymous; the account is the target. A repeated resetTokenId = token reuse.
+        logAs(null, null, SecurityEvent.PASSWORD_RESET_COMPLETED, Outcome.SUCCESS,
+                details("targetUserId", user.getId(), "resetTokenId", prt.getId()));
         return ResponseEntity.ok(Map.of(
             "message", "Password reset successful",
             "username", user.getUsername()
@@ -335,6 +348,7 @@ public class AuthController {
 
         Optional<User> userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) {
+            log(SecurityEvent.PASSWORD_CHANGED, Outcome.FAILURE, details("reason", "user_not_found"));
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", "User not found"));
         }
@@ -344,7 +358,7 @@ public class AuthController {
         userRepository.save(user);
         // VULN: Old JWT still valid
         logger.info("AUTH_PASSWORD_CHANGE: userId={}", userId);
-        SecurityEventLogger.log("AUTH_PASSWORD_CHANGE", "SUCCESS", Map.of("userId", userId, "requiredOldPassword", false));
+        log(SecurityEvent.PASSWORD_CHANGED, Outcome.SUCCESS, null);
 
         return ResponseEntity.ok(Map.of(
             "message", "Password changed successfully",
@@ -363,10 +377,8 @@ public class AuthController {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             userId = jwtTokenProvider.getUserIdFromToken(authHeader.substring(7));
         }
-        Map<String, Object> details = new HashMap<>();
-        if (userId != null) details.put("userId", userId);
-        SecurityEventLogger.log("AUTH_LOGOUT", "SUCCESS", details);
         logger.info("AUTH_LOGOUT: userId={}", userId);
+        log(SecurityEvent.LOGOUT, Outcome.SUCCESS, null);
         return ResponseEntity.ok(Map.of("message", "Logged out"));
     }
 
@@ -391,6 +403,7 @@ public class AuthController {
 
         Optional<User> userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) {
+            log(SecurityEvent.REFRESH_TOKEN_USED, Outcome.FAILURE, details("reason", "user_not_found"));
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", "User not found"));
         }
@@ -409,6 +422,7 @@ public class AuthController {
         response.put("verified", user.getVerifiedAt() != null);
         response.put("firstName", user.getFirstName());
 
+        log(SecurityEvent.REFRESH_TOKEN_USED, Outcome.SUCCESS, null);
         return ResponseEntity.ok(response);
     }
 }

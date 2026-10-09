@@ -2,8 +2,9 @@ package com.vulntrade.controller;
 
 import com.vulntrade.model.User;
 import com.vulntrade.repository.UserRepository;
-import com.vulntrade.security.logging.SecurityEventLogger;
 import com.vulntrade.repository.CustomQueryRepository;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,6 +12,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Admin controller.
@@ -56,6 +59,7 @@ public class AdminController {
             return userMap;
         }).collect(Collectors.toList());
 
+        log(SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS, details("resource", "users"));
         return ResponseEntity.ok(userList);
     }
 
@@ -76,18 +80,25 @@ public class AdminController {
             // VULN: Executes arbitrary SQL
             if (sql.trim().toUpperCase().startsWith("SELECT")) {
                 List<Object[]> results = customQueryRepository.executeRawQuery(sql);
+                log(SecurityEvent.ADMIN_ACTION, Outcome.SUCCESS,
+                        details("action", "execute_query", "query", shorten(sql)));
                 return ResponseEntity.ok(Map.of(
                     "results", results,
                     "count", results.size()
                 ));
             } else {
                 int affected = customQueryRepository.executeRawUpdate(sql);
+                log(SecurityEvent.ADMIN_ACTION, Outcome.SUCCESS,
+                        details("action", "execute_query", "query", shorten(sql)));
                 return ResponseEntity.ok(Map.of(
                     "message", "Query executed",
                     "rowsAffected", affected
                 ));
             }
         } catch (Exception e) {
+            log(SecurityEvent.ADMIN_ACTION, Outcome.FAILURE,
+                    details("action", "execute_query", "query", shorten(sql),
+                            "errorType", e.getClass().getSimpleName()));
             // VULN: Error message reveals database structure
             return ResponseEntity.status(500)
                 .body(Map.of("error", e.getMessage()));
@@ -104,8 +115,9 @@ public class AdminController {
             .map(user -> {
                 user.setIsActive(!user.getIsActive());
                 userRepository.save(user);
-                SecurityEventLogger.log("ADMIN_USER_TOGGLE", "SUCCESS", Map.of(
-                    "targetUserId", userId, "newIsActive", user.getIsActive()));
+                // One call: the event name follows the new state.
+                log(user.getIsActive() ? SecurityEvent.ACCOUNT_ENABLED : SecurityEvent.ACCOUNT_DISABLED,
+                        Outcome.SUCCESS, details("targetUserId", userId));
                 return ResponseEntity.ok(Map.of(
                     "message", "User " + (user.getIsActive() ? "enabled" : "disabled"),
                     "userId", userId,
@@ -135,11 +147,10 @@ public class AdminController {
                 System.out.println("[ADMIN] Balance adjusted for user " + userId
                     + " by " + amount + " reason: " + reason);
 
-                SecurityEventLogger.log("ADMIN_BALANCE_ADJUST", "SUCCESS", Map.of(
-                    "targetUserId", userId,
-                    "amount", amount,
-                    "reason", String.valueOf(reason),
-                    "newBalance", user.getBalance()));
+                // reason is logged raw on purpose: Wazuh scans it for CR/LF and Log4Shell
+                log(SecurityEvent.ADMIN_ACTION, Outcome.SUCCESS,
+                        details("action", "adjust_balance", "targetUserId", userId,
+                                "amount", amount, "reason", reason));
 
                 return ResponseEntity.ok(Map.of(
                     "message", "Balance adjusted",

@@ -5,6 +5,8 @@ import com.vulntrade.model.Symbol;
 import com.vulntrade.model.dto.OrderRequest;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.SymbolRepository;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -14,6 +16,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Order management service.
@@ -58,6 +62,12 @@ public class OrderService {
 
         // Halt check for ALL order types
         if (priceSimulator.isHalted(request.getSymbol())) {
+            log(SecurityEvent.ORDER_REJECTED, Outcome.DENIED,
+                    details("reason", "trading_halted",
+                            "symbol", request.getSymbol(),
+                            "side", request.getSide(),
+                            "quantity", request.getQuantity(),
+                            "price", request.getPrice()));
             throw new RuntimeException("Trading halted for " + request.getSymbol());
         }
 
@@ -67,6 +77,13 @@ public class OrderService {
                 request.getType(), request.getQuantity(), request.getPrice());
 
         if (riskError != null) {
+            // The RiskService text is not logged: the reason code is enough for Wazuh.
+            log(SecurityEvent.ORDER_REJECTED, Outcome.DENIED,
+                    details("reason", "risk_check_failed",
+                            "symbol", request.getSymbol(),
+                            "side", request.getSide(),
+                            "quantity", request.getQuantity(),
+                            "price", request.getPrice()));
             throw new RuntimeException(riskError);
         }
 
@@ -87,6 +104,16 @@ public class OrderService {
         logger.info("Order created: id={}, userId={}, {} {} {} x {} @ {}",
                 order.getId(), userId, order.getSide(), order.getOrderType(),
                 order.getSymbol(), order.getQuantity(), order.getPrice());
+
+        // Logged before matching, so order_created comes before its trade_executed events.
+        log(SecurityEvent.ORDER_CREATED, Outcome.SUCCESS,
+                details("orderId", order.getId(),
+                        "symbol", order.getSymbol(),
+                        "side", order.getSide(),
+                        "orderType", order.getOrderType(),
+                        "quantity", order.getQuantity(),
+                        "price", order.getPrice(),
+                        "clientOrderId", order.getClientOrderId()));
 
         // Try to match immediately
         matchingEngine.tryMatch(order);
@@ -117,6 +144,12 @@ public class OrderService {
         // VULN: Should check order.getUserId().equals(userId) but doesn't
 
         if ("FILLED".equals(order.getStatus()) || "CANCELLED".equals(order.getStatus())) {
+            log(SecurityEvent.ORDER_CANCELLED, Outcome.FAILURE,
+                    details("reason", "already_closed",
+                            "orderId", order.getId(),
+                            "symbol", order.getSymbol(),
+                            "targetUserId", order.getUserId(),
+                            "isOwner", isOwner(order.getUserId())));
             throw new RuntimeException("Order already " + order.getStatus());
         }
 
@@ -133,6 +166,11 @@ public class OrderService {
         // Update order book
         matchingEngine.broadcastOrderBook(order.getSymbol());
 
+        log(SecurityEvent.ORDER_CANCELLED, Outcome.SUCCESS,
+                details("orderId", order.getId(),
+                        "symbol", order.getSymbol(),
+                        "targetUserId", order.getUserId(),
+                        "isOwner", isOwner(order.getUserId())));
         return order;
     }
 
@@ -143,6 +181,11 @@ public class OrderService {
         // Get current price
         Optional<Symbol> symbolOpt = symbolRepository.findById(symbol);
         if (symbolOpt.isEmpty()) {
+            log(SecurityEvent.ORDER_REJECTED, Outcome.DENIED,
+                    details("reason", "unknown_symbol",
+                            "symbol", symbol,
+                            "side", side,
+                            "quantity", quantity));
             throw new RuntimeException("Unknown symbol: " + symbol);
         }
 
@@ -151,6 +194,12 @@ public class OrderService {
                 : symbolOpt.get().getBid();   // Sell at bid
 
         if (currentPrice == null || currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            log(SecurityEvent.ORDER_REJECTED, Outcome.DENIED,
+                    details("reason", "no_market_price",
+                            "symbol", symbol,
+                            "side", side,
+                            "quantity", quantity,
+                            "price", currentPrice));
             throw new RuntimeException("No valid market price for " + symbol);
         }
 
