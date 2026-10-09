@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS price_alerts (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
-    symbol VARCHAR(20) NOT NULL,
+    symbol VARCHAR(255) NOT NULL,     -- VULN: wide enough to store a stored-XSS payload
     target_price DECIMAL(20,8) NOT NULL,
     direction VARCHAR(5) NOT NULL,    -- ABOVE/BELOW
     is_triggered BOOLEAN DEFAULT false,

@@ -67,12 +67,10 @@ public class AdminStompController {
             response.put("newBalance", newBalance);
             response.put("amount", request.getAmount());
 
-            // Send to requesting user
-            Long userId = extractUserId(headerAccessor);
-            if (userId != null) {
-                messagingTemplate.convertAndSendToUser(
-                        String.valueOf(userId), "/queue/admin", response);
-            }
+            // Send to requesting user. STOMP user destinations resolve by the principal name
+            // (the username), not the numeric userId - see StompChannelInterceptor.
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/admin", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -100,11 +98,8 @@ public class AdminStompController {
             response.put("symbol", request.getSymbol());
             response.put("reason", request.getReason());
 
-            Long userId = extractUserId(headerAccessor);
-            if (userId != null) {
-                messagingTemplate.convertAndSendToUser(
-                        String.valueOf(userId), "/queue/admin", response);
-            }
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/admin", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -126,11 +121,8 @@ public class AdminStompController {
             response.put("type", "TRADING_RESUMED");
             response.put("symbol", symbol);
 
-            Long userId = extractUserId(headerAccessor);
-            if (userId != null) {
-                messagingTemplate.convertAndSendToUser(
-                        String.valueOf(userId), "/queue/admin", response);
-            }
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/admin", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -155,11 +147,8 @@ public class AdminStompController {
             response.put("symbol", request.getSymbol());
             response.put("price", request.getPrice());
 
-            Long userId = extractUserId(headerAccessor);
-            if (userId != null) {
-                messagingTemplate.convertAndSendToUser(
-                        String.valueOf(userId), "/queue/admin", response);
-            }
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/admin", response);
 
         } catch (Exception e) {
             sendError(headerAccessor, e.getMessage());
@@ -180,23 +169,20 @@ public class AdminStompController {
         return "UNKNOWN";
     }
 
-    private Long extractUserId(SimpMessageHeaderAccessor headerAccessor) {
+    /**
+     * Principal name (the username) for convertAndSendToUser. Spring resolves /user/ queue
+     * destinations by Principal.getName(), not by userId - mirrors TradeStompController.
+     */
+    private String extractUsername(SimpMessageHeaderAccessor headerAccessor) {
         Principal principal = headerAccessor.getUser();
-        if (principal instanceof StompPrincipal) {
-            return ((StompPrincipal) principal).getUserIdAsLong();
+        if (principal != null) {
+            return principal.getName();
         }
-        Map<String, Object> sessionAttrs = headerAccessor.getSessionAttributes();
-        if (sessionAttrs != null) {
-            Object userId = sessionAttrs.get("userId");
-            if (userId instanceof Integer) return ((Integer) userId).longValue();
-            if (userId instanceof Long) return (Long) userId;
-        }
-        return null;
+        return "anonymous";
     }
 
     private void sendError(SimpMessageHeaderAccessor headerAccessor, String message) {
-        Long userId = extractUserId(headerAccessor);
-        String target = userId != null ? String.valueOf(userId) : "anonymous";
+        String target = extractUsername(headerAccessor);
 
         Map<String, Object> error = new HashMap<>();
         error.put("type", "ERROR");

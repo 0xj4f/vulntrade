@@ -36,9 +36,9 @@ Browser (STOMP.js client)
 | CWE | CWE-89 |
 | Difficulty | Intermediate |
 | Endpoint | STOMP `/app/trade.getHistory` |
-| File | `CustomQueryRepository.java:25-45` |
+| File | `CustomQueryRepository.java:25-45`, `TradeStompController.java:326-375` |
 
-**Description:** Three injectable parameters (`startDate`, `endDate`, `symbol`) are concatenated into raw SQL. The response is sent back via `/user/queue/history`. Error messages leak database structure via `/user/queue/errors`.
+**Description:** Three injectable parameters (`startDate`, `endDate`, `symbol`) are concatenated into raw SQL (no binding). The successful response is sent back via `/user/queue/history`; when the injected SQL fails to parse, the handler relays the raw exception as an `ERROR` on `/user/queue/errors`, leaking the database/parser error — a working error-based oracle. The SELECT list has **5 columns** (`t.id, t.symbol, t.quantity, t.price, t.executed_at`), so a UNION payload must supply 5 columns to extract cleanly.
 
 **Why WAFs miss this:** WebSocket frames use binary framing after the HTTP upgrade handshake. STOMP message bodies (JSON) are inside WebSocket frames. Most WAFs only inspect HTTP request/response.
 
@@ -71,9 +71,9 @@ See [../websocket-sqli-guide.md](../websocket-sqli-guide.md) for comprehensive p
 | CWE | CWE-862 |
 | Difficulty | Intermediate |
 | Endpoint | STOMP `/app/admin.setPrice` |
-| File | `AdminStompController.java:142-163` |
+| File | `AdminStompController.java:137-156`, `StompChannelInterceptor.java:142-158` |
 
-**Description:** The `setPrice` handler has NO role check. Any authenticated user can set any symbol to any price. The `StompChannelInterceptor` logs a warning for non-admin senders but does not block the message.
+**Description:** The `setPrice` handler has NO role check. Any authenticated user can set any symbol to any price. The `StompChannelInterceptor` logs a `websocket_authorization_failed` warning for non-admin senders of `/app/admin.*` but **does not block** the message. Proven: a `TRADER` moved GME from ~28 to 13371 and the change was visible via REST `GET /api/market/prices/GME`.
 
 **How to exploit:**
 ```javascript
@@ -91,9 +91,9 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | CWE | CWE-862 |
 | Difficulty | Intermediate |
 | Endpoint | STOMP `/app/admin.adjustBalance` |
-| File | `AdminStompController.java` |
+| File | `AdminStompController.java:48-78` |
 
-**Description:** Same as WS-02 — any user can adjust any user's balance. Give yourself unlimited money or drain other accounts.
+**Description:** Same as WS-02 — `adjustBalance` only *logs* a warning for a non-admin role, then processes the request anyway (lines 51-57). Any user can adjust any user's balance by `userId`. Give yourself unlimited money or drain other accounts. Proven: a freshly-registered non-admin credited its own account over STOMP and the change showed up in `GET /api/accounts/balance`.
 
 ---
 
@@ -105,9 +105,9 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | CWE | CWE-862 |
 | Difficulty | Intermediate |
 | Endpoint | STOMP `SUBSCRIBE /topic/admin/alerts` |
-| File | `StompChannelInterceptor.java:82-91` |
+| File | `StompChannelInterceptor.java:125-140` |
 
-**Description:** Any authenticated user can subscribe to admin broadcast channels. These channels leak FLAG_7, admin actions, balance adjustments, and trading halt notifications.
+**Description:** Any authenticated user can subscribe to admin broadcast channels. The interceptor only logs a `websocket_authorization_failed` event for a non-admin SUBSCRIBE to `/topic/admin/*`; it never blocks it. These channels leak admin actions, balance adjustments, and trading-halt notifications — the halt alert even carries `FLAG{st0mp_4dm1n_ch4nn3l_l34k}` (Flag 7). Proven: a `TRADER` received a `TRADING_HALT` broadcast with the flag attached.
 
 ---
 
@@ -118,9 +118,9 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | OWASP | A07: Identification and Authentication Failures |
 | CWE | CWE-306 |
 | Difficulty | Intermediate |
-| File | `StompChannelInterceptor.java:76-79` |
+| File | `StompChannelInterceptor.java:107-114` |
 
-**Description:** If no JWT is provided in the STOMP CONNECT frame, the connection is allowed with an "anonymous" principal. Anonymous users can subscribe to broadcast topics like `/topic/prices`.
+**Description:** If no JWT is provided in the STOMP CONNECT frame, the connection is allowed with an "anonymous" principal (lines 107-114; it logs `websocket_authentication_failed` but still connects). Anonymous users can subscribe to broadcast topics like `/topic/prices`. Proven: a CONNECT with no token still receives a `CONNECTED` frame.
 
 ---
 
@@ -130,9 +130,9 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | Severity | Medium |
 | OWASP | A07: Identification and Authentication Failures |
 | CWE | CWE-522 |
-| File | `websocketService.js:23` |
+| File | `websocketService.js:23`, `StompChannelInterceptor.java:54-90` |
 
-**Description:** The JWT token is sent as a plain STOMP header in the CONNECT frame. It's visible in browser DevTools > Network > WS tab to anyone with access to the browser.
+**Description:** The JWT token is sent as a plain STOMP header (`Authorization` / `token`) in the CONNECT frame. It's visible in browser DevTools > Network > WS tab to anyone with access to the browser, and it is actually honoured — an authenticated `getBalance` returns the real username, not `anonymous`. The handshake also accepts the token as a `?token=` **query parameter** (captured by `WebSocketAuthInterceptor` and picked up at `StompChannelInterceptor.java:95-105`), so the credential can leak into access logs / history exactly like DATA-06.
 
 ---
 
@@ -142,9 +142,9 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | Severity | High |
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-346 |
-| File | `WebSocketConfig.java:38` |
+| File | `WebSocketConfig.java:39-40` (and `:44-47` for the SockJS endpoint) |
 
-**Description:** `setAllowedOriginPatterns("*")` permits WebSocket connections from any origin. A malicious page on any domain can establish a WebSocket connection to VulnTrade if the user has a valid session.
+**Description:** `setAllowedOriginPatterns("*")` permits WebSocket connections from any origin. A malicious page on any domain can establish a WebSocket connection to VulnTrade if the user has a valid session. Proven: a raw handshake with `Origin: https://evil.com` still receives a `CONNECTED` frame.
 
 ---
 
@@ -160,15 +160,17 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 
 ---
 
-### WS-09: No Message Size Limit
+### WS-09: Message Size Limit — Claim Debunked (Config No-Op)
 | Field | Value |
 |-------|-------|
-| Severity | Medium |
+| Status | ⚠️ Not exploitable as written — effective size limit present; the 10 MB config is a no-op bug |
 | OWASP | A04: Insecure Design |
 | CWE | CWE-400 |
-| File | `WebSocketConfig.java:54` |
+| File | `WebSocketConfig.java:53-59` |
 
-**Description:** WebSocket transport has no message size restriction configured, enabling DoS via oversized payloads.
+**Description:** The original claim ("no message size limit → DoS via oversized payloads") does **not** reproduce. `configureWebSocketTransport` calls `setMessageSizeLimit(10 * 1024 * 1024)` (line 56), but that value never takes effect: the underlying servlet WebSocket text buffer (~16–32 KB) wins, so an oversized frame **drops the connection** instead of being processed. A ~8 KB frame is accepted; a ~1 MB frame is rejected.
+
+So there *is* an effective size limit — the "10 MB / unbounded" framing is false. The real issue is a **misconfiguration / bug**: the 10 MB `setMessageSizeLimit` is silently overridden and does nothing (the comment in the file claiming "no message size limit configured" is itself wrong). If the config were ever made effective, the documented DoS would become real.
 
 ---
 
@@ -179,8 +181,11 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-862 |
 | Endpoint | STOMP `/app/admin.haltTrading`, `/app/admin.resumeTrading` |
+| File | `AdminStompController.java:84-130`, `StompChannelInterceptor.java:142-158` |
 
-**Description:** Any user can halt and resume trading for any symbol. During a halt, they can accumulate orders, then resume trading to execute them.
+**Description:** The real issue is **missing authorization**, not an order-accumulation trick: any non-admin can halt and resume trading for any symbol (the `/app/admin.*` role check only logs, never blocks). This is a denial-of-service / market-control primitive — an attacker can freeze a symbol at will. Proven: a `TRADER` received `TRADING_HALTED` and `TRADING_RESUMED` replies.
+
+> Note: the old "accumulate orders during a halt, then resume to execute" path no longer works — the halt check in `OrderService.placeOrder` applies to **all** order types, so new orders are rejected while a symbol is halted.
 
 ---
 

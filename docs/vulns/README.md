@@ -7,6 +7,7 @@ VulnTrade is a deliberately vulnerable trading platform designed for security tr
 ## Quick Start
 
 ```bash
+cp .env.example .env   # step 0: create your local env (compose also has inline defaults)
 docker compose down -v && docker compose up --build
 ```
 

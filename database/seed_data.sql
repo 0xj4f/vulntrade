@@ -11,7 +11,7 @@ INSERT INTO symbols (symbol, name, current_price, bid, ask, volume, is_tradable)
     ('AMZN', 'Amazon.com Inc.', 178.25, 178.20, 178.30, 45678901, true),
     ('BTC-USD', 'Bitcoin USD', 67500.00, 67490.00, 67510.00, 12345678, true),
     ('ETH-USD', 'Ethereum USD', 3450.00, 3448.00, 3452.00, 8765432, true),
-    ('VULN', 'VulnCorp (Fictional)', 42.00, 41.95, 42.05, 1000000, true),
+    ('VULN', 'VulnCorp (Fictional)', 100.00, 99.95, 100.05, 1000000, true),
     ('SOL-USD', 'Solana USD', 185.00, 184.80, 185.20, 6543210, true),
     ('DOGE-USD', 'Dogecoin USD', 0.16500, 0.16450, 0.16550, 234567890, true),
     ('NVDA', 'NVIDIA Corp.', 892.50, 892.30, 892.70, 41234567, true),

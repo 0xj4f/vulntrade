@@ -113,12 +113,13 @@ public class LiquidityProviderService {
         houseOrder.setOrderType("MARKET");
         houseOrder.setQuantity(quantity);
         houseOrder.setPrice(fillPrice);
-        houseOrder.setStatus("FILLED");
-        houseOrder.setFilledQty(quantity);
-        houseOrder.setFilledPrice(fillPrice);
+        // Create as NEW with no fill yet; executeTrade() does the single fill (status,
+        // filled_qty, filled_price, executed_at). Previously this was pre-filled here AND
+        // again in executeTrade, double-counting filled_qty.
+        houseOrder.setStatus("NEW");
+        houseOrder.setFilledQty(BigDecimal.ZERO);
         houseOrder.setClientOrderId("LP-" + System.currentTimeMillis());
         houseOrder.setCreatedAt(LocalDateTime.now());
-        houseOrder.setExecutedAt(LocalDateTime.now());
         houseOrder = orderRepository.save(houseOrder);
 
         logger.info("LP fill: {} {} {} x {} @ {} (spread={}%, houseOrder=#{})",

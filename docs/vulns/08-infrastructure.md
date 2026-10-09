@@ -16,15 +16,16 @@ VulnTrade's infrastructure is intentionally misconfigured. Exposed debug ports, 
 | Difficulty | Beginner |
 | File | `docker-compose.yml:35` |
 
-**Description:** Redis runs without `--requirepass`. Port 6379 is exposed to the Docker host. Anyone can connect and read cached data.
+**Description:** Redis runs without `--requirepass` (`docker-compose.yml:36` — `redis-server --save 60 1`, no password). Port 6379 is exposed to the Docker host. Anyone can connect unauthenticated and read/write cached data.
 
 **How to exploit:**
 ```bash
 redis-cli -h localhost -p 6379
-> KEYS *
-> GET flag3
-"FLAG{r3d1s_n0_4uth_p1v0t}"
+> PING          # +PONG  — no auth required (proven)
+> KEYS *        # enumerate whatever the app has cached
 ```
+
+**Note on `flag3` (corrected):** the no-auth pivot itself is real and verified, but the `flag3` key is **not currently seeded** into Redis — `GET flag3` returns `(nil)`. The Redis-pivot flag (FLAG 3) is therefore **not obtainable today**; it is a planned seed. See [10-ctf-flags.md](10-ctf-flags.md) FLAG 3.
 
 ---
 
@@ -60,6 +61,8 @@ psql -h localhost -p 5432 -U postgres -d vulntrade
 
 **Description:** All actuator endpoints are exposed and unauthenticated: `/actuator/env` (secrets), `/actuator/heapdump` (memory), `/actuator/beans` (internals), `/actuator/health` (status), `/actuator/mappings` (all endpoints).
 
+**Secret masking is off (confirmed):** `application.yml` sets `management.endpoint.env.keys-to-sanitize:` and `configprops.keys-to-sanitize:` to **empty** (`application.yml:79-82`). On Spring Boot 2.7 an empty sanitize list masks nothing, so `/actuator/env` and `/actuator/configprops` print `JWT_SECRET` (`vulntrade-secret`), the DB password, the debug key, and the `FLAG_*` env values in **clear text** — no `******`. (The Boot 3 `show-values: ALWAYS` property does not exist on 2.7 and is silently ignored.)
+
 ---
 
 ### INFRA-04: H2 Console Enabled
@@ -82,7 +85,7 @@ psql -h localhost -p 5432 -U postgres -d vulntrade
 | Severity | High |
 | OWASP | A05: Security Misconfiguration |
 | CWE | CWE-200 |
-| File | `docker-compose.yml:70` |
+| File | `docker-compose.yml:71` |
 
 **Description:** Java debug port 5005 is exposed to the host. An attacker can attach a debugger (IntelliJ, jdb) and inspect/modify runtime state, read memory, and set breakpoints.
 
@@ -94,7 +97,7 @@ psql -h localhost -p 5432 -U postgres -d vulntrade
 | Severity | High |
 | OWASP | A05: Security Misconfiguration |
 | CWE | CWE-200 |
-| File | `docker-compose.yml:71` |
+| File | `docker-compose.yml:72` |
 
 **Description:** JMX monitoring port 9090 is exposed. Tools like JConsole or VisualVM can connect to monitor threads, memory, MBeans, and trigger garbage collection.
 
@@ -107,9 +110,9 @@ psql -h localhost -p 5432 -U postgres -d vulntrade
 | OWASP | A05: Security Misconfiguration |
 | CWE | CWE-200 |
 | Difficulty | Beginner |
-| File | `docker-compose.yml:51` |
+| File | `docker-compose.yml:52` |
 
-**Description:** Adminer (database admin panel) is accessible on port 8081 with no additional authentication. Login with the PostgreSQL credentials to get full database access via a web UI.
+**Description:** Adminer (database admin panel) is accessible on port 8081 with no additional authentication. Login with the PostgreSQL credentials to get full database access via a web UI — including the hidden `flags` table.
 
 ---
 

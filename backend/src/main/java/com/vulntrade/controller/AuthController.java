@@ -64,7 +64,9 @@ public class AuthController {
      */
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {
-        Optional<User> userOpt = userRepository.findByUsername(request.getUsername());
+        // findFirstByUsername (LIMIT 1): duplicate usernames are allowed, so findByUsername
+        // would throw IncorrectResultSizeDataAccessException (500). Case-variant dup VULN kept.
+        Optional<User> userOpt = userRepository.findFirstByUsername(request.getUsername());
         if (userOpt.isEmpty()) {
             Map<String, String> error = new HashMap<>();
             error.put("error", "User not found");  // VULN: reveals user doesn't exist
@@ -239,7 +241,9 @@ public class AuthController {
     @PostMapping("/reset")
     public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> request) {
         String email = request.get("email");
-        Optional<User> userOpt = userRepository.findByEmail(email);
+        // findFirstByEmail (LIMIT 1): duplicate emails are allowed, so findByEmail would throw
+        // IncorrectResultSizeDataAccessException (500) when two accounts share an email.
+        Optional<User> userOpt = userRepository.findFirstByEmail(email);
 
         logger.info("AUTH_RESET_REQUEST: email={}", email);
 

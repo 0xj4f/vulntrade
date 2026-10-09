@@ -55,8 +55,9 @@ public class MarketController {
     @GetMapping("/orderbook/{symbol}")
     public ResponseEntity<?> getOrderBook(@PathVariable String symbol) {
         // VULN: symbol not sanitized — path traversal possible
-        List<Order> buyOrders = orderRepository.findBySymbolAndSideAndStatus(symbol, "BUY", "NEW");
-        List<Order> sellOrders = orderRepository.findBySymbolAndSideAndStatus(symbol, "SELL", "NEW");
+        // Include PARTIAL so partially-filled resting orders still appear in the book.
+        List<Order> buyOrders = orderRepository.findBySymbolAndSideAndStatusIn(symbol, "BUY", List.of("NEW", "PARTIAL"));
+        List<Order> sellOrders = orderRepository.findBySymbolAndSideAndStatusIn(symbol, "SELL", List.of("NEW", "PARTIAL"));
 
         // VULN: Leaks userId and full order details for front-running
         List<Map<String, Object>> bids = buyOrders.stream()

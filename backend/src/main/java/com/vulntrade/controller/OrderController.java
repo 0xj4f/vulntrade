@@ -150,36 +150,27 @@ public class OrderController {
                 .body(Map.of("error", "Authentication required"));
         }
 
-        return orderRepository.findById(orderId)
-            .map(order -> {
-                // VULN: No ownership check - any user can cancel any order
-                if ("FILLED".equals(order.getStatus()) || "CANCELLED".equals(order.getStatus())) {
-                    log(SecurityEvent.ORDER_CANCELLED, Outcome.FAILURE,
-                            details("reason", "already_closed",
-                                    "orderId", order.getId(),
-                                    "symbol", order.getSymbol(),
-                                    "targetUserId", order.getUserId(),
-                                    "isOwner", isOwner(order.getUserId())));
-                    return ResponseEntity.badRequest()
-                        .body((Object) Map.of("error", "Order already " + order.getStatus()));
-                }
+        try {
+            // VULN: service ignores ownership (IDOR) — any user can cancel any order.
+            // Delegating (instead of re-implementing here) also triggers the order-book
+            // broadcast and owner notification, and keeps a single security-log path.
+            Order order = orderService.cancelOrder(userId, orderId);
 
-                order.setStatus("CANCELLED");
-                orderRepository.save(order);
-
-                Map<String, Object> response = new HashMap<>();
-                response.put("id", order.getId());
-                response.put("status", "CANCELLED");
-                response.put("message", "Order cancelled");
-                response.put("originalUserId", order.getUserId()); // VULN: leaks original owner
-                log(SecurityEvent.ORDER_CANCELLED, Outcome.SUCCESS,
-                        details("orderId", order.getId(),
-                                "symbol", order.getSymbol(),
-                                "targetUserId", order.getUserId(),
-                                "isOwner", isOwner(order.getUserId())));
-                return ResponseEntity.ok((Object) response);
-            })
-            .orElse(ResponseEntity.notFound().build());
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", order.getId());
+            response.put("status", "CANCELLED");
+            response.put("message", "Order cancelled");
+            response.put("originalUserId", order.getUserId()); // VULN: leaks original owner
+            return ResponseEntity.ok((Object) response);
+        } catch (RuntimeException e) {
+            String msg = e.getMessage();
+            if (msg != null && msg.startsWith("Order not found")) {
+                return ResponseEntity.notFound().build();
+            }
+            // already-closed (and any other cancel failure) → 400, same as before
+            return ResponseEntity.badRequest()
+                .body((Object) Map.of("error", msg != null ? msg : "Order cancel failed"));
+        }
     }
 
     /**

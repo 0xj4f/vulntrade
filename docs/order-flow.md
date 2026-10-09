@@ -43,21 +43,25 @@ The order system has four main services:
 userId = 1, type = "MARKET", side = "BUY", symbol = "BTC-USD", quantity = 0.5
 ```
 
-### Step 2: Halt check — SKIPPED for MARKET orders
+### Step 2: Halt check — enforced for ALL order types
 
-The halt check (`priceSimulator.isHalted()`) only runs for `LIMIT` orders.  
-Market orders bypass the halt check entirely.
+The halt check (`priceSimulator.isHalted()`) runs for every order, MARKET and LIMIT alike
+(`OrderService.placeOrder`). A market order on a halted symbol is rejected with
+`Trading halted for <symbol>`.
 
-### Step 3: `RiskService.checkPreTrade()` — SKIPPED for MARKET orders
+> *Historical:* earlier builds skipped the halt check for MARKET orders. That gap is closed.
 
-```java
-if ("MARKET".equalsIgnoreCase(orderType)) {
-    return null;  // no risk check at all
-}
-```
+### Step 3: `RiskService.checkPreTrade()` — runs for ALL order types
 
-**This means: NO balance check happens for market orders.**  
-The buyer's balance is NOT verified before the order is created.
+`checkPreTrade()` (`RiskService.java:47`) runs for MARKET and LIMIT orders and validates, in
+order: quantity > 0, price > 0 (LIMIT only), symbol exists and is tradable, buyer balance ≥
+order value (BUY), and position ≥ quantity (SELL). For MARKET orders it resolves the effective
+price from the live `ask` (BUY) / `bid` (SELL) before the balance check.
+
+**The buyer's balance IS verified before a MARKET buy is accepted.**
+
+> *Historical:* earlier builds returned `null` (pass) immediately for any MARKET order, so no
+> balance/position check ran. That gap is closed.
 
 ### Step 4: Order saved to DB with status `NEW`
 
@@ -88,16 +92,16 @@ The matching engine looks for opposing `SELL` orders with status `NEW` on the sa
 
 ### Step 1–4: Same as buy flow
 
-- Halt check: SKIPPED (market order)
-- Risk check: SKIPPED (market order)
-- **No check that Trader 2 actually owns 0.5 BTC.** The `RiskService` has no sell-side validation at all:
-
-```java
-// VULN: No risk checks for SELL side
-// (could sell shares you don't own - naked short selling)
-```
-
+- Halt check: enforced (all order types)
+- Risk check: enforced (all order types)
+- **Position check applies to the SELL side.** `RiskService.checkPreTrade()` requires the seller
+  to already hold ≥ the quantity being sold, otherwise the order is rejected with
+  `Insufficient position. Required: <qty> <symbol>, Available: <held>`. Selling 0.5 BTC with a
+  0 BTC position is denied.
 - Order saved with current `bid` price from Symbol table
+
+> *Historical:* earlier builds had no sell-side validation (naked short selling). That gap is
+> closed — see "Business-logic vulns that remain" below for what is still exploitable.
 
 ### Step 5: Matching attempt
 
@@ -167,22 +171,28 @@ seller.balance = seller.balance + tradeValue
 ### 5. Positions updated
 
 **Buyer:** Position quantity increases, average price recalculated  
-**Seller:** Position quantity decreases (can go negative — naked short)
+**Seller:** Position quantity decreases, clamped at 0 (`MatchingEngineService` prevents negative positions; the `RiskService` position check already rejects a sell larger than the holding)
 
 ---
 
 ## Full Example
 
+> *Note:* this walkthrough illustrates the matching-engine mechanics. Under the current
+> pre-trade controls, Trader 2's MARKET SELL only passes risk checks if Trader 2 actually holds
+> ≥ 0.5 BTC (or is the house / liquidity provider). Positions no longer go negative —
+> `MatchingEngineService` clamps fills at 0 and the `RiskService` position check rejects naked
+> shorts up front. Assume Trader 2 holds the 0.5 BTC for the numbers below.
+
 ### Setup
 - **Trader 1**: balance = $100,000, no positions
-- **Trader 2**: balance = $50,000, no positions
+- **Trader 2**: balance = $50,000, holds 0.5 BTC
 - **BTC-USD**: bid = $64,000, ask = $64,100
 
 ### Step 1: Trader 1 places MARKET BUY 0.5 BTC-USD
 
 1. `OrderService.placeOrder(userId=1, MARKET, BUY, BTC-USD, qty=0.5)`
 2. Price set to ask: **$64,100**
-3. Risk check: **SKIPPED** (MARKET order)
+3. Risk check: **enforced** (MARKET order) — balance ≥ 0.5 × $64,100 = $32,050 ✓
 4. Order saved: `{id=1, userId=1, BUY, MARKET, BTC-USD, qty=0.5, price=$64,100, status=NEW}`
 5. `tryMatch()` runs → no SELL orders exist → **no match**
 6. Order stays `NEW` in the order book
@@ -192,8 +202,8 @@ seller.balance = seller.balance + tradeValue
 
 1. `OrderService.placeOrder(userId=2, MARKET, SELL, BTC-USD, qty=0.5)`
 2. Price set to bid: **$64,000**
-3. Risk check: **SKIPPED** (MARKET order)
-4. **No check that Trader 2 owns any BTC** (no sell-side validation)
+3. Risk check: **enforced** (MARKET order) — balance/position/symbol/qty all validated
+4. **Position check passes** because Trader 2 holds 0.5 BTC (a 0-position seller would be rejected)
 5. Order saved: `{id=2, userId=2, SELL, MARKET, BTC-USD, qty=0.5, price=$64,000, status=NEW}`
 6. `tryMatch()` runs → finds Trader 1's BUY order
 
@@ -222,7 +232,7 @@ Trader 1 (buyer):
 
 Trader 2 (seller):
   balance: $50,000 + $32,050 = $82,050
-  position: BTC-USD qty = -0.5 (NEGATIVE — naked short!)
+  position: BTC-USD qty 0.5 → 0.0 (positions clamp at 0; naked shorts are rejected pre-trade)
   transaction: TRADE_SELL, amount = +$32,050
 ```
 
@@ -238,7 +248,7 @@ Order 2: status=FILLED, filledQty=0.5, filledPrice=$64,100
 | Trader   | Balance   | BTC-USD Position |
 |----------|-----------|------------------|
 | Trader 1 | $67,950   | +0.5 BTC         |
-| Trader 2 | $82,050   | -0.5 BTC (short) |
+| Trader 2 | $82,050   | 0.0 BTC          |
 
 ---
 
@@ -256,18 +266,15 @@ if ("LIMIT".equalsIgnoreCase(request.getType())) {
 }
 ```
 
-### 2. Risk check IS performed (for BUY side only)
+### 2. Risk check IS performed (both sides)
 
-```java
-// For LIMIT BUY:
-orderValue = quantity × price
-if (user.balance < orderValue) → reject "Insufficient balance"
-
-// For LIMIT SELL:
-// No check at all — can sell assets you don't own
+```
+LIMIT BUY : balance  ≥ quantity × price   (else "Insufficient balance")
+LIMIT SELL: position ≥ quantity            (else "Insufficient position")
+both sides: quantity > 0, price > 0, symbol exists & tradable
 ```
 
-**However:** The balance is only **checked**, not **reserved/locked**. This creates a TOCTOU (Time-of-Check, Time-of-Use) gap — the balance could change between the check and the actual trade execution.
+**However:** the balance is only **checked**, not **reserved/locked**. This creates a TOCTOU (Time-of-Check, Time-of-Use) gap — the balance could change between the check and the actual trade execution (still exploitable; see #43/#51 in `vulnerabilities.md`).
 
 ---
 
@@ -277,23 +284,26 @@ if (user.balance < orderValue) → reject "Insufficient balance"
 
 Balance is only deducted when the order is **filled** (matched with an opposing order). A market buy order with no opposing sell will sit in the book without affecting the trader's balance.
 
-### 2. No sell-side validation exists
+### 2. Sell-side position check IS enforced *(hardened)*
 
-A trader can sell assets they don't own. There is no position check for sell orders. The `RiskService` explicitly skips sell-side checks:
+A trader can no longer sell assets they don't own. `RiskService.checkPreTrade()` requires
+`position ≥ quantity` for every SELL (MARKET and LIMIT); otherwise the order is rejected with
+`Insufficient position …`. Negative positions are additionally prevented in
+`MatchingEngineService` (fills clamp at 0).
 
-```java
-// VULN: No risk checks for SELL side
-```
+> *Historical:* earlier builds had no sell-side validation (naked shorting). Fixed.
 
-This means Trader 2 can sell 0.5 BTC even with 0 BTC in their position, resulting in a **negative position** (naked short).
+### 3. Market orders run the full risk check *(hardened)*
 
-### 3. Market orders skip ALL risk checks
+`RiskService.checkPreTrade()` runs for every order type, including `MARKET` — balance, position,
+symbol existence/tradability and quantity are all validated.
 
-The `RiskService.checkPreTrade()` returns `null` (pass) immediately for any `MARKET` order type. No balance check, no position check, nothing.
+> *Historical:* earlier builds returned `null` (pass) immediately for MARKET orders. Fixed.
 
-### 4. Balance check only exists for LIMIT BUY
+### 4. Pre-trade validation covers all combinations *(hardened)*
 
-The only pre-trade validation that exists is: for `LIMIT` orders on the `BUY` side, check that `user.balance >= quantity × price`. That's it. No other combination is validated.
+Validation is not limited to LIMIT BUY. Every order is checked for quantity > 0, price > 0
+(LIMIT), symbol existence/tradability, buyer balance (BUY) and seller position (SELL).
 
 ### 5. No balance reservation / locking
 
@@ -307,16 +317,39 @@ The matching engine does not check if the buyer and seller are the same user. A 
 
 When a trade matches, the price used is the price of the order that was already in the book (the "maker"), not the incoming order (the "taker").
 
-### Summary Table
+### Summary Table (current behaviour)
 
 | Check                        | MARKET BUY | MARKET SELL | LIMIT BUY | LIMIT SELL |
 |------------------------------|:----------:|:-----------:|:---------:|:----------:|
-| Halt check                   | ❌         | ❌          | ✅        | ✅         |
-| Balance check                | ❌         | ❌          | ✅        | ❌         |
-| Position/asset check         | ❌         | ❌          | ❌        | ❌         |
+| Symbol exists & tradable     | ✅         | ✅          | ✅        | ✅         |
+| Quantity > 0                 | ✅         | ✅          | ✅        | ✅         |
+| Halt check                   | ✅         | ✅          | ✅        | ✅         |
+| Balance check (BUY)          | ✅         | N/A         | ✅        | N/A        |
+| Position/asset check (SELL)  | N/A        | ✅          | N/A       | ✅         |
 | Balance reservation          | ❌         | ❌          | ❌        | ❌         |
 | Balance deducted on fill     | ✅         | N/A         | ✅        | N/A        |
 | Balance credited on fill     | N/A        | ✅          | N/A       | ✅         |
+
+Balance reservation is still **not** done (the TOCTOU gap above remains the live
+double-spend bug).
+
+### Business-logic vulns that remain
+
+The pre-trade hardening (symbol / qty / halt / balance / position checks) closed the input-
+validation gaps, but the trading flow is still deliberately exploitable:
+
+| Vuln | Where | Ref |
+|------|-------|-----|
+| Sign-flip withdrawal (negative = deposit) | `AccountController` / withdraw | #50 |
+| TOCTOU double-spend (concurrent withdrawals) | balance checked, not locked | #43 / #51 |
+| Deposit without source verification | deposit endpoint | #52 |
+| Wash trading (self-matching) | `MatchingEngineService` (no self-trade guard) | #62 |
+| No price band on LIMIT orders | `RiskService` (price>0 only) | #40 |
+| clientOrderId replay | `OrderService` (no uniqueness) | #41 |
+| No slippage protection on MARKET orders | `executeMarketOrder` | #45 |
+| IDOR cancel any order | `OrderService.cancelOrder` (no ownership check) | #44 |
+
+(Numbers reference `vulnerabilities.md`.)
 
 ---
 

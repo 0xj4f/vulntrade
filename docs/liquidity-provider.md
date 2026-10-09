@@ -5,6 +5,11 @@
 The liquidity provider acts as the **house / market maker**. It guarantees that
 MARKET orders always execute, even when there are no matching orders in the book.
 
+> The MARKET fill is only reached **after** the pre-trade risk check. Since the hardening,
+> `RiskService.checkPreTrade()` (`RiskService.java:47`) runs for **all** order types, so a
+> MARKET order must already pass symbol/quantity/price and balance (BUY) or position (SELL)
+> validation before the house ever fills it.
+
 ### How It Works
 
 ```
@@ -12,7 +17,8 @@ Trader places MARKET BUY 10 AAPL
         │
         ▼
   OrderService.placeOrder()
-        │  ✓ risk checks pass (balance, symbol, qty)
+        │  ✓ pre-trade risk checks pass — RiskService runs for ALL order types
+        │    (symbol/tradable, qty > 0, balance for BUY, position for SELL)
         ▼
   MatchingEngine.tryMatch()
         │

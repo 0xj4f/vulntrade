@@ -1,7 +1,9 @@
 package com.vulntrade.service;
 
 import com.vulntrade.model.PriceAlert;
+import com.vulntrade.model.User;
 import com.vulntrade.repository.PriceAlertRepository;
+import com.vulntrade.repository.UserRepository;
 import com.vulntrade.security.logging.Outcome;
 import com.vulntrade.security.logging.SecurityEvent;
 import org.slf4j.Logger;
@@ -29,11 +31,14 @@ public class AlertService {
 
     private final PriceAlertRepository priceAlertRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final UserRepository userRepository;
 
     public AlertService(PriceAlertRepository priceAlertRepository,
-                        SimpMessagingTemplate messagingTemplate) {
+                        SimpMessagingTemplate messagingTemplate,
+                        UserRepository userRepository) {
         this.priceAlertRepository = priceAlertRepository;
         this.messagingTemplate = messagingTemplate;
+        this.userRepository = userRepository;
     }
 
     /**
@@ -98,8 +103,13 @@ public class AlertService {
                 notification.put("message", "Price alert triggered for " + alert.getSymbol() +
                         " at " + currentPrice);
 
+                // STOMP user destinations are keyed by the principal name (the username),
+                // not the numeric id, so resolve it before sending.
+                String username = userRepository.findById(alert.getUserId())
+                        .map(User::getUsername)
+                        .orElse(String.valueOf(alert.getUserId()));
                 messagingTemplate.convertAndSendToUser(
-                        String.valueOf(alert.getUserId()),
+                        username,
                         "/queue/alerts",
                         notification);
 

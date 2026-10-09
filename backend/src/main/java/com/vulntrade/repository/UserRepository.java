@@ -15,6 +15,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmail(String email);
 
+    // Duplicate usernames/emails are allowed (no UNIQUE constraint - intentional VULN).
+    // findBy* throws when >1 row matches; findFirstBy* adds LIMIT 1 so login/reset stay up.
+    Optional<User> findFirstByUsername(String username);
+
+    Optional<User> findFirstByEmail(String email);
+
     Optional<User> findFirstByApiKey(String apiKey);
 
     // VULN: Raw SQL query - SQL injection possible if called with unsanitized input

@@ -89,6 +89,21 @@ public class StompChannelInterceptor implements ChannelInterceptor {
                 }
             }
 
+            // No token in the STOMP CONNECT frame, but the handshake may have
+            // captured a valid ?token= (WebSocketAuthInterceptor stores the claims
+            // in the session attributes). VULN: token accepted from the URL.
+            if (accessor.getUser() == null) {
+                Object role = sessionAttribute(accessor, "role");
+                Object username = sessionAttribute(accessor, "username");
+                if (role != null && !"ANONYMOUS".equalsIgnoreCase(String.valueOf(role))
+                        && username != null && !"anonymous".equalsIgnoreCase(String.valueOf(username))) {
+                    accessor.setUser(new StompPrincipal(
+                            String.valueOf(username),
+                            sessionAttribute(accessor, "userId"),
+                            String.valueOf(role)));
+                }
+            }
+
             // VULN: If no auth provided, allow anonymous connection
             if (accessor.getUser() == null) {
                 accessor.setUser(new StompPrincipal("anonymous", null, "ANONYMOUS"));

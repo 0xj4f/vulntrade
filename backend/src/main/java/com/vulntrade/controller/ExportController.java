@@ -1,12 +1,16 @@
 package com.vulntrade.controller;
 
 import com.vulntrade.model.Order;
+import com.vulntrade.model.User;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.CustomQueryRepository;
 import com.vulntrade.security.JwtTokenProvider;
 import com.vulntrade.security.logging.Outcome;
 import com.vulntrade.security.logging.SecurityEvent;
+import io.jsonwebtoken.Claims;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletResponse;
@@ -208,7 +212,10 @@ public class ExportController {
 
     private Long extractUserId(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            return null;
+            // No Bearer header: fall back to whoever the security filters already authenticated
+            // (API key via X-API-Key/?api_key=, or JWT via ?token=). Otherwise these endpoints
+            // would 401 for valid API-key requests even though the filter authenticated them.
+            return userIdFromSecurityContext();
         }
         try {
             String token = authHeader.substring(7);
@@ -216,5 +223,26 @@ public class ExportController {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * userId of the principal set by the auth filters, or null if unauthenticated.
+     * JwtAuthFilter stores the JWT Claims; ApiKeyAuthFilter stores the User entity.
+     */
+    private Long userIdFromSecurityContext() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            return null;
+        }
+        Object details = auth.getDetails();
+        if (details instanceof Claims) {
+            Object userId = ((Claims) details).get("userId");
+            if (userId instanceof Number) {
+                return ((Number) userId).longValue();
+            }
+        } else if (details instanceof User) {
+            return ((User) details).getId();
+        }
+        return null;
     }
 }

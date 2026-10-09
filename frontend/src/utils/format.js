@@ -13,8 +13,23 @@ export const fmtUSD = (val) =>
 export const fmtBalance = (val) =>
   `$${Number(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
-/** "$1.23" — fixed two decimal places (for per-share prices) */
-export const fmtPrice = (val) => `$${Number(val || 0).toFixed(2)}`;
+/** Decimal places to use for a price, by magnitude — sub-dollar/sub-cent symbols
+ *  need more precision so they don't collapse to "0.00". */
+const priceDecimals = (abs) =>
+  abs === 0 || abs >= 1 ? 2 : abs >= 0.01 ? 4 : abs >= 0.0001 ? 6 : 8;
+
+/** "$1.23" for normal prices; up to 8 decimals below $1 so sub-cent prices still show */
+export const fmtPrice = (val) => {
+  const n = Number(val || 0);
+  return `$${n.toFixed(priceDecimals(Math.abs(n)))}`;
+};
+
+/** Same magnitude-aware precision as fmtPrice but a bare numeric string (no "$"),
+ *  for pre-filling the order form's price <input> (avoids pre-filling "0.00"). */
+export const priceInputValue = (val) => {
+  const n = Number(val || 0);
+  return n.toFixed(priceDecimals(Math.abs(n)));
+};
 
 /** "+$1,234.56" / "-$1,234.56" — P&L with sign and currency */
 export const fmtPnL = (val) => {

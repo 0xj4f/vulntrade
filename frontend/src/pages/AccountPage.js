@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
-import { sendMessage } from '../services/websocketService';
+import { sendMessage, subscribe, unsubscribe, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 import PageLayout from '../components/PageLayout';
@@ -109,6 +109,28 @@ function AccountPage() {
         .catch(err => console.error('Failed to fetch balance:', err));
     }
   }, [user]);
+
+  // Subscribe to WS replies so the "Quick Withdraw" button (which sends over
+  // /app/trade.withdraw) actually reflects the result instead of looking like a no-op.
+  useEffect(() => {
+    const subs = [];
+    const setup = () => {
+      if (!isConnected()) return false;
+      subs.push(subscribe('/user/queue/balance', (reply) => {
+        api.get('/api/accounts/balance').then(r => setBalance(r.data)).catch(() => {});
+        if (refreshUser) refreshUser();
+        if (reply?.type === 'WITHDRAW_SUCCESS') toast.success(`Withdrawn via WS. New balance: $${reply.newBalance}`);
+        else if (reply?.type === 'DEPOSIT_SUCCESS') toast.success(`Deposited via WS. New balance: $${reply.newBalance}`);
+      }));
+      subs.push(subscribe('/user/queue/errors', (err) => {
+        toast.error(`❌ ${err?.message || 'Request failed'}`);
+      }));
+      return true;
+    };
+    let iv;
+    if (!setup()) iv = setInterval(() => { if (setup()) clearInterval(iv); }, 500);
+    return () => { if (iv) clearInterval(iv); subs.forEach(s => unsubscribe(s)); };
+  }, [refreshUser]);
 
   const handleChangePassword = async (e) => {
     e.preventDefault();

@@ -27,13 +27,14 @@ chrome-user-data
 /.worktrees
 .claude/*.local.*
 
-# Exploit tooling — framework committed, local scripts gitignored
-exploit/exploits/
-exploit/*.sh
-exploit/*.jar
-exploit/jwt.py
-exploit/marshalsec*
-exploit/.venv/
+# Local secrets — committed .env.example is the intentional VULN; the real .env is not.
+# Root-anchored so .env.example and frontend/.env stay tracked.
+/.env
+/.env.bak
+
+# Exploit tooling — the exploit validation suite is versioned in its own
+# (public) repo, not here. Keep the whole local working copy out of this repo.
+exploit/
 
 # Runtime logs (bind-mounted from docker-compose)
 logs/
@@ -260,3 +261,5 @@ README.html
 *.iml
 .idea
 .exercism
+
+internal-docs

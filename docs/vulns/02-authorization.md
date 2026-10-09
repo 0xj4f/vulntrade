@@ -15,9 +15,9 @@ Broken access control is the #1 vulnerability in the OWASP Top 10. In a trading 
 | CWE | CWE-639 |
 | Difficulty | Beginner |
 | Endpoint | `GET /api/users/{userId}` |
-| File | `UserController.java:49-90` |
+| File | `UserController.java:56-99` |
 
-**Description:** Any authenticated user can view any other user's full profile by changing the `userId` parameter. The response includes PII: SSN, date of birth, phone, address, API key, notes (which contain CTF flags).
+**Description:** Any authenticated user can view any other user's full profile by changing the `userId` parameter (`GET /{userId}` at `UserController.java:56`). An ownership check exists but only logs a security event and still returns the record (`UserController.java:97`). The response includes PII: SSN, date of birth, phone, address, API key, notes (which contain CTF flags).
 
 **How to exploit:**
 ```bash
@@ -43,7 +43,7 @@ curl http://localhost:8085/api/users/3 \
 | CWE | CWE-639 |
 | Difficulty | Beginner |
 | Endpoint | `GET /api/users/{userId}/portfolio` |
-| File | `PortfolioService.java:34` |
+| File | `PortfolioService.java:36` |
 
 **Description:** Returns any user's positions, holdings, and notes (which may contain flags). trader2's portfolio notes contain `FLAG{h0r1z0nt4l_pr1v3sc_p0rtf0l10}`.
 
@@ -57,7 +57,7 @@ curl http://localhost:8085/api/users/3 \
 | CWE | CWE-639 |
 | Difficulty | Beginner |
 | Endpoint | `GET /api/accounts/transactions?userId={id}` |
-| File | `AccountController.java:214-227` |
+| File | `AccountController.java:262-278` |
 
 **Description:** The `userId` query parameter overrides the authenticated user's ID, returning any user's full transaction history.
 
@@ -70,9 +70,9 @@ curl http://localhost:8085/api/users/3 \
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-639 |
 | Difficulty | Intermediate |
-| File | `OrderService.java:110` |
+| File | `OrderService.java:154` |
 
-**Description:** The cancel order function doesn't verify that the authenticated user owns the order. Any user can cancel any order by ID.
+**Description:** The cancel order function (`OrderService.cancelOrder`, `OrderService.java:154`) doesn't verify that the authenticated user owns the order. Any user can cancel any order by ID. (Re-run note: a given order can only be cancelled once; a fresh cross-user cancel still returns 200.)
 
 ---
 
@@ -84,7 +84,7 @@ curl http://localhost:8085/api/users/3 \
 | CWE | CWE-639 |
 | Difficulty | Beginner |
 | Endpoint | `GET /api/leaderboard?userId={id}` or `GET /api/leaderboard/{id}/detail` |
-| File | `LeaderboardController.java:47-56` |
+| File | `LeaderboardController.java:53` (`?userId=`), `:135` (`/{id}/detail`) |
 
 **Description:** Any authenticated user can look up detailed trading stats for any other user. The response includes the `notes` field which contains flags.
 
@@ -103,17 +103,19 @@ curl http://localhost:8085/api/users/3 \
 
 ---
 
-### AUTHZ-07: Admin Page — Client-Side Only Protection
+### AUTHZ-07: Admin Page — Client-Side Only Route Guard (Frontend)
 | Field | Value |
 |-------|-------|
-| Severity | High |
+| Severity | Medium |
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-862 |
 | Difficulty | Beginner |
 | Endpoint | `/admin` (frontend route) |
-| File | `App.js:293` |
+| File | `App.js:254,294-295` |
 
-**Description:** The admin page is hidden by a React conditional render (`isAdmin()`), but the route is accessible to any authenticated user by navigating directly to `/admin`. All admin API calls work if you know the endpoints.
+**Description:** The `/admin` route guard is **client-side only**. The nav link is hidden for non-admins by a React `isAdmin()` render (`App.js:254`), but the route itself only checks `isAuthenticated` (`App.js:294-295`), so any logged-in user can navigate directly to `/admin` and the `AdminPage` component renders. This is a real **frontend** vulnerability (demonstrated with a browser/Playwright check).
+
+**Important nuance:** reaching the admin page in the browser does **not** grant admin API access. The backend `/api/admin/**` endpoints are role-gated server-side (`SecurityConfig.java:64`, `hasRole("ADMIN")`): a plain non-admin token gets **403**. The admin API is only reachable by **forging the ADMIN role** in the JWT — see [AUTHZ-12](#authz-12-admin-user-list-endpoint-accessible). In the exploit matrix this item is a frontend-only **SKIP** (not HTTP-exploitable on its own).
 
 ---
 
@@ -124,9 +126,9 @@ curl http://localhost:8085/api/users/3 \
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-862 |
 | Difficulty | Intermediate |
-| File | `StompChannelInterceptor.java:84-91` |
+| File | `StompChannelInterceptor.java:125-130` |
 
-**Description:** Any authenticated user can subscribe to `/topic/admin/alerts` and `/topic/admin/notifications`. These channels broadcast sensitive admin actions including balance adjustments and FLAG_7.
+**Description:** Any authenticated user can subscribe to `/topic/admin/*` (e.g. `/topic/admin/alerts`). The interceptor logs the subscription but never blocks it (`StompChannelInterceptor.java:125-130`). These channels broadcast sensitive admin actions including balance adjustments and the FLAG_7 payload.
 
 ---
 
@@ -137,9 +139,9 @@ curl http://localhost:8085/api/users/3 \
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-862 |
 | Difficulty | Intermediate |
-| File | `StompChannelInterceptor.java:98-111` |
+| File | `StompChannelInterceptor.java:144-153` |
 
-**Description:** When a non-admin user sends messages to `/app/admin.*` destinations (like `admin.setPrice`, `admin.adjustBalance`), the interceptor logs a warning but **does not block** the message. The message is processed normally.
+**Description:** When a non-admin user sends messages to `/app/admin.*` destinations (like `admin.setPrice`, `admin.adjustBalance`, `admin.haltTrading`), the interceptor logs a warning but **does not block** the message (`StompChannelInterceptor.java:144-153`). The command is processed normally — a non-admin `admin.haltTrading` returns a `TRADING_HALTED` reply.
 
 **How to exploit:**
 ```javascript
@@ -150,16 +152,20 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 
 ---
 
-### AUTHZ-10: HTTP Method Override Bypass
+### AUTHZ-10: HTTP Method Override Bypass — Not Exploitable (Debunked)
 | Field | Value |
 |-------|-------|
-| Severity | Medium |
-| OWASP | A01: Broken Access Control |
-| CWE | CWE-20 |
-| Difficulty | Advanced |
+| Severity | N/A (not a vulnerability) |
+| OWASP | — |
+| CWE | — |
+| Difficulty | — |
 | File | `SecurityConfig.java:90` |
 
-**Description:** `HiddenHttpMethodFilter` is enabled, allowing the `X-HTTP-Method-Override` header to change the HTTP method. A POST request to an admin endpoint can be disguised as a GET to bypass method-based security rules.
+**Status:** This was previously claimed as a method-override authorization bypass. **The claim is false — it does not work.**
+
+**Why it does not work:** `HiddenHttpMethodFilter` (`SecurityConfig.java:90`) only honours a `_method` **form parameter** on `POST` requests and never changes authorization decisions. The `X-HTTP-Method-Override` **header** does nothing here. `/api/admin/**` is gated by `hasRole("ADMIN")` (`SecurityConfig.java:64`) independent of HTTP method, so a non-admin `POST /api/admin/users` with `X-HTTP-Method-Override: GET` still returns **403**.
+
+> Historical note: an inline code comment in `AdminController` still references this technique, but it is stale — the backend role check applies regardless of the override header. Admin API access requires forging the ADMIN role instead (see [AUTHZ-12](#authz-12-admin-user-list-endpoint-accessible)). In the exploit matrix this item is a **SKIP** (verified non-exploitable).
 
 ---
 
@@ -171,9 +177,9 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | CWE | CWE-807 |
 | Difficulty | Intermediate |
 | Endpoint | `POST /api/accounts/deposit`, `POST /api/accounts/withdraw` |
-| File | `AccountController.java` |
+| File | `AccountController.java:195` (deposit), `:100` (withdraw) |
 
-**Description:** Deposit and withdrawal endpoints check `accountLevel >= 2` from the JWT claim only — never querying the database. Forging a JWT with `accountLevel:2` bypasses all KYC/verification requirements.
+**Description:** Deposit and withdrawal endpoints check `accountLevel < 2` from the JWT claim only (`AccountController.java:195`, `:100`) — never querying the database. A fresh Level-1 user is blocked (403); re-signing that same token with `accountLevel:2` (weak secret) unlocks the operation (200), bypassing all KYC/verification requirements. See [AUTH-07](01-authentication.md) for the claim source.
 
 ---
 
@@ -185,6 +191,6 @@ sendMessage('/app/admin.setPrice', { symbol: 'VULN', price: 99999 });
 | CWE | CWE-862 |
 | Difficulty | Intermediate |
 | Endpoint | `GET /api/admin/users` |
-| File | `AdminController.java:39-59` |
+| File | `AdminController.java:43`, `SecurityConfig.java:64`, `JwtAuthFilter.java:37` |
 
-**Description:** Returns all users including API keys, balance, notes, and sensitive fields. While the endpoint is under `/api/admin/**` which requires ADMIN role, the role is read from the JWT body (which is forgeable).
+**Description:** Returns all users including API keys, balance, notes, and sensitive fields (`AdminController.java:43`). The endpoint is genuinely role-gated server-side — `/api/admin/**` requires `hasRole("ADMIN")` (`SecurityConfig.java:64`) and a plain non-admin token gets **403**. The weakness is that the role is read from the (forgeable) JWT body (`JwtAuthFilter.java:37`) and the parser accepts `alg:none`/weak-secret tokens, so forging `role=ADMIN` reaches the endpoint and dumps every user's sensitive data. This is the real server-side path behind the [AUTHZ-07](#authz-07-admin-page--client-side-only-route-guard-frontend) admin page.

@@ -2,6 +2,7 @@
   "name": "vulntrade-frontend",
   "version": "1.0.0",
   "private": true,
+  "proxy": "http://localhost:8085",
   "dependencies": {
     "@stomp/stompjs": "^7.0.0",
     "axios": "^1.6.0",

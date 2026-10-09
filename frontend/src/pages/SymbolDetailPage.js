@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { createChart, ColorType, CrosshairMode } from 'lightweight-charts';
 import api from '../services/apiService';
-import { subscribe, isConnected } from '../services/websocketService';
+import { subscribe, unsubscribe, isConnected } from '../services/websocketService';
 import PageLayout from '../components/PageLayout';
 import Card from '../components/Card';
 import StatCard from '../components/StatCard';
@@ -71,9 +71,11 @@ function SymbolDetailPage() {
 
   // ── Subscribe to WS price updates ───────────────────
   useEffect(() => {
+    let sub = null;
     const trySubscribe = () => {
       if (!isConnected()) return false;
-      subscribe('/topic/prices', (update) => {
+      sub = subscribe('/topic/prices', (update) => {
+        if (update.type === 'TRADING_HALT') return; // ignore halt notices on this topic
         if (update.symbol === symbol) {
           const last = Number(update.last || update.bid || 0);
           if (last > 0) {
@@ -112,12 +114,13 @@ function SymbolDetailPage() {
       return true;
     };
 
+    let iv;
     if (!trySubscribe()) {
-      const iv = window.setInterval(() => {
+      iv = window.setInterval(() => {
         if (trySubscribe()) window.clearInterval(iv);
       }, 500);
-      return () => window.clearInterval(iv);
     }
+    return () => { if (iv) window.clearInterval(iv); if (sub) unsubscribe(sub); };
   }, [symbol]);
 
   // ── Create / update chart ───────────────────────────

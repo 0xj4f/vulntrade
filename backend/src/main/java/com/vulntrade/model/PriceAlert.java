@@ -22,7 +22,8 @@ public class PriceAlert {
     @Column(name = "user_id")
     private Long userId;
 
-    @Column(name = "symbol", length = 20, nullable = false)
+    // VULN: wide enough to hold a stored-XSS payload in the symbol field
+    @Column(name = "symbol", length = 255, nullable = false)
     private String symbol;
 
     @Column(name = "target_price", precision = 20, scale = 8, nullable = false)

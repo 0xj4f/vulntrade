@@ -11,12 +11,18 @@ This directory contains executable test scripts and documentation for end-to-end
 
 This is also called **Integration Testing** or **Workflow Testing**.
 
+> **Authoritative red/green validation:** the phase scripts below are the original smoke tests.
+> The per-vulnerability source of truth is now the exploit matrix in [`../exploit/`](../exploit/)
+> (`python run_all.py`), which asserts on the server's actual reply for every claim. Latest
+> clean-DB run: **68 PASS / 0 FAIL / 8 SKIP** of 76 (the 8 SKIPs are frontend-only or
+> backend-out-of-scope checks). Where this smoke-test doc and the matrix disagree, the matrix wins.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 ```bash
 # 1. Start all services
-cd /Users/j4f/Repo/ADAPTIVE/llm-projects/vuln-trading-app-1
+cd vulntrade   # the repository root
 docker-compose up -d
 
 # 2. Verify services are healthy
@@ -83,8 +89,8 @@ chmod +x test-phase1.sh test-phase2.sh test-phase3.sh run-all-tests.sh
 - ✅ Order placement via REST
 - ✅ **IDOR - cancel any user's order** 🔴
 - ✅ **IDOR - view any user's portfolio** 🔴
-- ✅ **Negative quantity accepted** 🔴
-- ✅ **Non-existent symbols accepted** 🔴
+- 🛡️ **Negative quantity now REJECTED server-side** (RiskService qty>0 — control present; was a vuln pre-hardening)
+- 🛡️ **Non-existent symbols now REJECTED server-side** (RiskService symbol check — control present; was a vuln pre-hardening)
 - ✅ **Stored XSS via symbol field** 🔴
 - ✅ **Race condition in withdrawals** 🔴
 - ✅ **Sign flip vulnerability** 🔴
@@ -92,7 +98,7 @@ chmod +x test-phase1.sh test-phase2.sh test-phase3.sh run-all-tests.sh
 - ✅ **Information disclosure in responses** 🔴
 - ✅ **SQL injection in trade history** 🔴
 
-**🔴 = Vulnerability Found**
+**🔴 = Vulnerability Found** · **🛡️ = Server-side control present (formerly a vuln, now rejected)**
 
 ## 📊 Test Output Example
 
@@ -198,24 +204,21 @@ curl http://localhost:8085/api/users/3/portfolio \
 
 | Doc | Purpose |
 |-----|---------|
-| [TESTING.md](TESTING.md) | **Comprehensive guide** - detailed explanations, data flow diagrams, vulnerability exploitation tips |
-| [API-REFERENCE.md](API-REFERENCE.md) | **API endpoint reference** - all endpoints with curl examples and vulnerabilities |
-| [../plan.md](../plan.md) | **Project plan** - full vulnerability catalog with CWE mappings |
+| [../exploit/README.md](../exploit/README.md) | **Exploit matrix** - authoritative red/green proof of every vuln (`python run_all.py`) |
+| [../docs/vulns/README.md](../docs/vulns/README.md) | **Vulnerability catalog** - per-category write-ups with CWE mappings |
+| [../docs/vulnerabilities.md](../docs/vulnerabilities.md) | **Master vuln table** - status of every claim (working / control present / debunked) |
+| [CURL-EXAMPLES.sh](CURL-EXAMPLES.sh) | **curl recipes** - ready-to-run requests per endpoint |
 
 ### Read This First
-→ Start with [TESTING.md](TESTING.md) for:
-- What is E2E testing
-- Detailed phase-by-phase walkthroughs
-- Data flow diagrams (ASCII art)
-- Vulnerability exploitation guide
-- Troubleshooting tips
+→ Run the exploit matrix in [`../exploit/`](../exploit/) (`python run_all.py`) for the current,
+asserted status of every vulnerability, then use [../docs/vulns/](../docs/vulns/) for the
+per-category exploitation walkthroughs.
 
 ### For Quick Reference
-→ Use [API-REFERENCE.md](API-REFERENCE.md) for:
+→ Use [CURL-EXAMPLES.sh](CURL-EXAMPLES.sh) and [../docs/vulnerabilities.md](../docs/vulnerabilities.md) for:
 - All endpoints with curl examples
 - Default credentials
-- Common vulnerability patterns
-- Exploit templates
+- Which claims are proven vs. mitigated (control present) vs. debunked
 
 ## 🐛 Finding Vulnerabilities
 
@@ -242,11 +245,16 @@ Look for:
 ### Phase 3
 ```
 Look for:
-- Can place order with -10 quantity (negative)
-- Can cancel other user's order
-- Can view any user's portfolio
+- Can cancel other user's order (IDOR)
+- Can view any user's portfolio (IDOR)
 - Withdrawing -$100 adds $100 (sign flip)
 - Symbol field with <img> tag causes XSS
+- Duplicate clientOrderId replayed; no price band; no market-order slippage cap
+
+Now REJECTED server-side (control present, no longer exploitable):
+- Order with -10 quantity -> "Invalid quantity: must be greater than 0"
+- Order for an unknown symbol -> "Unknown symbol: ..."
+- Market/limit order on a halted symbol; selling more than you hold (naked short)
 ```
 
 ## 🔧 Troubleshooting
@@ -307,7 +315,7 @@ kill -9 <PID>
 - [ ] WebSocket endpoint responding
 - [ ] Can place orders
 - [ ] Can cancel other user's orders (IDOR)
-- [ ] Negative quantities accepted
+- [ ] Negative quantities REJECTED server-side (control present)
 - [ ] Negative withdrawals increase balance (sign flip)
 - [ ] XSS payload stored in alert symbol
 - [ ] Trader JWT can call admin endpoints
@@ -325,15 +333,16 @@ kill -9 <PID>
 ## 🤝 Support
 
 Issues? Check:
-1. [TESTING.md](TESTING.md) - Detailed troubleshooting section
+1. The Troubleshooting section above
 2. Verify `docker-compose ps` shows all 5 services running
 3. Check `docker-compose logs -f backend` for errors
 4. Verify connectivity: `curl http://localhost:8085/api/health`
 
 ---
 
-**Total Vulnerabilities Tested**: 60+  
+**Exploit matrix (authoritative)**: 76 tests — **68 PASS / 0 FAIL / 8 SKIP** (clean-DB run)  
 **Total Test Execution Time**: ~10 minutes  
-**Success Rate**: 100% (all vulnerabilities as designed)
+**Note**: a few order-flow claims (negative qty, unknown symbol, naked short, market-during-halt)
+are now **server-side controls**, not live vulns — see `../docs/vulnerabilities.md`
 
 🎯 **Goal**: Find as many vulnerabilities as possible - they're intentionally planted!

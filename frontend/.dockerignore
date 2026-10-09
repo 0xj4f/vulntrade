@@ -1,0 +1,4 @@
+# Keep the build context small and avoid copying host artifacts into the image.
+# NOTE: .env is intentionally NOT ignored — it is copied into the image on purpose (VULN).
+node_modules
+build
