@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import static com.vulntrade.security.logging.SecurityEventLogger.*;
@@ -59,6 +60,23 @@ public class OrderService {
      * Validates symbol, enforces halt check for all types, runs risk checks.
      */
     public Order placeOrder(Long userId, OrderRequest request) {
+
+        // Normalise side/type so downstream case-sensitive matching ("BUY".equals(...)) works.
+        if (request.getSide() != null) {
+            request.setSide(request.getSide().toUpperCase(Locale.ROOT));
+        }
+        if (request.getType() != null) {
+            request.setType(request.getType().toUpperCase(Locale.ROOT));
+        }
+
+        // MARKET orders may omit price; resolve it from live bid/ask (same as executeMarketOrder)
+        // so the matching engine has a price to compare and doesn't NPE.
+        if ("MARKET".equals(request.getType()) && request.getPrice() == null) {
+            symbolRepository.findById(request.getSymbol()).ifPresent(sym -> {
+                BigDecimal marketPrice = "BUY".equals(request.getSide()) ? sym.getAsk() : sym.getBid();
+                request.setPrice(marketPrice);
+            });
+        }
 
         // Halt check for ALL order types
         if (priceSimulator.isHalted(request.getSymbol())) {

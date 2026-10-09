@@ -42,7 +42,7 @@ public class JwtTokenProvider {
                 .setSubject(username)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpiration))
-                .signWith(SignatureAlgorithm.HS256, jwtSecret)  // VULN: weak secret
+                .signWith(SignatureAlgorithm.HS256, jwtSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8))  // VULN: weak secret, forgeable with the plaintext string
                 .compact();
     }
 
@@ -85,7 +85,7 @@ public class JwtTokenProvider {
                 .setSubject(user.getUsername())
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpiration))
-                .signWith(SignatureAlgorithm.HS256, jwtSecret)
+                .signWith(SignatureAlgorithm.HS256, jwtSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8))
                 .compact();
     }
 
@@ -131,7 +131,7 @@ public class JwtTokenProvider {
             // In jjwt 0.9.1, if you don't set the signing key properly,
             // unsigned tokens may be accepted
             return Jwts.parser()
-                    .setSigningKey(jwtSecret)
+                    .setSigningKey(jwtSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8))
                     .parseClaimsJws(token)
                     .getBody();
         } catch (ExpiredJwtException e) {

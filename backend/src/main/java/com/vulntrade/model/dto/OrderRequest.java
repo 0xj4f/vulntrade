@@ -14,4 +14,5 @@ public class OrderRequest {
     private BigDecimal quantity; // VULN: can be negative
     private BigDecimal price;   // VULN: can be zero or negative
     private String clientOrderId; // VULN: not unique-enforced
+    private Long userId;        // VULN: client can place an order as another user (IDOR) via the hidden field
 }
