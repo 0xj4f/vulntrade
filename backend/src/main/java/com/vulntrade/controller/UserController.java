@@ -6,11 +6,14 @@ import com.vulntrade.security.JwtTokenProvider;
 import com.vulntrade.security.logging.Outcome;
 import com.vulntrade.security.logging.SecurityEvent;
 import com.vulntrade.service.PortfolioService;
+import io.jsonwebtoken.Claims;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -106,8 +109,14 @@ public class UserController {
             @RequestHeader(value = "Authorization", required = false) String authHeader) {
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Authentication required"));
+            // No Bearer header: fall back to the API-key/JWT principal the filters authenticated,
+            // so X-API-Key / ?api_key= requests reach /me instead of getting 401.
+            Long apiUserId = userIdFromSecurityContext();
+            if (apiUserId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authentication required"));
+            }
+            return getUserProfile(apiUserId);  // Reuse the IDOR-vulnerable method
         }
 
         String token = authHeader.substring(7);
@@ -118,6 +127,27 @@ public class UserController {
         }
 
         return getUserProfile(userId);  // Reuse the IDOR-vulnerable method
+    }
+
+    /**
+     * userId of the principal set by the auth filters, or null if unauthenticated.
+     * JwtAuthFilter stores the JWT Claims; ApiKeyAuthFilter stores the User entity.
+     */
+    private Long userIdFromSecurityContext() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            return null;
+        }
+        Object details = auth.getDetails();
+        if (details instanceof Claims) {
+            Object userId = ((Claims) details).get("userId");
+            if (userId instanceof Number) {
+                return ((Number) userId).longValue();
+            }
+        } else if (details instanceof User) {
+            return ((User) details).getId();
+        }
+        return null;
     }
 
     /**

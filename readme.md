@@ -48,10 +48,13 @@ Most vulnerable-by-design apps (DVWA, WebGoat, Juice Shop) are generic web appli
 ```bash
 git clone https://github.com/0xj4f/vulntrade.git
 cd vulntrade
+cp .env.example .env
 docker compose up
 ```
 
-That's it. The full stack starts in under a minute.
+That's it. The full stack starts in under a minute. (The compose files ship with
+inline defaults, so `docker compose up` also works before you copy `.env` — but
+copying it first lets you tweak secrets and enable the S3 log shipper.)
 
 ### Using prebuilt images (no local build)
 
@@ -60,6 +63,7 @@ If you just want to run the lab without compiling anything, use the prebuilt ima
 ```bash
 git clone https://github.com/0xj4f/vulntrade.git
 cd vulntrade
+cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
@@ -70,7 +74,7 @@ The `prod` compose file pulls `0xj4f/vulntrade-backend:latest` and `0xj4f/vulntr
 | Frontend   | **3001**  | http://localhost:3001               |
 | Backend    | **8085**  | http://localhost:8085               |
 | Adminer    | **8081**  | http://localhost:8081               |
-| PostgreSQL | **5432**  | `postgres://vulntrade:vulntrade@localhost:5432/vulntrade` |
+| PostgreSQL | **5432**  | `postgres://postgres:postgres@localhost:5432/vulntrade` |
 | Redis      | **6379**  | `redis://localhost:6379`            |
 | Debug Port | **5005**  | Java remote debug (JDWP)           |
 | JMX        | **9090**  | JMX monitoring (unauthenticated)    |
@@ -79,12 +83,13 @@ The `prod` compose file pulls `0xj4f/vulntrade-backend:latest` and `0xj4f/vulntr
 
 | Role      | Username   | Password    |
 |-----------|------------|-------------|
+| Admin     | `admin`    | `admin123`  |
 | Trader    | `trader1`  | `password`  |
-| Trader    | `trader2`  | `trader123` |
+| Trader    | `trader2`  | `password`  |
 | Developer | `dev`      | `dev123`    |
-| API       | `apiuser`  | `api123`    |
+| API       | `apiuser`  | `apipass`   |
 
-The database is also seeded with 12 famous traders (Buffett, Saylor, DFV, Satoshi, and more) with trade histories and portfolio positions.
+The database is also seeded with 12 famous traders (Buffett, Saylor, DFV, Satoshi, and more), each with ~7 days of trade history and portfolio positions.
 
 ## Vulnerability Categories
 
@@ -111,10 +116,10 @@ VulnTrade includes **12 CTF flags** worth a total of **3,550 points**, ranging f
 
 | Difficulty | Flags | Points | Techniques Required |
 |------------|-------|--------|---------------------|
-| Beginner   | 3     | 100-200 | Actuator enumeration, basic IDOR |
-| Intermediate | 4   | 200-300 | UNION SQLi, Redis pivoting, JWT analysis |
-| Advanced   | 3     | 300-350 | JWT forging, heap dump analysis, RCE via debug port |
-| Expert     | 2     | 500 each | Market manipulation chains, Log4Shell over WebSocket |
+| Beginner     | 4 | 100-200 | Actuator enumeration, basic IDOR, Redis (no-auth) pivoting |
+| Intermediate | 4 | 250-300 | UNION SQLi over WebSocket, STOMP admin channel, heap dump analysis, JWT claim tampering |
+| Advanced     | 2 | 350-400 | JWT forging, RCE via debug endpoint |
+| Expert       | 2 | 500 each | Market manipulation chains, Log4Shell over WebSocket |
 
 Flags are hidden across the database, application memory, configuration files, and require real exploitation to discover — not just source code reading.
 

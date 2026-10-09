@@ -33,6 +33,7 @@ public class PriceSimulatorService {
 
     private final SymbolRepository symbolRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final AlertService alertService;
 
     // VULN: Fixed seed makes prices predictable
     private final Random random = new Random(42);
@@ -50,9 +51,11 @@ public class PriceSimulatorService {
     private long tickCount = 0;
 
     public PriceSimulatorService(SymbolRepository symbolRepository,
-                                  SimpMessagingTemplate messagingTemplate) {
+                                  SimpMessagingTemplate messagingTemplate,
+                                  AlertService alertService) {
         this.symbolRepository = symbolRepository;
         this.messagingTemplate = messagingTemplate;
+        this.alertService = alertService;
     }
 
     /**
@@ -107,6 +110,10 @@ public class PriceSimulatorService {
 
             // Broadcast to all subscribers - VULN: no entitlement check
             messagingTemplate.convertAndSend("/topic/prices", update);
+
+            // Fire any price alerts that this tick crosses (delivers the stored
+            // symbol to the user's /queue/alerts — the stored-XSS sink).
+            alertService.checkAlerts(symbol.getSymbol(), newPrice);
         }
     }
 

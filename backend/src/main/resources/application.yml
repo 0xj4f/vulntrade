@@ -71,10 +71,15 @@ management:
   endpoint:
     health:
       show-details: always
+    # VULN: turn OFF the default secret masking so /actuator/env and
+    # /actuator/configprops print JWT_SECRET, the DB password, the debug key,
+    # etc. in clear text. On Spring Boot 2.7 masking is controlled by
+    # keys-to-sanitize (a regex list); an empty list masks nothing. (The
+    # Boot 3 `show-values: ALWAYS` property is silently ignored on 2.7.)
     env:
-      show-values: ALWAYS  # VULN: env values visible
+      keys-to-sanitize:
     configprops:
-      show-values: ALWAYS
+      keys-to-sanitize:
     shutdown:
       enabled: true  # VULN: shutdown endpoint enabled
 

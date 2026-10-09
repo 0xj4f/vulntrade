@@ -14,9 +14,9 @@ VulnTrade's React frontend has client-side security issues common in SPAs: relyi
 | OWASP | A07: Identification and Authentication Failures |
 | CWE | CWE-922 |
 | Difficulty | Beginner |
-| File | `context/AuthContext.js:65` |
+| File | `context/AuthContext.js:66` |
 
-**Description:** The JWT token is stored in `localStorage` under the key `token`. Any XSS vulnerability (even on a third-party script) can read it: `localStorage.getItem('token')`. httpOnly cookies would be immune to this.
+**Description:** The JWT token is stored in `localStorage` under the key `token` (`localStorage.setItem('token', data.token)`). Any XSS vulnerability (even on a third-party script) can read it: `localStorage.getItem('token')`. httpOnly cookies would be immune to this.
 
 ---
 
@@ -26,22 +26,24 @@ VulnTrade's React frontend has client-side security issues common in SPAs: relyi
 | Severity | Medium |
 | OWASP | A02: Cryptographic Failures |
 | CWE | CWE-922 |
-| File | `context/AuthContext.js:66` |
+| File | `context/AuthContext.js:67` |
 
-**Description:** The entire user object (including PII from JWT claims) is stored in `localStorage` under the key `user`. This persists across browser sessions and is accessible to any script.
+**Description:** The entire user object (including PII from JWT claims) is stored in `localStorage` under the key `user` (`localStorage.setItem('user', JSON.stringify(data))`). This persists across browser sessions and is accessible to any script.
 
 ---
 
 ### FE-03: Client-Side Role Check (Admin Route)
 | Field | Value |
 |-------|-------|
-| Severity | High |
+| Severity | Medium |
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-602 |
 | Difficulty | Beginner |
-| File | `App.js` (admin route) |
+| File | `App.js:294` (admin route) |
 
-**Description:** The admin page route is only protected by `isAuthenticated ? <AdminPage /> : <Navigate to="/login" />`. The nav link is hidden with `isAdmin()` but any user can navigate directly to `/admin`.
+**Description:** The `/admin` page route is only protected by `isAuthenticated ? <AdminPage /> : <Navigate to="/login" />` (App.js:294). The nav link is hidden with `isAdmin()`/`isDeveloper()` (App.js:254) but any authenticated user can navigate directly to `/admin` and render the admin UI shell.
+
+**Scope note (corrected):** This is a *frontend-only* control. The admin **page** loads for any logged-in user, but the admin **API** it talks to is role-gated server-side: `GET /api/admin/**` returns **403** for a plain non-admin token. So rendering the page leaks the admin layout but not admin data. To actually read/modify admin data you must forge the `ADMIN` role in the JWT (alg:none or the weak secret) — that server-side bypass is **AUTHZ-12** (see [02-authorization.md](02-authorization.md)). Because the pure route-guard is only demonstrable in the browser, the exploit matrix marks it **SKIP (frontend-only)**.
 
 ---
 
@@ -52,9 +54,9 @@ VulnTrade's React frontend has client-side security issues common in SPAs: relyi
 | OWASP | A03: Injection |
 | CWE | CWE-79 |
 | Difficulty | Intermediate |
-| File | `DashboardPage.js:352,356` |
+| File | `DashboardPage.js:375,379,624` |
 
-**Description:** Symbol names in the market data table use `dangerouslySetInnerHTML` to render. If an attacker can inject a malicious symbol name (via admin SQL executor or direct DB access), it executes JavaScript in every user's browser.
+**Description:** Symbol and name values are rendered with `dangerouslySetInnerHTML` — in the market-data table (`DashboardPage.js:375,379`) and in the Price Alerts panel (`DashboardPage.js:624`). If an attacker can plant a malicious symbol string, it executes JavaScript in every user's browser. A stored-XSS source already exists: a price-alert symbol is persisted and reflected **unsanitised** over STOMP (`/app/trade.setAlert`, proven as **INJ-09** in [03-injection.md](03-injection.md)), so an alert symbol such as `<img src=x onerror=alert(1)>` reaches this sink. (The sink itself is browser-only, so the exploit matrix tracks it as **INJ-10 / SKIP (frontend-only)**.)
 
 ---
 
@@ -70,15 +72,22 @@ VulnTrade's React frontend has client-side security issues common in SPAs: relyi
 
 ---
 
-### FE-06: Client-Side Order Validation Only
+### FE-06: Client-Side Max-Order-Size Cap Only
 | Field | Value |
 |-------|-------|
-| Severity | Medium |
+| Severity | Low |
 | OWASP | A04: Insecure Design |
 | CWE | CWE-602 |
-| File | `DashboardPage.js` |
+| File | `DashboardPage.js:494,512` |
 
-**Description:** Order quantity and price validation happens only in React. Negative quantities, zero prices, and invalid symbols are accepted by the backend when bypassing the UI.
+**Description:** The order form caps quantity at 10000 purely in React — `<Input ... max="10000" min="1">` (DashboardPage.js:494) and a `qty <= 0 || qty > 10000` toast (DashboardPage.js:512). This 10000 ceiling is **not** enforced by the backend, so bypassing the UI lets you place far larger orders.
+
+**Scope note (corrected):** Core order validation is **no longer** client-side-only. The server now runs `RiskService.checkPreTrade` (`OrderService.placeOrder`) on every order — including MARKET orders (`executeMarketOrder` routes through the same path) — and rejects:
+- negative / zero quantity → `Invalid quantity: must be greater than 0` (see **BIZ-07**)
+- selling more than you hold → `Insufficient position...` (see **BIZ-09**)
+- unknown symbols → `Unknown symbol: ...` (see **BIZ-12**)
+
+Only the 10000 max-order-size cap remains browser-only. *(Historical: earlier builds accepted negative quantities, zero prices, and invalid symbols directly against the backend; those are now server-side controls — see [04-business-logic.md](04-business-logic.md).)*
 
 ---
 
@@ -106,15 +115,16 @@ VulnTrade's React frontend has client-side security issues common in SPAs: relyi
 
 ---
 
-### FE-09: Hidden User ID Input in DOM
+### FE-09: Hidden User ID Input in DOM (IDOR — backend honours it)
 | Field | Value |
 |-------|-------|
-| Severity | Medium |
-| OWASP | A04: Insecure Design |
-| CWE | CWE-472 |
-| File | `DashboardPage.js` (debug mode only) |
+| Severity | High |
+| OWASP | A01: Broken Access Control |
+| CWE | CWE-639 |
+| Difficulty | Intermediate |
+| File | `DashboardPage.js:418-420,535,543` |
 
-**Description:** In debug mode, a hidden `<input id="order-user-id">` contains the current user's ID. The order placement reads this via `document.getElementById('order-user-id').value` and sends it in the WebSocket message — allowing IDOR if the DOM value is changed.
+**Description:** The order form always renders a hidden `<input id="order-user-id">` seeded with the current user's ID (DashboardPage.js:418-420). On submit the page reads it with `document.getElementById('order-user-id')?.value` and sends it as `userId` in the STOMP order message (DashboardPage.js:535,543). The backend **honours that body field**: `/app/trade.placeOrder` sets `userId = request.getUserId()` when it is present (`TradeStompController.placeOrder`), so editing the hidden value in DevTools places orders **as another user** — a confirmed IDOR, not a theoretical one. (The REST `POST /api/orders` path still binds the order to the token's user; the IDOR is specific to the WebSocket order path.)
 
 ---
 

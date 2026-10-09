@@ -41,19 +41,19 @@ Inside the backend container, Log4j2 writes:
 
 Both rotate on time+size (current config: daily / 50 MB), producing gzipped files named `*-YYYY-MM-DD-N.log.gz`.
 
-Docker Compose already exposes these via the `vulntrade-logs` named volume:
+Docker Compose already exposes these via a host **bind mount** at `./logs/vulntrade`:
 
 ```yaml
 # docker-compose.yml (already present)
 services:
   backend:
     volumes:
-      - vulntrade-logs:/var/log/vulntrade
-volumes:
-  vulntrade-logs:
+      - ./logs/vulntrade:/var/log/vulntrade   # structured JSON logs (bind mount for SIEM/S3)
 ```
 
-On the EC2 host, Docker places this at `/var/lib/docker/volumes/<project>_vulntrade-logs/_data/`. We ship directly from that path.
+On the host, the rotated files land in the repo's `logs/vulntrade/` directory, and the shipping
+script reads directly from there (`LOG_SRC_DIR` defaults to it, falling back to auto-detecting a
+`*vulntrade-logs*` Docker named volume for older setups that used one).
 
 ---
 
@@ -74,8 +74,9 @@ Behavior:
 Environment it needs:
 - `S3_BUCKET` (required)
 - `AWS_REGION` (required; EC2 instance profile otherwise provides creds)
-- `LOG_SRC_DIR` (optional; defaults to the Docker volume path above)
-- `AWS` (optional; defaults to `/usr/local/bin/aws` — let your PATH resolve if using `apt install awscli`)
+- `LOG_SRC_DIR` (optional; defaults to the repo's `logs/vulntrade` bind mount, falling back to a `*vulntrade-logs*` Docker named volume)
+- `MIN_AGE_SECONDS` (optional; defaults to `60` — skip files younger than this to avoid racing rotation)
+- `AWS` (optional; defaults to `aws` resolved from `PATH`)
 
 IAM for the instance profile (minimal):
 
@@ -84,7 +85,7 @@ IAM for the instance profile (minimal):
   "Version": "2012-10-17",
   "Statement": [{
     "Effect": "Allow",
-    "Action": ["s3:PutObject", "s3:PutObjectAcl"],
+    "Action": ["s3:PutObject"],
     "Resource": "arn:aws:s3:::vulntrade-logs/*"
   }]
 }
@@ -94,11 +95,11 @@ IAM for the instance profile (minimal):
 
 ## 4. The systemd units
 
-`systemd/vulntrade-log-shipper.service` (see [`../systemd/vulntrade-log-shipper.service`](../systemd/vulntrade-log-shipper.service)) — oneshot that runs the script once.
+`wazuh/systemd/vulntrade-log-shipper.service` (see [`../wazuh/systemd/vulntrade-log-shipper.service`](../wazuh/systemd/vulntrade-log-shipper.service)) — oneshot that runs the script once; reads its config from `/etc/vulntrade/log-shipper.env` (template: `wazuh/systemd/log-shipper.env.example`).
 
-`systemd/vulntrade-log-shipper.timer` (see [`../systemd/vulntrade-log-shipper.timer`](../systemd/vulntrade-log-shipper.timer)) — fires every minute.
+`wazuh/systemd/vulntrade-log-shipper.timer` (see [`../wazuh/systemd/vulntrade-log-shipper.timer`](../wazuh/systemd/vulntrade-log-shipper.timer)) — fires 30s after boot, then every minute.
 
-Installed in your cloud-init (one-liner): copy the two unit files to `/etc/systemd/system/`, copy the script to `/usr/local/bin/`, `systemctl enable --now vulntrade-log-shipper.timer`.
+Install one-liner: copy the two unit files to `/etc/systemd/system/`, the script to `/usr/local/bin/ship-logs-to-s3.sh`, the env template to `/etc/vulntrade/log-shipper.env` (fill in `S3_BUCKET` / `AWS_REGION`), then `systemctl enable --now vulntrade-log-shipper.timer`.
 
 ---
 
@@ -127,11 +128,11 @@ Provision these yourself (for example with Terraform):
 - The S3 bucket (`vulntrade-logs`), with server-side encryption, lifecycle to Glacier/deep-archive, and object-lock if you want WORM.
 - The SQS queue + S3 event notification.
 - The EC2 instance profile with the IAM policy in §3.
-- Cloud-init: install `docker`, `docker compose plugin`, `awscli`, then `systemctl enable --now vulntrade-log-shipper.timer` after copying the three files from this repo.
+- Cloud-init: install `docker`, `docker compose plugin`, `awscli`, then `systemctl enable --now vulntrade-log-shipper.timer` after copying the shipper files from this repo.
 
 VulnTrade does not create those resources. It provides only:
 1. The app emitting the right log shape.
-2. The shipping script + systemd units under `scripts/` and `systemd/`, which your provisioning copies into `/usr/local/bin/` and `/etc/systemd/system/`.
+2. The shipping script under `scripts/` and the systemd units (+ env template) under `wazuh/systemd/`, which your provisioning copies into `/usr/local/bin/`, `/etc/systemd/system/` and `/etc/vulntrade/`.
 
 ---
 
@@ -147,8 +148,8 @@ docker compose exec backend bash -c 'for i in $(seq 1 1000); do \
          -d "{\"username\":\"u$i\",\"password\":\"x\"}" > /dev/null; \
   done'
 
-# 2. Wait for Log4j2 to gzip-roll at 50MB or force via size trigger
-ls /var/lib/docker/volumes/*_vulntrade-logs/_data/ | grep gz
+# 2. Wait for Log4j2 to gzip-roll (daily, or at 50MB) and list the rotated files
+ls logs/vulntrade/ | grep gz
 
 # 3. Trigger the shipper manually
 sudo systemctl start vulntrade-log-shipper.service

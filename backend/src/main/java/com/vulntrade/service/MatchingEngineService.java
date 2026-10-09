@@ -61,6 +61,14 @@ public class MatchingEngineService {
         this.liquidityProvider = liquidityProvider;
     }
 
+    /** Null-safe price comparison for sorting: nulls sort last. */
+    private static int comparePrice(BigDecimal a, BigDecimal b) {
+        if (a == null && b == null) return 0;
+        if (a == null) return 1;
+        if (b == null) return -1;
+        return a.compareTo(b);
+    }
+
     /**
      * Try to match an incoming order against the order book.
      * VULN: Self-matching allowed (wash trading).
@@ -70,21 +78,21 @@ public class MatchingEngineService {
     public void tryMatch(Order incomingOrder) {
         String opposingSide = "BUY".equals(incomingOrder.getSide()) ? "SELL" : "BUY";
 
-        // Find opposing orders
-        List<Order> opposingOrders = orderRepository.findBySymbolAndSideAndStatus(
-                incomingOrder.getSymbol(), opposingSide, "NEW");
+        // Find opposing orders — include PARTIAL so partially-filled resting orders stay matchable.
+        List<Order> opposingOrders = orderRepository.findBySymbolAndSideAndStatusIn(
+                incomingOrder.getSymbol(), opposingSide, List.of("NEW", "PARTIAL"));
 
-        // Sort by price-time priority
+        // Sort by price-time priority (null-safe: a missing price sorts last)
         if ("BUY".equals(incomingOrder.getSide())) {
             // For buy orders, match against lowest sell prices first
             opposingOrders.sort((a, b) -> {
-                int priceCompare = a.getPrice().compareTo(b.getPrice());
+                int priceCompare = comparePrice(a.getPrice(), b.getPrice());
                 return priceCompare != 0 ? priceCompare : a.getCreatedAt().compareTo(b.getCreatedAt());
             });
         } else {
             // For sell orders, match against highest buy prices first
             opposingOrders.sort((a, b) -> {
-                int priceCompare = b.getPrice().compareTo(a.getPrice());
+                int priceCompare = comparePrice(b.getPrice(), a.getPrice());
                 return priceCompare != 0 ? priceCompare : a.getCreatedAt().compareTo(b.getCreatedAt());
             });
         }
@@ -95,9 +103,11 @@ public class MatchingEngineService {
         for (Order opposing : opposingOrders) {
             if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) break;
 
-            // Check price match
+            // Check price match (null-safe: a missing price can't be compared, so it can't match)
             boolean priceMatch;
-            if ("BUY".equals(incomingOrder.getSide())) {
+            if (incomingOrder.getPrice() == null || opposing.getPrice() == null) {
+                priceMatch = false;
+            } else if ("BUY".equals(incomingOrder.getSide())) {
                 priceMatch = incomingOrder.getPrice().compareTo(opposing.getPrice()) >= 0;
             } else {
                 priceMatch = incomingOrder.getPrice().compareTo(opposing.getPrice()) <= 0;
@@ -318,7 +328,8 @@ public class MatchingEngineService {
      * VULN: Shows all pending orders (front-running possible).
      */
     public void broadcastOrderBook(String symbol) {
-        List<Order> orders = orderRepository.findBySymbolAndStatus(symbol, "NEW");
+        // Include PARTIAL so partially-filled resting orders still show in the book.
+        List<Order> orders = orderRepository.findBySymbolAndStatusIn(symbol, List.of("NEW", "PARTIAL"));
 
         List<OrderBookEntry> entries = orders.stream().map(o -> {
             OrderBookEntry entry = new OrderBookEntry();

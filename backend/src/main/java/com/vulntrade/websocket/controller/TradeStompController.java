@@ -72,6 +72,13 @@ public class TradeStompController {
             return;
         }
 
+        // VULN (IDOR): if the body carries a userId, place the order as that user.
+        // The order form has a hidden userId input; tampering with it in the DOM
+        // lets a client trade on someone else's account.
+        if (request.getUserId() != null) {
+            userId = request.getUserId();
+        }
+
         try {
             logger.info("TRADE_ORDER: userId={}, symbol={}, side={}, type={}, qty={}, price={}", userId, request.getSymbol(), request.getSide(), request.getType(), request.getQuantity(), request.getPrice());
             Order order = orderService.placeOrder(userId, request);
