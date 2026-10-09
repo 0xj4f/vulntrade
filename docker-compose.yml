@@ -6,11 +6,11 @@ services:
     image: postgres:13
     container_name: vulntrade-db
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-vulntrade}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_PORT}:5432"   # VULN: exposed to host
+      - "${POSTGRES_PORT:-5432}:5432"   # VULN: exposed to host
     volumes:
       - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
       - ./database/seed_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
@@ -19,7 +19,7 @@ services:
     networks:
       - vulntrade-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vulntrade}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -31,7 +31,7 @@ services:
     image: redis:7-alpine
     container_name: vulntrade-redis
     ports:
-      - "${REDIS_PORT}:6379"   # VULN: exposed to host
+      - "${REDIS_PORT:-6379}:6379"   # VULN: exposed to host (host port only)
     command: redis-server --save 60 1   # No --requirepass (intentional)
     networks:
       - vulntrade-net
@@ -70,19 +70,21 @@ services:
       - "5005:5005"    # VULN: debug port exposed
       - "9090:9090"    # VULN: JMX port exposed
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      SPRING_REDIS_HOST: ${REDIS_HOST}
-      SPRING_REDIS_PORT: ${REDIS_PORT}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRATION: ${JWT_EXPIRATION}
-      ADMIN_API_KEY: ${ADMIN_API_KEY}
-      FLAG_1: ${FLAG_1}
-      FLAG_7: ${FLAG_7}
-      FLAG_8: ${FLAG_8}
-      FLAG_10: ${FLAG_10}
+      # Inline defaults (match .env.example) so a fresh clone boots without a .env.
+      # Weak secrets are intentional (educational lab) and stay as the defaults.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-vulntrade}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      SPRING_REDIS_HOST: ${REDIS_HOST:-redis}
+      SPRING_REDIS_PORT: 6379   # fixed in-container port (REDIS_PORT only remaps the host side)
+      JWT_SECRET: ${JWT_SECRET:-vulntrade-secret}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-vt-api-key-12345-not-so-secret}
+      FLAG_1: ${FLAG_1:-FLAG{4ctu4t0r_3xp0s3d_s3cr3ts}}
+      FLAG_7: ${FLAG_7:-FLAG{st0mp_4dm1n_ch4nn3l_l34k}}
+      FLAG_8: ${FLAG_8:-FLAG{h34pdump_m3m0ry_s3cr3ts}}
+      FLAG_10: ${FLAG_10:-FLAG{jwt_f0rg3d_4dm1n_m4st3r}}
     depends_on:
       postgres:
         condition: service_healthy
@@ -124,12 +126,13 @@ services:
       - ./log-shipper/parsers.conf:/fluent-bit/etc/parsers.conf:ro
       - fluent-bit-buffer:/var/log/fluent-bit
     environment:
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
-      AWS_REGION: ${AWS_REGION}
-      AWS_DEFAULT_REGION: ${AWS_REGION}
-      S3_BUCKET: ${S3_BUCKET}
+      # Blank defaults: without real creds the shipper starts but fails auth cleanly.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-eu-west-1}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-eu-west-1}
+      S3_BUCKET: ${S3_BUCKET:-wazuh-application-logs}
     depends_on:
       - backend
     networks:

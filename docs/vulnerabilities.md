@@ -29,7 +29,7 @@
 | 5 | JWT in response with role | POST /api/auth/login | CWE-522 | ✅ Working |
 | 6 | Redis no authentication | redis://localhost:6379 | CWE-306 | ✅ Working |
 | 7 | PostgreSQL default creds | postgres://localhost:5432 | CWE-798 | ✅ Working |
-| 8 | Secrets in .env file | .env | CWE-312 | ✅ Working |
+| 8 | Secrets in .env file (served by frontend nginx :3001, not the backend) | .env (frontend) | CWE-312 | ✅ Working |
 | 9 | CORS wildcard (*) | All endpoints | CWE-942 | ✅ Working |
 | 10 | CSRF disabled | All POST endpoints | CWE-352 | ✅ Working |
 | 11 | WebSocket no origin check | /ws, /ws-sockjs | CWE-346 | ✅ Working |
@@ -39,7 +39,7 @@
 ## Verified Vulnerabilities (Phase 2)
 | # | Vulnerability | Endpoint | CWE | Status |
 |---|--------------|----------|-----|--------|
-| 14 | SQL injection (login-legacy) | POST /api/auth/login-legacy | CWE-89 | ✅ Working |
+| 14 | SQL injection (login-legacy) — blind + error-based, **not** an auth bypass | POST /api/auth/login-legacy | CWE-89 | ✅ Working (bcrypt re-check on the returned row defeats `' OR '1'='1`; the oracle + error leak are the real exploit — see "Reclassified & Debunked Claims") |
 | 15 | API key in URL parameter | ?api_key= on any endpoint | CWE-598 | ✅ Working |
 | 16 | API key in plaintext (DB + response) | POST /api/auth/login, /register | CWE-312 | ✅ Working |
 | 17 | IDOR - user profile | GET /api/users/{id} | CWE-639 | ✅ Working (Flag 2) |
@@ -58,44 +58,49 @@
 | 30 | Predictable WebSocket session ID | /ws handshake | CWE-330 | ✅ Working |
 | 31 | Anonymous WebSocket connections | /ws, /ws-sockjs | CWE-306 | ✅ Working |
 
-## Planned Vulnerabilities (Phase 3) — Needs Testing After Build
+## Verified Vulnerabilities (Phase 3) — WebSocket / Trading
+
+> **✅ Working** = proven exploitable · **🛡️ Control present** = historical vuln, now rejected
+> server-side (kept for teaching, no longer exploitable) · **❌ Not exploitable** = claim
+> debunked · **🔄 Coded** = present in source but not exercised by the matrix.
+
 | # | Vulnerability | Endpoint | CWE | Status |
 |---|--------------|----------|-----|--------|
-| 32 | No message size limit (10MB) | /ws, /ws-sockjs | CWE-400 | 🔄 Coded |
-| 33 | No connection rate limiting | /ws, /ws-sockjs | CWE-799 | 🔄 Coded |
-| 34 | /topic/admin/* subscribable by any user | /topic/admin/alerts | CWE-862 | 🔄 Coded (Flag 7) |
-| 35 | Missing authorization on /app/admin.* | /app/admin.adjustBalance etc | CWE-862 | 🔄 Coded |
-| 36 | Price feed includes internal fields | /topic/prices | CWE-200 | 🔄 Coded |
-| 37 | Fixed random seed (predictable prices) | PriceSimulatorService | CWE-330 | 🔄 Coded |
-| 38 | VULN symbol predictable pattern | PriceSimulatorService | CWE-330 | 🔄 Coded |
-| 39 | Negative quantity accepted | /app/trade.placeOrder | CWE-20 | 🔄 Coded |
-| 40 | No price band validation | /app/trade.placeOrder | CWE-20 | 🔄 Coded |
-| 41 | clientOrderId replay | /app/trade.placeOrder | CWE-294 | 🔄 Coded |
-| 42 | Non-existent symbol accepted | /app/trade.placeOrder | CWE-20 | 🔄 Coded |
-| 43 | Balance check race condition (TOCTOU) | RiskService | CWE-367 | 🔄 Coded |
-| 44 | IDOR - cancel any order | /app/trade.cancelOrder | CWE-639 | 🔄 Coded |
-| 45 | No slippage protection | /app/trade.executeMarket | CWE-20 | 🔄 Coded |
-| 46 | Market order during halt | /app/trade.executeMarket | CWE-862 | 🔄 Coded |
-| 47 | IDOR - view any portfolio | /app/trade.getPortfolio | CWE-639 | 🔄 Coded |
-| 48 | Internal account flags in balance | /app/trade.getBalance | CWE-200 | 🔄 Coded |
-| 49 | No 2FA on withdraw (backend) | /app/trade.withdraw | CWE-306 | 🔄 Coded |
-| 50 | Sign flip vulnerability (negative withdraw) | /app/trade.withdraw | CWE-20 | 🔄 Coded |
-| 51 | Race condition double-withdraw | /app/trade.withdraw | CWE-367 | 🔄 Coded |
-| 52 | No deposit source verification | /app/trade.deposit | CWE-345 | 🔄 Coded |
-| 53 | SQL injection in trade history | /app/trade.getHistory | CWE-89 | 🔄 Coded |
-| 54 | Stored XSS via alert symbol | /app/trade.setAlert | CWE-79 | 🔄 Coded |
-| 55 | No alert limit (resource exhaustion) | /app/trade.setAlert | CWE-400 | 🔄 Coded |
-| 56 | JWT role from token body (admin) | /app/admin.adjustBalance | CWE-862 | 🔄 Coded |
-| 57 | Log injection via reason field | /app/admin.adjustBalance | CWE-117 | 🔄 Coded |
-| 58 | Arbitrary price manipulation | /app/admin.setPrice | CWE-20 | 🔄 Coded |
-| 59 | No audit trail for price changes | /app/admin.setPrice | CWE-778 | 🔄 Coded |
-| 60 | Order book info disclosure (userId) | /topic/orderbook | CWE-200 | 🔄 Coded |
-| 61 | Trade broadcast info disclosure | /topic/trades | CWE-200 | 🔄 Coded |
-| 62 | Self-matching (wash trading) | MatchingEngineService | CWE-840 | 🔄 Coded |
-| 63 | Position can go negative (naked short) | MatchingEngineService | CWE-20 | 🔄 Coded |
-| 64 | Floating point P&L errors | MatchingEngineService | CWE-681 | 🔄 Coded |
-| 65 | Risk check skipped for MARKET | RiskService | CWE-862 | 🔄 Coded |
-| 66 | System metrics in admin alerts | AdminService | CWE-200 | 🔄 Coded |
+| 32 | Unbounded WS message size (10MB) | /ws, /ws-sockjs | CWE-400 | ❌ Not exploitable — effective ~16–32KB limit; `setMessageSizeLimit(10MB)` is a no-op (servlet buffer wins), a ~1MB frame drops the connection |
+| 33 | No message rate limiting | /ws, /ws-sockjs | CWE-799 | ✅ Working (50/50 messages serviced, 0 errors) |
+| 34 | /topic/admin/* subscribable by any user | /topic/admin/alerts | CWE-862 | ✅ Working (Flag 7 leaked in the halt alert) |
+| 35 | Missing authorization on /app/admin.* | /app/admin.setPrice, .adjustBalance, .haltTrading | CWE-862 | ✅ Working (non-admin commands accepted) |
+| 36 | Price feed includes internal fields | /topic/prices | CWE-200 | ✅ Working (marketMakerId/costBasis/spreadBps) |
+| 37 | Fixed random seed (predictable prices) | PriceSimulatorService | CWE-330 | ✅ Working |
+| 38 | VULN symbol predictable pattern | PriceSimulatorService | CWE-330 | ✅ Working (deterministic sine band ~60–140) |
+| 39 | Negative quantity accepted | /app/trade.placeOrder | CWE-20 | 🛡️ Control present — rejected server-side (`RiskService` qty>0). *Was exploitable pre-hardening* |
+| 40 | No price band validation | /app/trade.placeOrder | CWE-20 | ✅ Working (0.01 and 999999 both accepted) |
+| 41 | clientOrderId replay | /app/trade.placeOrder | CWE-294 | ✅ Working (duplicate id accepted twice) |
+| 42 | Non-existent symbol accepted | /app/trade.placeOrder | CWE-20 | 🛡️ Control present — rejected (`RiskService` symbol check). *Was exploitable pre-hardening* |
+| 43 | Balance check race condition (TOCTOU) | RiskService | CWE-367 | ✅ Working (concurrent withdrawals double-spend) |
+| 44 | IDOR - cancel any order | POST /api/orders/{id}/cancel, /app/trade.cancelOrder | CWE-639 | ✅ Working (no ownership check in `OrderService`) |
+| 45 | No slippage protection | /app/trade.executeMarket | CWE-20 | ✅ Working |
+| 46 | Market order during halt | /app/trade.executeMarket | CWE-862 | 🛡️ Control present — halt now applies to ALL order types (`OrderService`). *Was exploitable pre-hardening* |
+| 47 | IDOR - view any portfolio | GET /api/users/{id}/portfolio | CWE-639 | ✅ Working |
+| 48 | Sensitive fields in balance (apiKey/role/notes) | /app/trade.getBalance, /api/accounts/balance | CWE-200 | ✅ Working |
+| 49 | No 2FA on withdraw (backend) | /api/accounts/withdraw, /app/trade.withdraw | CWE-306 | ✅ Working (backend never checks 2FA) |
+| 50 | Sign flip (negative withdraw = deposit) | /api/accounts/withdraw | CWE-20 | ✅ Working |
+| 51 | Race condition double-withdraw | /api/accounts/withdraw | CWE-367 | ✅ Working |
+| 52 | No deposit source verification | /api/accounts/deposit | CWE-345 | ✅ Working |
+| 53 | SQL injection in trade history | /app/trade.getHistory | CWE-89 | ✅ Working (startDate/endDate/symbol) |
+| 54 | Stored XSS via alert symbol | /app/trade.setAlert | CWE-79 | ✅ Working |
+| 55 | No alert limit (resource exhaustion) | /app/trade.setAlert | CWE-400 | 🔄 Coded (not in matrix) |
+| 56 | JWT role from token body (admin) | /api/admin/**, /app/admin.* | CWE-862 | ✅ Working (alg:none / weak-secret forge) |
+| 57 | Log injection via reason field | POST /api/admin/adjust-balance | CWE-117 | ✅ Working |
+| 58 | Arbitrary price manipulation | /app/admin.setPrice | CWE-20 | ✅ Working |
+| 59 | No audit trail for price changes | /app/admin.setPrice | CWE-778 | 🔄 Coded (not in matrix) |
+| 60 | Order book info disclosure (userId) | /topic/orderbook | CWE-200 | 🔄 Coded (not in matrix) |
+| 61 | Trade broadcast info disclosure (userId) | /topic/trades | CWE-200 | 🔄 Coded (not in matrix) |
+| 62 | Self-matching (wash trading) | MatchingEngineService | CWE-840 | ✅ Working (no self-trade guard) |
+| 63 | Position can go negative (naked short) | MatchingEngineService, RiskService | CWE-20 | 🛡️ Control present — short rejected (`RiskService` position check) and fills clamp at 0 (`MatchingEngineService`). *Was exploitable pre-hardening* |
+| 64 | Floating point P&L errors | MatchingEngineService | CWE-681 | 🔄 Coded (BigDecimal in use; not in matrix) |
+| 65 | Risk check skipped for MARKET | RiskService | CWE-862 | ❌ Not exploitable — MARKET orders are now risk-checked (balance/position/symbol/qty). *Was exploitable pre-hardening* |
+| 66 | System metrics in admin alerts | AdminService | CWE-200 | 🔄 Coded (not in matrix) |
 
 ## Planned Vulnerabilities (Phase 6) — Frontend
 | # | Vulnerability | Location | CWE | Status |
@@ -103,7 +108,7 @@
 | 67 | dangerouslySetInnerHTML for symbol (XSS) | DashboardPage.js | CWE-79 | ✅ Coded |
 | 68 | dangerouslySetInnerHTML for name (XSS) | DashboardPage.js | CWE-79 | ✅ Coded |
 | 69 | Internal price fields displayed | DashboardPage.js | CWE-200 | ✅ Coded |
-| 70 | Client-side only order validation | DashboardPage.js | CWE-602 | ✅ Coded |
+| 70 | Client-side max-order-size cap (10000) only | DashboardPage.js | CWE-602 | ⚠️ Frontend-only — only the `max=10000` size cap is client-side; qty>0, price>0 and symbol existence ARE enforced server-side (`RiskService`) |
 | 71 | Hidden userId field (tamperable) | DashboardPage.js | CWE-472 | ✅ Coded |
 | 72 | Order IDs in order book (IDOR cancel) | DashboardPage.js | CWE-639 | ✅ Coded |
 | 73 | Admin alerts visible to any user | DashboardPage.js | CWE-862 | ✅ Coded |
@@ -114,7 +119,7 @@
 | 78 | Withdraw sign flip (negative amount) | AccountPage.js | CWE-20 | ✅ Coded |
 | 79 | Deposit no source verification | AccountPage.js | CWE-345 | ✅ Coded |
 | 80 | JS-only amount validation | AccountPage.js | CWE-602 | ✅ Coded |
-| 81 | Admin route no server protection | AdminPage.js / App.js | CWE-862 | ✅ Coded |
+| 81 | Client-side /admin route guard only | AdminPage.js / App.js | CWE-602 | ⚠️ Frontend-only — the React `/admin` guard is client-side, but backend `/api/admin/**` IS role-gated (`SecurityConfig`); server-side admin access needs a forged ADMIN role (see #56) |
 | 82 | Trading halt via WS (any user) | AdminPage.js | CWE-862 | ✅ Coded |
 | 83 | Price override (market manipulation) | AdminPage.js | CWE-20 | ✅ Coded |
 | 84 | Log injection via reason field | AdminPage.js | CWE-117 | ✅ Coded |
@@ -125,3 +130,40 @@
 | 89 | Directory listing enabled | nginx.conf | CWE-548 | ✅ Coded |
 | 90 | SQLi via history WS endpoint | HistoryPage.js | CWE-89 | ✅ Coded |
 | 91 | CSV injection via export | HistoryPage.js | CWE-1236 | ✅ Coded |
+
+## Reclassified & Debunked Claims
+
+From the clean-DB verification run (exploit matrix: **68 PASS / 0 FAIL / 8 SKIP** of 76; the
+8 SKIPs are frontend-only or backend-out-of-scope checks, not failures). These correct earlier framing:
+
+- **Legacy-login SQLi is blind + error-based, not an auth bypass.** `/api/auth/login-legacy`
+  concatenates the username into `SELECT * FROM users WHERE username = '<here>'`
+  (`AuthController.java:143`), but the app bcrypt-re-checks the password on the returned row, so
+  `' OR '1'='1` does **not** log you in. The injectable surface is real: a boolean oracle
+  (`x' AND '1'='1` → *Invalid password* [row matched] vs `x' AND '1'='2` → *User not found*
+  [no row]) and error-based leakage (a stray quote → HTTP 500 with an
+  `org.hibernate … SQLGrammarException` in the body). Difficulty: Intermediate.
+- **HTTP method-override does NOT bypass authorization (debunked).** Spring's
+  `HiddenHttpMethodFilter` only honours the `_method` *form* param on POST and never changes
+  authorization; the `X-HTTP-Method-Override` header does nothing. A non-admin
+  `POST /api/admin/users` + override still returns 403. Not a vulnerability.
+- **WS message size is effectively limited (config no-op).**
+  `WebSocketConfig.setMessageSizeLimit(10 * 1024 * 1024)` (`WebSocketConfig.java:56`) is
+  overridden by the servlet WebSocket text buffer (~16–32KB), so a ~1MB frame drops the
+  connection. "Unbounded message size" is false — it is a backend misconfiguration, not an
+  exploitable DoS.
+- **Admin page protection is a frontend-only route guard.** The `/admin` React route is hidden
+  client-side, but `/api/admin/**` is role-gated server-side (`SecurityConfig.java:64`): a plain
+  non-admin token gets 403. Reaching the admin API requires forging the ADMIN role (#56).
+- **`.env` exposure is a frontend/nginx static-file issue, not backend.** The SPA's nginx serves
+  `/.env` (`frontend/nginx.conf:66`, with `autoindex on`), reachable at the frontend origin
+  (:3001), not from the Spring backend.
+- **Order-flow hardening (now foundational controls).** `RiskService.checkPreTrade`
+  (`RiskService.java:47`) runs for **all** order types and rejects: qty ≤ 0, price ≤ 0 (LIMIT),
+  unknown/untradable symbols, insufficient balance (BUY) and insufficient position (SELL). The
+  halt check in `OrderService.placeOrder` applies to all order types, and
+  `MatchingEngineService` clamps positions at 0 (no naked shorts). Items #39, #42, #46, #63 and
+  #65 above moved from "vulnerability" to "control present / not exploitable" as a result.
+  The still-real trading-logic vulns are: sign-flip withdrawal (#50), TOCTOU double-spend
+  (#43/#51), deposit without source verification (#52), wash trading (#62), no price band (#40),
+  clientOrderId replay (#41) and no slippage protection (#45).

@@ -15,9 +15,9 @@ VulnTrade's authentication system has vulnerabilities at every layer: login, JWT
 | CWE | CWE-204 |
 | Difficulty | Beginner |
 | Endpoint | `POST /api/auth/login` |
-| File | `AuthController.java:62,69` |
+| File | `AuthController.java:72,83` |
 
-**Description:** The login endpoint returns different error messages for "user not found" vs "wrong password", allowing attackers to enumerate valid usernames.
+**Description:** The login endpoint returns different error messages for "user not found" (line 72) vs "wrong password" (line 83), allowing attackers to enumerate valid usernames.
 
 **How to exploit:**
 ```bash
@@ -38,26 +38,47 @@ curl -X POST http://localhost:8085/api/auth/login \
 
 ---
 
-### AUTH-02: SQL Injection in Legacy Login
+### AUTH-02: SQL Injection in Legacy Login (Blind / Error-Based)
 | Field | Value |
 |-------|-------|
 | Severity | Critical |
 | OWASP | A03: Injection |
 | CWE | CWE-89 |
-| Difficulty | Beginner |
+| Difficulty | Intermediate |
 | Endpoint | `POST /api/auth/login-legacy` |
-| File | `AuthController.java:119` |
+| File | `AuthController.java:143` |
 
-**Description:** The legacy login endpoint concatenates the username directly into a SQL query without parameterization.
+**Description:** The legacy login endpoint concatenates the username directly into a SQL query without parameterization — `"SELECT * FROM users WHERE username = '" + username + "'"` (line 143), executed via `createNativeQuery` (line 144). The endpoint is genuinely SQL-injectable, **but the classic `' OR '1'='1` authentication bypass does _not_ work**: the app still bcrypt-verifies the supplied password against whatever row the query returns (line 155), so a matched row with the wrong password is still rejected. Injection is exploited through side channels instead:
 
-**How to exploit:**
+- **Boolean-blind oracle** — "row found" vs "no row" leaks through two different 401 messages, giving a controllable TRUE/FALSE oracle for extracting data character by character.
+- **Error-based** — an unbalanced quote breaks the SQL grammar and returns HTTP 500 leaking `org.hibernate ... SQLGrammarException`.
+
+**How to exploit (boolean-blind oracle):**
 ```bash
+# TRUE  predicate: username = trader1' AND '1'='1  -> row matches -> bcrypt fails -> "Invalid password"
+# FALSE predicate: username = trader1' AND '1'='2  -> no row                     -> "User not found"
 curl -X POST http://localhost:8085/api/auth/login-legacy \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin'\'' OR 1=1 --","password":"anything"}'
+  --data-raw '{"username":"trader1'\'' AND '\''1'\''='\''1","password":"x"}'
+# => {"error":"Invalid password"}
+
+curl -X POST http://localhost:8085/api/auth/login-legacy \
+  -H "Content-Type: application/json" \
+  --data-raw '{"username":"trader1'\'' AND '\''1'\''='\''2","password":"x"}'
+# => {"error":"User not found"}
 ```
 
-**What you learn:** Always use parameterized queries. Legacy endpoints are a common real-world attack surface during migrations.
+**How to exploit (error-based):**
+```bash
+# A stray quote breaks SQL grammar -> HTTP 500 leaking the Hibernate SQLGrammarException
+curl -X POST http://localhost:8085/api/auth/login-legacy \
+  -H "Content-Type: application/json" \
+  --data-raw '{"username":"trader1'\''","password":"x"}'
+```
+
+See [INJ-01](03-injection.md) for the same injection point treated as a data-extraction primitive.
+
+**What you learn:** Always use parameterized queries. A defence-in-depth password re-check stopped the auth bypass here, but the query is still injectable and leaks data through blind and error-based side channels. Legacy endpoints are a common real-world attack surface during migrations.
 
 ---
 
@@ -69,7 +90,7 @@ curl -X POST http://localhost:8085/api/auth/login-legacy \
 | CWE | CWE-598 |
 | Difficulty | Beginner |
 | Endpoint | `GET /api/auth/login?username=X&password=Y` |
-| File | `AuthController.java:107` |
+| File | `AuthController.java:123,130` |
 
 **Description:** A GET-based login endpoint accepts credentials as URL query parameters, exposing them in server logs, browser history, and referrer headers.
 
@@ -82,9 +103,9 @@ curl -X POST http://localhost:8085/api/auth/login-legacy \
 | OWASP | A02: Cryptographic Failures |
 | CWE | CWE-326 |
 | Difficulty | Intermediate |
-| File | `application.yml:83` |
+| File | `application.yml:88`, `JwtTokenProvider.java:45,88` |
 
-**Description:** The JWT signing secret is `vulntrade-secret` (hardcoded). Anyone who knows this can forge valid tokens for any user with any role.
+**Description:** The JWT signing secret defaults to `vulntrade-secret` (`application.yml:88`). Tokens are signed with the raw UTF-8 bytes of this string (`JwtTokenProvider.java:45,88`), so anyone who knows (or cracks) it can mint valid HS256 tokens for any user with any role.
 
 **How to exploit:**
 1. Visit jwt.io
@@ -102,9 +123,9 @@ curl -X POST http://localhost:8085/api/auth/login-legacy \
 | OWASP | A02: Cryptographic Failures |
 | CWE | CWE-347 |
 | Difficulty | Advanced |
-| File | `JwtTokenProvider.java:124` |
+| File | `JwtTokenProvider.java:142` |
 
-**Description:** The JWT validation falls back to manual Base64 decoding for unsupported algorithms. A token with `alg:none` and no signature is accepted.
+**Description:** When signature validation fails, the JWT parser falls back to manual Base64 decoding of the payload (`JwtTokenProvider.java:142-154`). A token with `alg:none` and no signature is therefore accepted as a valid session.
 
 ---
 
@@ -128,9 +149,9 @@ curl -X POST http://localhost:8085/api/auth/login-legacy \
 | OWASP | A01: Broken Access Control |
 | CWE | CWE-807 |
 | Difficulty | Intermediate |
-| File | `JwtTokenProvider.java:35,57` |
+| File | `JwtTokenProvider.java:38,60,97` |
 
-**Description:** The `accountLevel` claim in the JWT controls access to deposits/withdrawals. The server trusts this claim without verifying against the database. Forging `accountLevel:2` bypasses KYC verification.
+**Description:** The `accountLevel` claim is written into the JWT at token creation (`JwtTokenProvider.java:38,60`) and read straight back out to gate deposits/withdrawals (`JwtTokenProvider.java:97`) without ever verifying against the database. Forging `accountLevel:2` bypasses KYC verification. See [AUTHZ-11](02-authorization.md) for the deposit/withdraw gate that trusts this claim.
 
 ---
 
@@ -156,9 +177,9 @@ curl -X POST http://localhost:8085/api/auth/login-legacy \
 | CWE | CWE-330 |
 | Difficulty | Intermediate |
 | Endpoint | `POST /api/auth/reset` |
-| File | `PasswordResetToken.java:32` |
+| File | `AuthController.java:257,265` |
 
-**Description:** Reset tokens are timestamp-based and predictable. The token is also leaked in the API response (`debug_token` field). Tokens never expire and are reusable.
+**Description:** Reset tokens are `String.valueOf(System.currentTimeMillis())` — timestamp-based and predictable (`AuthController.java:257`). The token is also leaked in the API response via the `debug_token` / `reset_url` fields (`AuthController.java:265-266`). Tokens never expire and are reusable.
 
 ---
 
@@ -204,9 +225,9 @@ curl -X POST http://localhost:8085/api/auth/register \
 | CWE | CWE-200 |
 | Difficulty | Beginner |
 | Endpoint | `POST /api/auth/login` |
-| File | `AuthController.java:88` |
+| File | `AuthController.java:107` |
 
-**Description:** The login response includes the user's API key in plaintext. Check the response body in DevTools Network tab.
+**Description:** The login response includes the user's API key in plaintext (`AuthController.java:107`). Check the response body in DevTools Network tab.
 
 ---
 
@@ -230,6 +251,6 @@ curl -X POST http://localhost:8085/api/auth/register \
 | OWASP | A07: Identification and Authentication Failures |
 | CWE | CWE-613 |
 | Difficulty | Advanced |
-| File | `JwtTokenProvider.java:121` |
+| File | `JwtTokenProvider.java:137` |
 
-**Description:** The token validation catches `ExpiredJwtException` but still returns the claims, effectively bypassing the expiration check.
+**Description:** The token validation catches `ExpiredJwtException` (`JwtTokenProvider.java:137`) but still returns the claims (line 138), effectively bypassing the expiration check — an expired but correctly-signed token is still accepted.
