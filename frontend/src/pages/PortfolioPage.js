@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
-import { subscribe, isConnected } from '../services/websocketService';
+import { subscribe, unsubscribe, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 import PageLayout from '../components/PageLayout';
@@ -89,9 +89,12 @@ function PortfolioPage() {
 
   // Live price updates via WebSocket — only writes to ref, dirty flag throttles React updates
   useEffect(() => {
+    let sub = null;
     const setupPriceSub = () => {
       if (!isConnected()) return false;
-      subscribe('/topic/prices', (update) => {
+      sub = subscribe('/topic/prices', (update) => {
+        // Ignore trading-halt notices broadcast on this topic (no price fields).
+        if (update.type === 'TRADING_HALT') return;
         if (update.symbol && update.last) {
           pricesRef.current[update.symbol] = Number(update.last);
           pricesDirtyRef.current = true;
@@ -99,10 +102,11 @@ function PortfolioPage() {
       });
       return true;
     };
+    let iv;
     if (!setupPriceSub()) {
-      const iv = setInterval(() => { if (setupPriceSub()) clearInterval(iv); }, 500);
-      return () => clearInterval(iv);
+      iv = setInterval(() => { if (setupPriceSub()) clearInterval(iv); }, 500);
     }
+    return () => { if (iv) clearInterval(iv); if (sub) unsubscribe(sub); };
   }, []);
 
   // Flush price ref to state at most every 100 ms

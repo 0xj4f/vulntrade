@@ -24,38 +24,39 @@ function decodeJWT(token) {
   }
 }
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-  const userIdRef = useRef(null); // stable ref so refreshUser doesn't close over user
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // VULN: Restore auth from localStorage on page load
+/**
+ * Read + merge the persisted session from localStorage.
+ * VULN: Token/user restored from localStorage (accessible via XSS).
+ * Returns { token, user } with nulls when nothing valid is stored.
+ */
+function loadStoredAuth() {
+  try {
     const storedToken = localStorage.getItem('token');
     const storedUser = localStorage.getItem('user');
-    if (storedToken && storedUser) {
-      try {
-        const userData = JSON.parse(storedUser);
-        // Merge JWT claims into user state (VULN: PII from JWT in React state)
-        const jwtClaims = decodeJWT(storedToken);
-        const merged = { ...userData, ...jwtClaims };
-        // Restore photoUrl from profilePic if the explicit photoUrl wasn't persisted
-        if (!merged.photoUrl && merged.profilePic) {
-          merged.photoUrl = merged.profilePic;
-        }
-        setToken(storedToken);
-        setUser(merged);
-        setIsAuthenticated(true);
-      } catch (e) {
-        // Invalid stored data
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-      }
-    }
-    setLoading(false);
-  }, []);
+    if (!storedToken || !storedUser) return { token: null, user: null };
+    const userData = JSON.parse(storedUser);
+    // Merge JWT claims into user state (VULN: PII from JWT in React state)
+    const jwtClaims = decodeJWT(storedToken);
+    const merged = { ...userData, ...jwtClaims };
+    // Restore photoUrl from profilePic if the explicit photoUrl wasn't persisted
+    if (!merged.photoUrl && merged.profilePic) merged.photoUrl = merged.profilePic;
+    return { token: storedToken, user: merged };
+  } catch (e) {
+    // Invalid stored data — clear it so later reads are consistent
+    try { localStorage.removeItem('token'); localStorage.removeItem('user'); } catch (_) { /* ignore */ }
+    return { token: null, user: null };
+  }
+}
+
+export function AuthProvider({ children }) {
+  // Restore synchronously via lazy initialisers so a page refresh on a protected
+  // route doesn't bounce to /login (and land on /dashboard) before an effect runs.
+  const [user, setUser] = useState(() => loadStoredAuth().user);
+  const [token, setToken] = useState(() => loadStoredAuth().token);
+  // Seed from the restored user so refreshUser() works even before the sync effect runs
+  const userIdRef = useRef(user?.userId || user?.id || null); // stable ref so refreshUser doesn't close over user
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!loadStoredAuth().token);
+  const [loading] = useState(false); // restore is synchronous now — kept for API compatibility
 
   const login = async (username, password) => {
     const res = await api.post('/api/auth/login', { username, password });
@@ -96,6 +97,15 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    // Tell the server so the logout security event fires (fire-and-forget).
+    // Send the token explicitly: the axios request interceptor reads it from
+    // localStorage in a microtask that runs AFTER the removeItem calls below, so
+    // relying on the interceptor would send this request with no Authorization
+    // header and the server would log the logout as userId=null.
+    const authToken = localStorage.getItem('token');
+    api.post('/api/auth/logout', null,
+      authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : undefined
+    ).catch(() => {});
     // VULN: Token not invalidated server-side - old token still works
     localStorage.removeItem('token');
     localStorage.removeItem('user');

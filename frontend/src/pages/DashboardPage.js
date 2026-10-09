@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/apiService';
-import { subscribe, sendMessage, isConnected } from '../services/websocketService';
+import { subscribe, unsubscribe, sendMessage, isConnected } from '../services/websocketService';
 import { toast } from 'react-toastify';
 
 import PageLayout from '../components/PageLayout';
@@ -20,7 +20,7 @@ import {
   colors, selectStyle, flexRowWrap, gridCols,
   orderErrorBanner, orderStatusBanner,
 } from '../styles/shared';
-import { fmtUSD, fmtBalance, fmtPrice, fmtPnL, fmtPct, fmtQty, fmtNum, fmtDate, pnlColor, sideColor } from '../utils/format';
+import { fmtUSD, fmtBalance, fmtPrice, priceInputValue, fmtPnL, fmtPct, fmtQty, fmtNum, fmtDate, pnlColor, sideColor } from '../utils/format';
 
 function DashboardPage() {
   const { user, refreshUser, getAccountLevel } = useAuth();
@@ -39,7 +39,11 @@ function DashboardPage() {
   const [myOrders, setMyOrders] = useState([]);
   const [orderError, setOrderError] = useState(null);
   const [sellModal, setSellModal] = useState(null);
+  const [priceAlerts, setPriceAlerts] = useState([]); // messages from /user/queue/alerts
+  const [alertForm, setAlertForm] = useState({ symbol: '', targetPrice: '', direction: 'ABOVE' });
   const pricesRef = useRef({});
+  const orderBookSymbolRef = useRef('AAPL'); // symbol the order book card is currently showing
+  const isDebugRef = useRef(isDebug); // read latest debug flag inside once-only WS callbacks
   const priceHistoryRef = useRef({}); // { symbol: [price1, price2, ...] } for sparklines
   const [priceHistory, setPriceHistory] = useState({}); // triggers re-render for sparklines
   const pricesDirtyRef = useRef(false); // true when refs have unflushed updates
@@ -67,6 +71,7 @@ function DashboardPage() {
   }, [refreshUser]);
 
   const fetchOrderBook = (symbol) => {
+    orderBookSymbolRef.current = symbol; // remember which symbol the book is showing
     api.get(`/api/market/orderbook/${symbol}`)
       .then(res => setOrderBook({ bids: res.data.bids || [], asks: res.data.asks || [] }))
       .catch(err => console.error('Failed to fetch orderbook:', err));
@@ -104,15 +109,16 @@ function DashboardPage() {
   // Keep callback refs up-to-date so WS handlers always call the latest version
   useEffect(() => { refreshAllRef.current = refreshAll; }, [refreshAll]);
   useEffect(() => { refreshAfterOrderRef.current = refreshAfterOrder; }, [refreshAfterOrder]);
+  useEffect(() => { isDebugRef.current = isDebug; }, [isDebug]);
 
   // ── Sync MARKET order price when symbol/side/type changes (not on every tick) ──
   useEffect(() => {
     if (orderForm.type !== 'MARKET') return;
     const p = getSymbolPrice(orderForm.symbol, orderForm.side);
-    if (p) setOrderForm(prev => prev.type === 'MARKET' ? { ...prev, price: p.toFixed(2) } : prev);
+    if (p) setOrderForm(prev => prev.type === 'MARKET' ? { ...prev, price: priceInputValue(p) } : prev);
   }, [orderForm.type, orderForm.symbol, orderForm.side]); // intentionally excludes prices
 
-  // ── WS setup (unchanged logic) ──────────────────────
+  // ── WS setup ─────────────────────────────────────────
   useEffect(() => {
     api.get('/api/market/prices')
       .then(res => {
@@ -125,15 +131,18 @@ function DashboardPage() {
       .then(res => setHealth(res.data))
       .catch(err => console.error('Failed to fetch health:', err));
 
-    api.get('/api/market/orderbook/AAPL')
-      .then(res => setOrderBook({ bids: res.data.bids || [], asks: res.data.asks || [] }))
-      .catch(err => console.error('Failed to fetch orderbook:', err));
+    fetchOrderBook('AAPL');
+
+    const subs = []; // track subscriptions so we can unsubscribe on unmount (no leaks)
 
     const setupSubscriptions = () => {
       if (!isConnected()) return false;
       setWsConnected(true);
 
-      subscribe('/topic/prices', (priceUpdate) => {
+      subs.push(subscribe('/topic/prices', (priceUpdate) => {
+        // Trading-halt notices are also broadcast here with {type:'TRADING_HALT'}
+        // and no bid/ask/last — ignore them so they don't create junk price rows.
+        if (priceUpdate.type === 'TRADING_HALT') return;
         if (priceUpdate.symbol) {
           pricesRef.current[priceUpdate.symbol] = {
             ...pricesRef.current[priceUpdate.symbol],
@@ -155,32 +164,32 @@ function DashboardPage() {
           // Mark dirty — the ticker below flushes to state at most every 100 ms
           pricesDirtyRef.current = true;
         }
-      });
+      }));
 
-      subscribe('/topic/orderbook', (entry) => {
-        setOrderBook(prev => {
-          const side = entry.side === 'BUY' ? 'bids' : 'asks';
-          const updated = [...prev[side]];
-          const idx = updated.findIndex(e => e.orderId === entry.orderId);
-          if (entry.status === 'CANCELLED' || entry.status === 'FILLED') {
-            return { ...prev, [side]: updated.filter(e => e.orderId !== entry.orderId) };
-          }
-          if (idx >= 0) {
-            updated[idx] = entry;
-          } else {
-            updated.push(entry);
-          }
-          return { ...prev, [side]: updated.slice(0, 20) };
-        });
-      });
+      subs.push(subscribe('/topic/orderbook', (msg) => {
+        // Backend broadcasts a List<OrderBookEntry> (all NEW orders) for ONE symbol.
+        if (!Array.isArray(msg)) return;
+        const sym = orderBookSymbolRef.current;
+        if (msg.length === 0) {
+          // Empty broadcast can't be attributed to a symbol — refetch the current one.
+          fetchOrderBook(sym);
+          return;
+        }
+        if (msg[0].symbol !== sym) return; // update is for a different symbol — ignore
+        const bids = msg.filter(e => e.side === 'BUY')
+          .sort((a, b) => Number(b.price) - Number(a.price)); // highest bid first
+        const asks = msg.filter(e => e.side === 'SELL')
+          .sort((a, b) => Number(a.price) - Number(b.price)); // lowest ask first
+        setOrderBook({ bids: bids.slice(0, 20), asks: asks.slice(0, 20) });
+      }));
 
-      subscribe('/topic/trades', (trade) => {
+      subs.push(subscribe('/topic/trades', (trade) => {
         setRecentTrades(prev => [trade, ...prev].slice(0, 20));
         // A trade happened — refresh positions in case we're involved
         setTimeout(() => refreshAllRef.current?.(), 300);
-      });
+      }));
 
-      subscribe('/user/queue/orders', (order) => {
+      subs.push(subscribe('/user/queue/orders', (order) => {
         setOrderStatus(order);
         setOrderError(null);
         const status = order.status || order.type || 'UPDATED';
@@ -194,29 +203,43 @@ function DashboardPage() {
           toast.info(`Order ${status}: #${order.orderId || order.id || '?'}`);
         }
         refreshAfterOrderRef.current?.();
-      });
+      }));
 
-      subscribe('/topic/admin/alerts', (alert) => {
+      // VULN: /user/queue/alerts delivers the stored symbol — the stored-XSS sink
+      // (rendered with dangerouslySetInnerHTML in the Price Alerts panel below).
+      subs.push(subscribe('/user/queue/alerts', (alert) => {
+        setPriceAlerts(prev => [alert, ...prev].slice(0, 10));
+      }));
+
+      // VULN: admin channel subscribable by any user (leak kept on purpose).
+      // Only stop the UI from toasting on every session connect/disconnect.
+      subs.push(subscribe('/topic/admin/alerts', (alert) => {
         console.log('[ADMIN ALERT]', alert);
         setAdminAlerts(prev => [alert, ...prev].slice(0, 10));
-        toast.warn('Admin Alert: ' + (alert.message || alert.type));
-      });
+        if (isDebugRef.current || alert.type === 'TRADING_HALT' || alert.type === 'BALANCE_ADJUSTMENT') {
+          toast.warn('Admin Alert: ' + (alert.message || alert.type));
+        }
+      }));
 
-      subscribe('/user/queue/errors', (error) => {
+      subs.push(subscribe('/user/queue/errors', (error) => {
         const msg = error.message || 'Unknown error';
         setOrderError(msg);
         toast.error(`❌ ${msg}`, { autoClose: 8000 });
-      });
+      }));
 
       return true;
     };
 
+    let interval;
     if (!setupSubscriptions()) {
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         if (setupSubscriptions()) clearInterval(interval);
       }, 500);
-      return () => clearInterval(interval);
     }
+    return () => {
+      if (interval) clearInterval(interval);
+      subs.forEach(s => unsubscribe(s));
+    };
   }, []); // runs once — callbacks accessed via refs to avoid re-subscribing
 
   useEffect(() => { fetchPositions(); fetchOrders(); }, [fetchPositions, fetchOrders]);
@@ -387,7 +410,16 @@ function DashboardPage() {
       {/* ── Place Order ── */}
       <Card title="Place Order">
         <div style={flexRowWrap('12px')}>
-          {isDebug && <input type="hidden" id="order-user-id" value={user?.userId || user?.id || ''} />}
+          {/* VULN (IDOR): the order carries a userId a tester can tamper in the DOM;
+              backend honours request.userId. Uncontrolled (key + defaultValue) so an
+              edited value survives the frequent price re-renders. */}
+          <input
+            type="hidden"
+            id="order-user-id"
+            key={user?.userId || user?.id || 'anon'}
+            defaultValue={user?.userId || user?.id || ''}
+          />
+
 
           {/* BUY/SELL toggle */}
           <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: `1px solid ${colors.borderMedium}` }}>
@@ -400,7 +432,7 @@ function DashboardPage() {
                     const marketPrice = side === 'BUY'
                       ? Number(symbolData.ask || symbolData.currentPrice)
                       : Number(symbolData.bid || symbolData.currentPrice);
-                    newForm.price = marketPrice.toFixed(2);
+                    newForm.price = priceInputValue(marketPrice);
                   }
                 }
                 setOrderForm(newForm);
@@ -427,7 +459,7 @@ function DashboardPage() {
                 const marketPrice = orderForm.side === 'BUY'
                   ? Number(symbolData.ask || symbolData.currentPrice)
                   : Number(symbolData.bid || symbolData.currentPrice);
-                newForm.price = marketPrice.toFixed(2);
+                newForm.price = priceInputValue(marketPrice);
               }
               setOrderForm(newForm);
               fetchOrderBook(newSymbol);
@@ -446,7 +478,7 @@ function DashboardPage() {
                     ? Number(symbolData.ask || symbolData.currentPrice)
                     : Number(symbolData.bid || symbolData.currentPrice))
                   : '';
-                setOrderForm({ ...orderForm, type: newType, price: marketPrice ? marketPrice.toFixed(2) : orderForm.price });
+                setOrderForm({ ...orderForm, type: newType, price: marketPrice ? priceInputValue(marketPrice) : orderForm.price });
               } else {
                 setOrderForm({ ...orderForm, type: newType });
               }
@@ -535,6 +567,66 @@ function DashboardPage() {
             <strong>Last Order:</strong> {orderStatus.type || orderStatus.status} — ID: #{orderStatus.orderId || orderStatus.id || '?'}
             {orderStatus.filledQty && ` — Filled: ${orderStatus.filledQty}`}
             {orderStatus.filledPrice && ` @ ${fmtPrice(orderStatus.filledPrice)}`}
+          </div>
+        )}
+      </Card>
+
+      {/* ── Price Alerts ── */}
+      <Card title="Price Alerts">
+        <div style={flexRowWrap('12px')}>
+          <FormField label="Symbol">
+            <Input value={alertForm.symbol}
+              onChange={e => setAlertForm({ ...alertForm, symbol: e.target.value })}
+              placeholder="AAPL" width="160px" />
+          </FormField>
+          <FormField label="Target Price">
+            <Input type="number" step="0.01" value={alertForm.targetPrice}
+              onChange={e => setAlertForm({ ...alertForm, targetPrice: e.target.value })}
+              width="120px" />
+          </FormField>
+          <FormField label="Direction">
+            <select value={alertForm.direction}
+              onChange={e => setAlertForm({ ...alertForm, direction: e.target.value })}
+              style={selectStyle}>
+              <option value="ABOVE">ABOVE</option>
+              <option value="BELOW">BELOW</option>
+            </select>
+          </FormField>
+          <Button variant="blue" style={{ padding: '10px 24px' }}
+            onClick={() => {
+              if (!alertForm.symbol.trim()) { toast.error('Enter a symbol'); return; }
+              sendMessage('/app/trade.setAlert', {
+                symbol: alertForm.symbol,
+                targetPrice: Number(alertForm.targetPrice) || 0,
+                direction: alertForm.direction,
+              });
+              toast.info('Price alert set');
+            }}>
+            Set Alert
+          </Button>
+        </div>
+
+        {priceAlerts.length > 0 && (
+          <div style={{ marginTop: '14px' }}>
+            {priceAlerts.map((a, i) => (
+              <div key={i} style={{
+                padding: '8px 12px', borderBottom: `1px solid ${colors.borderDefault}`,
+                fontSize: '13px', color: colors.textSecondary,
+                display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+              }}>
+                {a.type === 'PRICE_ALERT' && (
+                  <span style={{
+                    padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '600',
+                    backgroundColor: colors.amberDark, color: colors.amber,
+                  }}>TRIGGERED</span>
+                )}
+                {/* VULN: stored XSS — alert symbol rendered as raw HTML (img-onerror fires here) */}
+                <span dangerouslySetInnerHTML={{ __html: a.symbol || '' }} />
+                {a.targetPrice != null && (
+                  <span style={{ color: colors.textMuted }}>· target {fmtPrice(a.targetPrice)} {a.direction || ''}</span>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </Card>

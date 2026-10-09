@@ -63,8 +63,22 @@ export function subscribe(destination, callback) {
     }
   });
 
-  subscriptions[destination] = sub;
+  // Track by the STOMP subscription id (unique per subscribe) rather than by
+  // destination, so re-subscribing to the same topic (e.g. a page remount)
+  // doesn't orphan the previous subscription and leak it until disconnect.
+  subscriptions[sub.id] = sub;
   return sub;
+}
+
+/**
+ * Unsubscribe a single subscription returned by subscribe().
+ * Pages call this from their effect cleanup so subscriptions don't accumulate
+ * across navigations/remounts.
+ */
+export function unsubscribe(sub) {
+  if (!sub) return;
+  try { sub.unsubscribe(); } catch (e) { /* ignore */ }
+  if (sub.id) delete subscriptions[sub.id];
 }
 
 /**
