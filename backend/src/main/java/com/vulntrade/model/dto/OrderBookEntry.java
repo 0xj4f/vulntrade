@@ -18,4 +18,7 @@ public class OrderBookEntry {
     private Long userId;            // VULN: user ID disclosed
     private String username;        // VULN: username disclosed
     private Long timestamp;
+    private String clientOrderId;
+    private BigDecimal originalQuantity;
+    private java.time.LocalDateTime createdAt;
 }

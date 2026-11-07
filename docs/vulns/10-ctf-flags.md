@@ -187,9 +187,10 @@ strings heap.bin | grep "FLAG{"
 **Location:** Returned by the leaderboard API when the authenticated user is rank #1.
 
 **How to find:**
-1. Register → verify → deposit funds → buy VULN
+1. Register → verify → deposit funds → buy VULN with most of your capital
 2. Manipulate VULN price via WebSocket `admin.setPrice`
-3. Portfolio value skyrockets → ROI% goes to #1
+3. Portfolio value skyrockets → ROI% goes to #1 (ROI = gain over net deposits, so a deposit alone doesn't
+   help — you need more VULN per dollar of capital than the seeded #1)
 4. Visit leaderboard → flag appears in gold banner
 
 This is the hardest flag — it requires chaining 4+ vulnerabilities together. See [09-attack-chains.md](09-attack-chains.md) Chain 1 for the full walkthrough.

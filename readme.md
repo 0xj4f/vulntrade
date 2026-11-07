@@ -67,7 +67,27 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-The `prod` compose file pulls `0xj4f/vulntrade-backend:latest` and `0xj4f/vulntrade-frontend:latest` instead of building from source. Everything else — ports, DB seed, flags, vulnerabilities — is identical. To pin to a specific release, replace `:latest` with a version tag (e.g. `:0.5.3`).
+The `prod` compose file pulls `0xj4f/vulntrade-backend:latest` and `0xj4f/vulntrade-frontend:latest` instead of building from source. Everything else — ports, DB seed, flags, vulnerabilities — is identical. To pin to a specific release, replace `:latest` with a version tag.
+
+> **Stable release: `0.6.0`.** Pin `:0.6.0` for the baseline before the upcoming refactor — fixed trading
+> logic, the redesigned UI and the Kubernetes manifests. See [CHANGELOG.md](CHANGELOG.md) (upgrading from an
+> older volume? reseed with `docker compose down -v`).
+
+A port already taken on your machine? Every host port can be moved, e.g.
+`FRONTEND_PORT=3011 JMX_PORT=19090 docker compose up` (`BACKEND_PORT`, `ADMINER_PORT`, `DEBUG_PORT`,
+`POSTGRES_PORT`, `REDIS_PORT` work the same way).
+
+### Kubernetes (minikube / OrbStack)
+
+A Helm chart and a Makefile live in [`deploy/`](deploy/README.md):
+
+```bash
+cd deploy
+make minikube-up        # or: make orbstack-up
+make port-forward       # http://localhost:3001
+```
+
+docker compose remains the quickest way to run the lab; the chart is for local clusters.
 
 | Service    | Host Port | URL                                 |
 |------------|-----------|-------------------------------------|
@@ -183,8 +203,14 @@ A Fluent Bit sidecar (`log-shipper` service) tails `security.log` and `app.log` 
 | [`docs/vulns/`](docs/vulns/) | Detailed guides for all vulnerability categories |
 | [`docs/vulns/10-ctf-flags.md`](docs/vulns/10-ctf-flags.md) | CTF flag guide with hints and point values |
 | [`docs/vulns/09-attack-chains.md`](docs/vulns/09-attack-chains.md) | Multi-step exploitation walkthroughs |
-| [`docs/order-flow.md`](docs/order-flow.md) | Trading order flow and matching engine |
+| [`docs/order-flow.md`](docs/order-flow.md) | Order lifecycle: validation, matching, settlement, notifications |
+| [`docs/liquidity-provider.md`](docs/liquidity-provider.md) | The house: liquidity, crossed-limit sweep, quoted ladders |
+| [`docs/security-events.md`](docs/security-events.md) | Security-events catalog: what is logged or detected, and where |
+| [`docs/logging-guide.md`](docs/logging-guide.md) | `security.log` format, event reference, Wazuh rules |
 | [`docs/dfd.md`](docs/dfd.md) | Data flow diagrams |
+| [`deploy/README.md`](deploy/README.md) | Helm chart for minikube and OrbStack |
+| [`test/README.md`](test/README.md) | Smoke tests, security-events test, trading-integrity suite |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release notes |
 
 ## Tools That Work Well With VulnTrade
 

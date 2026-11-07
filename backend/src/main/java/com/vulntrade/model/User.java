@@ -3,6 +3,7 @@ package com.vulntrade.model;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import org.hibernate.annotations.DynamicUpdate;
 
 import javax.persistence.*;
 import java.math.BigDecimal;
@@ -11,6 +12,9 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users")
+// Only changed columns are written on save, so a profile or password update can't write
+// back a balance that a trade settled in the meantime.
+@DynamicUpdate
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

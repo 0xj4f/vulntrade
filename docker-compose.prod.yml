@@ -59,7 +59,7 @@ services:
     image: adminer:latest
     container_name: vulntrade-adminer
     ports:
-      - "8081:8080"   # VULN: exposed DB admin
+      - "${ADMINER_PORT:-8081}:8080"   # VULN: exposed DB admin
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     depends_on:
@@ -76,9 +76,9 @@ services:
     container_name: vulntrade-backend
     pull_policy: always
     ports:
-      - "8085:8080"    # Main API (mapped to 8085 to avoid conflicts)
-      - "5005:5005"    # VULN: debug port exposed
-      - "9090:9090"    # VULN: JMX port exposed
+      - "${BACKEND_PORT:-8085}:8080"    # Main API (mapped to 8085 to avoid conflicts)
+      - "${DEBUG_PORT:-5005}:5005"    # VULN: debug port exposed
+      - "${JMX_PORT:-9090}:9090"    # VULN: JMX port exposed
     environment:
       # Inline defaults (match .env.example) so a fresh clone boots without a .env.
       # Weak secrets are intentional (educational lab) and stay as the defaults.
@@ -115,7 +115,7 @@ services:
     container_name: vulntrade-frontend
     pull_policy: always
     ports:
-      - "3001:80"
+      - "${FRONTEND_PORT:-3001}:80"
     depends_on:
       - backend
     networks:

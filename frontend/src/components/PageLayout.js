@@ -1,21 +1,24 @@
 import React from 'react';
-import { pageContainer, pageHeading, colors } from '../styles/shared';
+import { colors, type } from '../styles/shared';
 
 /**
- * Standard page wrapper with heading.
- * @param {string} title - page heading
- * @param {string} titleColor - heading color
- * @param {string} maxWidth - container max width
+ * Page frame: max-width container with a title row (title, subtitle, actions).
+ * `titleColor` is accepted for compatibility; titles are neutral by design.
  */
-export default function PageLayout({ title, titleColor, maxWidth = '1200px', children }) {
+export default function PageLayout({ title, subtitle, actions, maxWidth = '1280px', children, eyebrow }) {
   return (
-    <div style={{
-      ...pageContainer(maxWidth),
-      minHeight: 'calc(100vh - 56px)',
-      background: `linear-gradient(180deg, ${colors.bgPage} 0%, #0F1D32 100%)`,
-    }}>
-      {title && <h2 style={pageHeading(titleColor)}>{title}</h2>}
+    <main className="vt-page fade-in" style={{ '--vt-page-max': maxWidth }}>
+      {(title || actions) && (
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0 }}>
+            {eyebrow && <div style={{ ...type.caps, marginBottom: '4px' }}>{eyebrow}</div>}
+            {title && <h1 style={{ ...type.title, fontSize: '22px', color: colors.textPrimary }}>{title}</h1>}
+            {subtitle && <p style={{ color: colors.textMuted, fontSize: '13px', marginTop: '4px' }}>{subtitle}</p>}
+          </div>
+          {actions && <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>{actions}</div>}
+        </div>
+      )}
       {children}
-    </div>
+    </main>
   );
 }

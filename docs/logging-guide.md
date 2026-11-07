@@ -103,7 +103,7 @@ Fields whose value is null are **omitted**, not written as `null`.
 | `username` | string | when known | Logged-in username. Filled automatically. The placeholders `anonymous`/`anonymousUser` are written as absent. **On a failure, never put the attempted name here** — it goes in `details.attemptedUsername` (see `login_failure`). |
 | `clientIp` | string | yes | First hop of `X-Forwarded-For`, else the socket address. Spoofable (see §9). For STOMP, taken from the WebSocket handshake request. |
 | `userAgent` | string | yes | `User-Agent` header, `""` when the header is missing. For STOMP, the handshake request's header. |
-| `transport` | string | yes | `HTTP` or `STOMP`. SockJS frames count as `STOMP`. |
+| `transport` | string | yes | `HTTP` or `STOMP` (SockJS frames count as `STOMP`), or `SYSTEM` for background work with no request behind it — the house market maker's fills and re-quotes, startup reconcile. `SYSTEM` lines carry no `requestId`/`sessionId`; engine-initiated cancels also carry `details.initiator = "system"` and no `isOwner`. |
 | `httpMethod` | string | HTTP only | See the `HiddenHttpMethodFilter` note in §9. |
 | `path` | string | HTTP: yes; STOMP: when known | HTTP: the raw request URI, without the query string (`/api/...`). STOMP: the destination (`/app/...`, `/topic/...`), only on events written where the code holds the STOMP message (interceptor checks, the trade auth gate). |
 | `httpStatus` | int | fallback events only | Set only on events written by `RequestLoggingFilter` at the end of a request (§4.5). Every other event carries its result in `outcome`. |

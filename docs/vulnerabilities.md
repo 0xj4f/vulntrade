@@ -97,7 +97,7 @@
 | 60 | Order book info disclosure (userId) | /topic/orderbook | CWE-200 | 🔄 Coded (not in matrix) |
 | 61 | Trade broadcast info disclosure (userId) | /topic/trades | CWE-200 | 🔄 Coded (not in matrix) |
 | 62 | Self-matching (wash trading) | MatchingEngineService | CWE-840 | ✅ Working (no self-trade guard) |
-| 63 | Position can go negative (naked short) | MatchingEngineService, RiskService | CWE-20 | 🛡️ Control present — short rejected (`RiskService` position check) and fills clamp at 0 (`MatchingEngineService`). *Was exploitable pre-hardening* |
+| 63 | Position can go negative (naked short) | MatchingEngineService, RiskService | CWE-20 | 🛡️ Control present — short rejected (`RiskService` position check) and settlement re-checks shares at fill: an oversold resting order is auto-cancelled (`INSUFFICIENT_POSITION`), positions never go below 0. *Was exploitable pre-hardening (and, until 0.6.0, by offering the same shares twice)* |
 | 64 | Floating point P&L errors | MatchingEngineService | CWE-681 | 🔄 Coded (BigDecimal in use; not in matrix) |
 | 65 | Risk check skipped for MARKET | RiskService | CWE-862 | ❌ Not exploitable — MARKET orders are now risk-checked (balance/position/symbol/qty). *Was exploitable pre-hardening* |
 | 66 | System metrics in admin alerts | AdminService | CWE-200 | 🔄 Coded (not in matrix) |
@@ -162,7 +162,8 @@ From the clean-DB verification run (exploit matrix: **68 PASS / 0 FAIL / 8 SKIP*
   (`RiskService.java:47`) runs for **all** order types and rejects: qty ≤ 0, price ≤ 0 (LIMIT),
   unknown/untradable symbols, insufficient balance (BUY) and insufficient position (SELL). The
   halt check in `OrderService.placeOrder` applies to all order types, and
-  `MatchingEngineService` clamps positions at 0 (no naked shorts). Items #39, #42, #46, #63 and
+  settlement in `MatchingEngineService` never lets a balance or position go below 0 (orders that can
+  no longer be covered are auto-cancelled). Items #39, #42, #46, #63 and
   #65 above moved from "vulnerability" to "control present / not exploitable" as a result.
   The still-real trading-logic vulns are: sign-flip withdrawal (#50), TOCTOU double-spend
   (#43/#51), deposit without source verification (#52), wash trading (#62), no price band (#40),

@@ -1,11 +1,10 @@
 package com.vulntrade.service;
 
 import com.vulntrade.model.Order;
+import com.vulntrade.model.Symbol;
 import com.vulntrade.model.Trade;
-import com.vulntrade.model.Position;
 import com.vulntrade.model.Transaction;
 import com.vulntrade.model.dto.TradeNotification;
-import com.vulntrade.model.dto.OrderBookEntry;
 import com.vulntrade.repository.*;
 import com.vulntrade.security.logging.Outcome;
 import com.vulntrade.security.logging.SecurityEvent;
@@ -17,6 +16,8 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -26,328 +27,417 @@ import static com.vulntrade.security.logging.SecurityEventLogger.*;
 
 /**
  * Order matching engine.
- * 
- * VULN: Self-matching allowed (wash trading).
+ *
+ * <p>Every method here runs inside {@link MatchingCoordinator} (one lock, one transaction).
+ *
+ * <p>Settlement happens at fill time: an order is not reserved when it is placed (vuln #43
+ * spirit — several resting orders may together exceed what the owner has), but a fill never
+ * takes a balance or a position below zero. A resting order whose owner can no longer cover
+ * it is cancelled with a reason; an incoming order that can't cover stops matching and its
+ * remainder is cancelled.
+ *
+ * VULN: Self-matching allowed (wash trading, #62) — the trade is recorded, the cash and
+ *       position moves net to zero.
  * VULN: No circuit breaker on rapid price movement.
- * VULN: Matching processes synchronously (timing attacks).
- * VULN: Partial fills update positions with floating point errors.
+ * VULN: MARKET orders take whatever the book and the house offer (no slippage cap, #45).
  */
 @Service
 public class MatchingEngineService {
 
     private static final Logger logger = LoggerFactory.getLogger(MatchingEngineService.class);
+    private static final List<String> OPEN = List.of("NEW", "PARTIAL");
+
+    public static final String INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS";
+    public static final String INSUFFICIENT_POSITION = "INSUFFICIENT_POSITION";
+    public static final String NO_LIQUIDITY = "NO_LIQUIDITY";
+
+    private enum Shortfall {
+        NONE(null), BUYER_FUNDS(INSUFFICIENT_FUNDS), SELLER_POSITION(INSUFFICIENT_POSITION);
+        final String reason;
+        Shortfall(String reason) { this.reason = reason; }
+    }
 
     private final OrderRepository orderRepository;
     private final TradeRepository tradeRepository;
     private final PositionRepository positionRepository;
     private final UserRepository userRepository;
     private final TransactionRepository transactionRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final SymbolRepository symbolRepository;
     private final LiquidityProviderService liquidityProvider;
+    private final TradingEvents events;
+    private final OrderBookService orderBookService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     public MatchingEngineService(OrderRepository orderRepository,
-                                  TradeRepository tradeRepository,
-                                  PositionRepository positionRepository,
-                                  UserRepository userRepository,
-                                  TransactionRepository transactionRepository,
-                                  SimpMessagingTemplate messagingTemplate,
-                                  LiquidityProviderService liquidityProvider) {
+                                 TradeRepository tradeRepository,
+                                 PositionRepository positionRepository,
+                                 UserRepository userRepository,
+                                 TransactionRepository transactionRepository,
+                                 SymbolRepository symbolRepository,
+                                 LiquidityProviderService liquidityProvider,
+                                 TradingEvents events,
+                                 OrderBookService orderBookService,
+                                 SimpMessagingTemplate messagingTemplate) {
         this.orderRepository = orderRepository;
         this.tradeRepository = tradeRepository;
         this.positionRepository = positionRepository;
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
-        this.messagingTemplate = messagingTemplate;
+        this.symbolRepository = symbolRepository;
         this.liquidityProvider = liquidityProvider;
+        this.events = events;
+        this.orderBookService = orderBookService;
+        this.messagingTemplate = messagingTemplate;
     }
 
-    /** Null-safe price comparison for sorting: nulls sort last. */
-    private static int comparePrice(BigDecimal a, BigDecimal b) {
-        if (a == null && b == null) return 0;
-        if (a == null) return 1;
-        if (b == null) return -1;
-        return a.compareTo(b);
+    // ==================================================================
+    // Incoming orders
+    // ==================================================================
+
+    /**
+     * Match an incoming (already saved) order against the book, then against the house,
+     * then decide what happens to any remainder:
+     * LIMIT rests, MARKET is cancelled (NO_LIQUIDITY), an uncoverable order is cancelled.
+     *
+     * VULN: Self-matching allowed — no check that both sides belong to different users.
+     */
+    public void match(Order incoming) {
+        boolean isBuy = "BUY".equals(incoming.getSide());
+        String symbol = incoming.getSymbol();
+
+        List<Order> book = orderRepository
+                .findBySymbolAndSideAndStatusIn(symbol, isBuy ? "SELL" : "BUY", OPEN).stream()
+                .filter(o -> !Objects.equals(o.getId(), incoming.getId()))
+                .filter(o -> "LIMIT".equals(o.getOrderType()) && o.getPrice() != null)
+                .sorted(priceTimePriority(isBuy))
+                .collect(Collectors.toList());
+
+        String shortfall = null;
+        for (Order resting : book) {
+            BigDecimal remaining = remaining(incoming);
+            if (remaining.signum() <= 0 || incoming.getPrice() == null) break;
+
+            boolean crosses = isBuy
+                    ? incoming.getPrice().compareTo(resting.getPrice()) >= 0
+                    : incoming.getPrice().compareTo(resting.getPrice()) <= 0;
+            if (!crosses) break;   // sorted best-first: nothing further down crosses either
+
+            BigDecimal restingRemaining = remaining(resting);
+            if (restingRemaining.signum() <= 0) continue;
+
+            BigDecimal qty = remaining.min(restingRemaining);
+            BigDecimal price = resting.getPrice();          // execute at the maker's price
+            Order buy = isBuy ? incoming : resting;
+            Order sell = isBuy ? resting : incoming;
+
+            Shortfall result = settle(buy.getUserId(), sell.getUserId(), symbol, qty, price);
+            if (result == Shortfall.NONE) {
+                recordFill(buy, sell, qty, price, false);
+                continue;
+            }
+            boolean restingIsShort = (result == Shortfall.SELLER_POSITION) == isBuy;
+            if (restingIsShort) {
+                cancelForReason(resting, result.reason);
+                continue;
+            }
+            shortfall = result.reason;
+            break;
+        }
+
+        if (shortfall == null && remaining(incoming).signum() > 0) {
+            shortfall = fillFromHouse(incoming);
+        }
+
+        BigDecimal remaining = remaining(incoming);
+        if (remaining.signum() > 0) {
+            if (shortfall != null) {
+                closeRemainder(incoming, shortfall);
+            } else if ("MARKET".equals(incoming.getOrderType())) {
+                closeRemainder(incoming, NO_LIQUIDITY);
+            }
+            // otherwise a LIMIT remainder rests (status NEW or PARTIAL)
+        }
+        orderRepository.save(incoming);
+        events.orderChanged(incoming);
     }
 
     /**
-     * Try to match an incoming order against the order book.
-     * VULN: Self-matching allowed (wash trading).
-     * VULN: No circuit breaker.
-     * VULN: Synchronous processing (timing attacks).
+     * Let the house take the other side of an incoming order:
+     * MARKET at touch ± spread; a marketable LIMIT at the better of its limit and the house
+     * price (so a limit above the ask doesn't pay its own limit). Fills as much as the house
+     * can cover. Returns the shortfall reason if the incoming owner couldn't cover, else null.
      */
-    public void tryMatch(Order incomingOrder) {
-        String opposingSide = "BUY".equals(incomingOrder.getSide()) ? "SELL" : "BUY";
+    private String fillFromHouse(Order incoming) {
+        Long houseId = liquidityProvider.getHouseUserId();
+        if (!liquidityProvider.isEnabled() || Objects.equals(houseId, incoming.getUserId())) return null;
 
-        // Find opposing orders — include PARTIAL so partially-filled resting orders stay matchable.
-        List<Order> opposingOrders = orderRepository.findBySymbolAndSideAndStatusIn(
-                incomingOrder.getSymbol(), opposingSide, List.of("NEW", "PARTIAL"));
+        Optional<Symbol> symOpt = symbolRepository.findById(incoming.getSymbol());
+        if (symOpt.isEmpty()) return null;
+        Symbol sym = symOpt.get();
+        boolean isBuy = "BUY".equals(incoming.getSide());
+        BigDecimal housePrice = liquidityProvider.fillPrice(sym, incoming.getSide());
+        if (housePrice == null) return null;
 
-        // Sort by price-time priority (null-safe: a missing price sorts last)
-        if ("BUY".equals(incomingOrder.getSide())) {
-            // For buy orders, match against lowest sell prices first
-            opposingOrders.sort((a, b) -> {
-                int priceCompare = comparePrice(a.getPrice(), b.getPrice());
-                return priceCompare != 0 ? priceCompare : a.getCreatedAt().compareTo(b.getCreatedAt());
-            });
+        BigDecimal price;
+        if ("MARKET".equals(incoming.getOrderType())) {
+            price = housePrice;   // VULN #45: no slippage cap
         } else {
-            // For sell orders, match against highest buy prices first
-            opposingOrders.sort((a, b) -> {
-                int priceCompare = comparePrice(b.getPrice(), a.getPrice());
-                return priceCompare != 0 ? priceCompare : a.getCreatedAt().compareTo(b.getCreatedAt());
-            });
+            BigDecimal limit = incoming.getPrice();
+            if (limit == null) return null;
+            if (isBuy && (sym.getAsk() == null || limit.compareTo(sym.getAsk()) < 0)) return null;
+            if (!isBuy && (sym.getBid() == null || limit.compareTo(sym.getBid()) > 0)) return null;
+            price = isBuy ? limit.min(housePrice) : limit.max(housePrice);
         }
 
-        BigDecimal remainingQty = incomingOrder.getQuantity().subtract(
-                incomingOrder.getFilledQty() != null ? incomingOrder.getFilledQty() : BigDecimal.ZERO);
+        BigDecimal qty = houseCapacity(sym.getSymbol(), isBuy ? "SELL" : "BUY", price).min(remaining(incoming));
+        if (qty.signum() <= 0) return null;
 
-        for (Order opposing : opposingOrders) {
-            if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) break;
-
-            // Check price match (null-safe: a missing price can't be compared, so it can't match)
-            boolean priceMatch;
-            if (incomingOrder.getPrice() == null || opposing.getPrice() == null) {
-                priceMatch = false;
-            } else if ("BUY".equals(incomingOrder.getSide())) {
-                priceMatch = incomingOrder.getPrice().compareTo(opposing.getPrice()) >= 0;
-            } else {
-                priceMatch = incomingOrder.getPrice().compareTo(opposing.getPrice()) <= 0;
-            }
-
-            if (!priceMatch) continue;
-
-            // VULN: Self-matching allowed - no check if same user
-            // A user can create both buy and sell orders and match with themselves
-
-            BigDecimal opposingRemaining = opposing.getQuantity().subtract(
-                    opposing.getFilledQty() != null ? opposing.getFilledQty() : BigDecimal.ZERO);
-            BigDecimal fillQty = remainingQty.min(opposingRemaining);
-            BigDecimal fillPrice = opposing.getPrice(); // Execute at resting order price
-
-            // Execute the trade
-            executeTrade(incomingOrder, opposing, fillQty, fillPrice);
-
-            remainingQty = remainingQty.subtract(fillQty);
+        Long buyerId = isBuy ? incoming.getUserId() : houseId;
+        Long sellerId = isBuy ? houseId : incoming.getUserId();
+        Shortfall result = settle(buyerId, sellerId, sym.getSymbol(), qty, price);
+        if (result != Shortfall.NONE) {
+            // The house checked its own capacity, so the shortfall is the incoming order's.
+            return result.reason;
         }
-
-        // If MARKET order still has unfilled quantity, use the liquidity provider
-        if (remainingQty.compareTo(BigDecimal.ZERO) > 0
-                && "MARKET".equalsIgnoreCase(incomingOrder.getOrderType())) {
-            Order houseOrder = liquidityProvider.fillMarketOrder(incomingOrder, remainingQty);
-            if (houseOrder != null) {
-                BigDecimal fillPrice = houseOrder.getPrice();
-                executeTrade(incomingOrder, houseOrder, remainingQty, fillPrice);
-                remainingQty = BigDecimal.ZERO;
-            }
-        }
-
-        // Update incoming order status
-        if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) {
-            incomingOrder.setStatus("FILLED");
-            incomingOrder.setExecutedAt(LocalDateTime.now());
-        } else if (incomingOrder.getFilledQty() != null &&
-                   incomingOrder.getFilledQty().compareTo(BigDecimal.ZERO) > 0) {
-            incomingOrder.setStatus("PARTIAL");
-        }
-        orderRepository.save(incomingOrder);
+        Order house = liquidityProvider.createHouseOrder(sym.getSymbol(), isBuy ? "SELL" : "BUY", qty, price);
+        recordFill(isBuy ? incoming : house, isBuy ? house : incoming, qty, price, false);
+        return null;
     }
 
-    /**
-     * Execute a trade between two orders.
-     * VULN: Floating point precision errors in P&L calculation.
-     * VULN: Position can go negative (unauthorized short selling).
-     */
-    private void executeTrade(Order buyOrder, Order sellOrder,
-                               BigDecimal quantity, BigDecimal price) {
-        // Determine which is buy and which is sell
-        Order actualBuy = "BUY".equals(buyOrder.getSide()) ? buyOrder : sellOrder;
-        Order actualSell = "SELL".equals(buyOrder.getSide()) ? buyOrder : sellOrder;
+    // ==================================================================
+    // House sweep (market maker): resting user LIMITs crossed by a price move
+    // ==================================================================
 
-        // Create trade record
+    /**
+     * Fill every resting user LIMIT order that the live quote now crosses
+     * (BUY at or above the ask, SELL at or below the bid) against the house, at the order's
+     * own limit price — the normal outcome for a resting maker order.
+     */
+    public int sweepCrossedLimits(Symbol sym) {
+        Long houseId = liquidityProvider.getHouseUserId();
+        if (!liquidityProvider.isEnabled() || sym.getAsk() == null || sym.getBid() == null) return 0;
+
+        int fills = 0;
+        for (Order o : orderRepository.findRestingUserLimits(sym.getSymbol(), houseId)) {
+            boolean isBuy = "BUY".equals(o.getSide());
+            boolean crossed = isBuy
+                    ? o.getPrice().compareTo(sym.getAsk()) >= 0
+                    : o.getPrice().compareTo(sym.getBid()) <= 0;
+            if (!crossed) continue;
+
+            BigDecimal price = o.getPrice();
+            BigDecimal qty = houseCapacity(sym.getSymbol(), isBuy ? "SELL" : "BUY", price).min(remaining(o));
+            if (qty.signum() <= 0) continue;   // house can't take it right now; leave it resting
+
+            Long buyerId = isBuy ? o.getUserId() : houseId;
+            Long sellerId = isBuy ? houseId : o.getUserId();
+            Shortfall result = settle(buyerId, sellerId, sym.getSymbol(), qty, price);
+            if (result != Shortfall.NONE) {
+                cancelForReason(o, result.reason);
+                continue;
+            }
+            Order house = liquidityProvider.createHouseOrder(sym.getSymbol(), isBuy ? "SELL" : "BUY", qty, price);
+            recordFill(isBuy ? o : house, isBuy ? house : o, qty, price, true);
+            fills++;
+        }
+        return fills;
+    }
+
+    /** How much the house can sell (its position) or buy (its cash at {@code price}). */
+    private BigDecimal houseCapacity(String symbol, String houseSide, BigDecimal price) {
+        Long houseId = liquidityProvider.getHouseUserId();
+        if ("SELL".equals(houseSide)) {
+            BigDecimal held = positionRepository.findQuantity(houseId, symbol);
+            return held != null ? held : BigDecimal.ZERO;
+        }
+        BigDecimal cash = userRepository.findBalanceById(houseId);
+        if (cash == null || price == null || price.signum() <= 0) return BigDecimal.ZERO;
+        return cash.divide(price, 8, RoundingMode.DOWN);
+    }
+
+    // ==================================================================
+    // Settlement
+    // ==================================================================
+
+    /**
+     * Move cash and shares for one fill, or report who can't cover it. Never leaves a
+     * negative balance or position. Under the matching lock, positions only change here,
+     * so the read-then-update of the seller's position is safe; the buyer debit is
+     * conditional because withdrawals and deposits run outside the lock (the intentional
+     * #43/#51 race lives there).
+     */
+    private Shortfall settle(Long buyerId, Long sellerId, String symbol, BigDecimal qty, BigDecimal price) {
+        BigDecimal held = positionRepository.findQuantity(sellerId, symbol);
+        if (held == null || held.compareTo(qty) < 0) {
+            return Shortfall.SELLER_POSITION;
+        }
+        if (Objects.equals(buyerId, sellerId)) {
+            return Shortfall.NONE;   // wash trade: cash and shares net to zero
+        }
+        BigDecimal value = tradeValue(qty, price);
+        if (userRepository.debitIfSufficient(buyerId, value) == 0) {
+            return Shortfall.BUYER_FUNDS;
+        }
+        if (positionRepository.sellIfSufficient(sellerId, symbol, qty, price) == 0) {
+            userRepository.credit(buyerId, value);   // undo the debit (not expected under the lock)
+            return Shortfall.SELLER_POSITION;
+        }
+        userRepository.credit(sellerId, value);
+        positionRepository.upsertBuy(buyerId, symbol, qty, price);
+        return Shortfall.NONE;
+    }
+
+    /** Persist the trade, both fills, both ledger rows, and queue the notifications. */
+    private void recordFill(Order buy, Order sell, BigDecimal qty, BigDecimal price, boolean systemInitiated) {
+        boolean selfTrade = Objects.equals(buy.getUserId(), sell.getUserId());
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+
         Trade trade = new Trade();
-        trade.setBuyOrderId(actualBuy.getId());
-        trade.setSellOrderId(actualSell.getId());
-        trade.setSymbol(actualBuy.getSymbol());
-        trade.setQuantity(quantity);
+        trade.setBuyOrderId(buy.getId());
+        trade.setSellOrderId(sell.getId());
+        trade.setSymbol(buy.getSymbol());
+        trade.setQuantity(qty);
         trade.setPrice(price);
-        trade.setExecutedAt(LocalDateTime.now());
-        final Trade savedTrade = tradeRepository.save(trade);
+        trade.setExecutedAt(now);
+        trade = tradeRepository.save(trade);
+
         log(SecurityEvent.TRADE_EXECUTED, Outcome.SUCCESS,
-                details("tradeId", savedTrade.getId(),
-                        "symbol", savedTrade.getSymbol(),
-                        "quantity", quantity,
+                details("tradeId", trade.getId(),
+                        "symbol", trade.getSymbol(),
+                        "quantity", qty,
                         "price", price,
-                        "buyerId", actualBuy.getUserId(),
-                        "sellerId", actualSell.getUserId(),
-                        "buyOrderId", actualBuy.getId(),
-                        "sellOrderId", actualSell.getId(),
-                        "selfTrade", Objects.equals(actualBuy.getUserId(), actualSell.getUserId())));
+                        "buyerId", buy.getUserId(),
+                        "sellerId", sell.getUserId(),
+                        "buyOrderId", buy.getId(),
+                        "sellOrderId", sell.getId(),
+                        "selfTrade", selfTrade,
+                        "initiator", systemInitiated ? "system" : null));
 
-        // Update order fill quantities
-        actualBuy.setFilledQty((actualBuy.getFilledQty() != null ? actualBuy.getFilledQty() : BigDecimal.ZERO).add(quantity));
-        actualBuy.setFilledPrice(price);
-        if (actualBuy.getFilledQty().compareTo(actualBuy.getQuantity()) >= 0) {
-            actualBuy.setStatus("FILLED");
-            actualBuy.setExecutedAt(LocalDateTime.now());
-        } else {
-            actualBuy.setStatus("PARTIAL");
-        }
-        orderRepository.save(actualBuy);
+        applyFill(buy, qty, price, now);
+        applyFill(sell, qty, price, now);
 
-        actualSell.setFilledQty((actualSell.getFilledQty() != null ? actualSell.getFilledQty() : BigDecimal.ZERO).add(quantity));
-        actualSell.setFilledPrice(price);
-        if (actualSell.getFilledQty().compareTo(actualSell.getQuantity()) >= 0) {
-            actualSell.setStatus("FILLED");
-            actualSell.setExecutedAt(LocalDateTime.now());
-        } else {
-            actualSell.setStatus("PARTIAL");
-        }
-        orderRepository.save(actualSell);
+        BigDecimal value = tradeValue(qty, price);
+        String qtyText = qty.stripTrailingZeros().toPlainString();
+        String priceText = price.stripTrailingZeros().toPlainString();
+        ledger(buy.getUserId(), "TRADE_BUY", value.negate(),
+                "Bought " + qtyText + " " + trade.getSymbol() + " @ " + priceText, trade.getId(), now);
+        ledger(sell.getUserId(), "TRADE_SELL", value,
+                "Sold " + qtyText + " " + trade.getSymbol() + " @ " + priceText, trade.getId(), now);
 
-        // Update buyer position
-        updatePosition(actualBuy.getUserId(), actualBuy.getSymbol(), quantity, price, true);
-        // Update seller position
-        updatePosition(actualSell.getUserId(), actualSell.getSymbol(), quantity, price, false);
-
-        // Update balances
-        BigDecimal tradeValue = quantity.multiply(price);
-
-        // Deduct from buyer
-        userRepository.findById(actualBuy.getUserId()).ifPresent(buyer -> {
-            buyer.setBalance(buyer.getBalance().subtract(tradeValue));
-            userRepository.save(buyer);
-
-            // Record transaction
-            Transaction txn = new Transaction();
-            txn.setUserId(buyer.getId());
-            txn.setType("TRADE_BUY");
-            txn.setAmount(tradeValue.negate());
-            txn.setBalanceAfter(buyer.getBalance());
-            txn.setDescription("Bought " + quantity + " " + actualBuy.getSymbol() + " @ " + price);
-            txn.setReferenceId("TRADE-" + savedTrade.getId());
-            transactionRepository.save(txn);
-        });
-
-        // Credit seller
-        userRepository.findById(actualSell.getUserId()).ifPresent(seller -> {
-            seller.setBalance(seller.getBalance().add(tradeValue));
-            userRepository.save(seller);
-
-            Transaction txn = new Transaction();
-            txn.setUserId(seller.getId());
-            txn.setType("TRADE_SELL");
-            txn.setAmount(tradeValue);
-            txn.setBalanceAfter(seller.getBalance());
-            txn.setDescription("Sold " + quantity + " " + actualSell.getSymbol() + " @ " + price);
-            txn.setReferenceId("TRADE-" + savedTrade.getId());
-            transactionRepository.save(txn);
-        });
-
-        // Broadcast trade notification
-        // VULN: Includes internal trade IDs and user IDs
+        // VULN (#61): user ids and order ids are broadcast to everyone
         TradeNotification notification = new TradeNotification();
-        notification.setTradeId(savedTrade.getId());
-        notification.setSymbol(savedTrade.getSymbol());
-        notification.setQuantity(savedTrade.getQuantity());
-        notification.setPrice(savedTrade.getPrice());
-        notification.setBuyUserId(actualBuy.getUserId());    // VULN: user ID disclosed
-        notification.setSellUserId(actualSell.getUserId());  // VULN: user ID disclosed
-        notification.setBuyOrderId(actualBuy.getId());       // VULN: order ID disclosed
-        notification.setSellOrderId(actualSell.getId());     // VULN: order ID disclosed
+        notification.setTradeId(trade.getId());
+        notification.setSymbol(trade.getSymbol());
+        notification.setQuantity(qty);
+        notification.setPrice(price);
+        notification.setBuyUserId(buy.getUserId());
+        notification.setSellUserId(sell.getUserId());
+        notification.setBuyOrderId(buy.getId());
+        notification.setSellOrderId(sell.getId());
         notification.setTimestamp(System.currentTimeMillis());
+        events.tradeExecuted(notification);
+        events.orderChanged(buy);
+        events.orderChanged(sell);
 
-        messagingTemplate.convertAndSend("/topic/trades", notification);
-
-        // Send order updates to specific users
-        messagingTemplate.convertAndSendToUser(
-                String.valueOf(actualBuy.getUserId()),
-                "/queue/orders",
-                actualBuy);
-        messagingTemplate.convertAndSendToUser(
-                String.valueOf(actualSell.getUserId()),
-                "/queue/orders",
-                actualSell);
-
-        // Update order book broadcast
-        broadcastOrderBook(actualBuy.getSymbol());
-
-        logger.info("Trade executed: {} {} x {} @ {} (buy_order={}, sell_order={})",
-                savedTrade.getSymbol(), quantity, price,
-                actualBuy.getId(), actualSell.getId());
+        logger.info("Trade executed: {} {} x {} @ {} (buy_order={}, sell_order={}{})",
+                trade.getSymbol(), qtyText, qty, priceText, buy.getId(), sell.getId(),
+                selfTrade ? ", self-trade" : "");
     }
 
-    /**
-     * Update user position.
-     * Prevents negative positions (no naked shorts).
-     */
-    private void updatePosition(Long userId, String symbol, BigDecimal quantity,
-                                 BigDecimal price, boolean isBuy) {
-        Optional<Position> posOpt = positionRepository.findByUserIdAndSymbol(userId, symbol);
-        Position position;
-
-        if (posOpt.isPresent()) {
-            position = posOpt.get();
-            if (isBuy) {
-                // Add to position
-                BigDecimal totalCost = position.getAvgPrice().multiply(position.getQuantity())
-                        .add(price.multiply(quantity));
-                BigDecimal newQty = position.getQuantity().add(quantity);
-                position.setAvgPrice(totalCost.divide(newQty, 8, RoundingMode.HALF_UP));
-                position.setQuantity(newQty);
-            } else {
-                // Subtract from position — floor at zero (safety net)
-                BigDecimal newQty = position.getQuantity().subtract(quantity);
-                if (newQty.compareTo(BigDecimal.ZERO) < 0) {
-                    logger.warn("Position would go negative for userId={}, symbol={}, setting to 0", userId, symbol);
-                    newQty = BigDecimal.ZERO;
-                }
-                position.setQuantity(newQty);
-            }
+    /** Add a fill to an order: filled quantity, volume-weighted average fill price, status. */
+    private void applyFill(Order o, BigDecimal qty, BigDecimal price, LocalDateTime now) {
+        BigDecimal prevFilled = o.getFilledQty() != null ? o.getFilledQty() : BigDecimal.ZERO;
+        BigDecimal newFilled = prevFilled.add(qty);
+        BigDecimal avg = (o.getFilledPrice() == null || prevFilled.signum() == 0)
+                ? price
+                : o.getFilledPrice().multiply(prevFilled).add(price.multiply(qty))
+                        .divide(newFilled, 8, RoundingMode.HALF_UP);
+        o.setFilledQty(newFilled);
+        o.setFilledPrice(avg);
+        if (newFilled.compareTo(o.getQuantity()) >= 0) {
+            o.setStatus("FILLED");
+            o.setExecutedAt(now);
         } else {
-            position = new Position();
-            position.setUserId(userId);
-            position.setSymbol(symbol);
-            if (isBuy) {
-                position.setQuantity(quantity);
-                position.setAvgPrice(price);
-            } else {
-                // No existing position and selling — should not happen with risk checks,
-                // but safety net: set to zero instead of negative
-                logger.warn("Sell with no existing position for userId={}, symbol={}", userId, symbol);
-                position.setQuantity(BigDecimal.ZERO);
-                position.setAvgPrice(price);
-            }
+            o.setStatus("PARTIAL");
         }
-
-        position.setUpdatedAt(LocalDateTime.now());
-        positionRepository.save(position);
+        orderRepository.save(o);
     }
 
+    private void ledger(Long userId, String type, BigDecimal amount, String description,
+                        Long tradeId, LocalDateTime now) {
+        Transaction txn = new Transaction();
+        txn.setUserId(userId);
+        txn.setType(type);
+        txn.setAmount(amount);
+        txn.setBalanceAfter(userRepository.findBalanceById(userId));
+        txn.setDescription(description);
+        txn.setReferenceId("TRADE-" + tradeId);
+        txn.setCreatedAt(now);
+        transactionRepository.save(txn);
+    }
+
+    // ==================================================================
+    // Engine-initiated cancels
+    // ==================================================================
+
+    /** Cancel a resting order the engine can no longer fill (its owner can't cover it). */
+    public void cancelForReason(Order o, String reason) {
+        o.setStatus("CANCELLED");
+        o.setStatusReason(reason);
+        orderRepository.save(o);
+        events.orderChanged(o);
+        // initiator=system and no isOwner: this is not a user cancelling someone else's order,
+        // so the IDOR-cancel detection must not fire on it.
+        log(SecurityEvent.ORDER_CANCELLED, Outcome.SUCCESS,
+                details("reason", reason.toLowerCase(),
+                        "orderId", o.getId(),
+                        "symbol", o.getSymbol(),
+                        "targetUserId", o.getUserId(),
+                        "initiator", "system"));
+        logger.info("Order auto-cancelled: id={}, owner={}, reason={}", o.getId(), o.getUserId(), reason);
+    }
+
+    /** The incoming order keeps its fills; the rest is cancelled with a reason. */
+    private void closeRemainder(Order o, String reason) {
+        o.setStatus("CANCELLED");
+        o.setStatusReason(reason);
+        logger.info("Order remainder cancelled: id={}, filled={}/{}, reason={}",
+                o.getId(), o.getFilledQty(), o.getQuantity(), reason);
+    }
+
+    // ==================================================================
+    // Order book
+    // ==================================================================
+
     /**
-     * Broadcast current order book.
-     * VULN: Includes orderer's userId (information disclosure).
-     * VULN: Shows all pending orders (front-running possible).
+     * Broadcast the current book of a symbol right away (used outside matching, e.g. the
+     * STOMP market.getOrderBook request).
+     * VULN: Includes orderer's userId and username (information disclosure).
      */
     public void broadcastOrderBook(String symbol) {
-        // Include PARTIAL so partially-filled resting orders still show in the book.
-        List<Order> orders = orderRepository.findBySymbolAndStatusIn(symbol, List.of("NEW", "PARTIAL"));
+        OrderBookService.Book book = orderBookService.snapshot(symbol);
+        messagingTemplate.convertAndSend("/topic/orderbook", book.entries());
+        messagingTemplate.convertAndSend("/topic/orderbook/" + symbol, book.toMessage());
+    }
 
-        List<OrderBookEntry> entries = orders.stream().map(o -> {
-            OrderBookEntry entry = new OrderBookEntry();
-            entry.setOrderId(o.getId());         // VULN: order ID exposed
-            entry.setSymbol(o.getSymbol());
-            entry.setSide(o.getSide());
-            entry.setPrice(o.getPrice());
-            entry.setQuantity(o.getQuantity().subtract(
-                    o.getFilledQty() != null ? o.getFilledQty() : BigDecimal.ZERO));
-            entry.setUserId(o.getUserId());      // VULN: user ID disclosed
-            // Look up username for extra info disclosure
-            userRepository.findById(o.getUserId()).ifPresent(u ->
-                    entry.setUsername(u.getUsername()));  // VULN: username disclosed
-            entry.setTimestamp(o.getCreatedAt().atZone(java.time.ZoneId.systemDefault())
-                    .toInstant().toEpochMilli());
-            return entry;
-        }).collect(Collectors.toList());
+    // ==================================================================
+    // Helpers
+    // ==================================================================
 
-        messagingTemplate.convertAndSend("/topic/orderbook", entries);
+    static BigDecimal remaining(Order o) {
+        BigDecimal filled = o.getFilledQty() != null ? o.getFilledQty() : BigDecimal.ZERO;
+        return o.getQuantity().subtract(filled);
+    }
+
+    static BigDecimal tradeValue(BigDecimal qty, BigDecimal price) {
+        return qty.multiply(price).setScale(8, RoundingMode.HALF_UP);
+    }
+
+    private static Comparator<Order> priceTimePriority(boolean incomingIsBuy) {
+        Comparator<Order> byPrice = Comparator.comparing(Order::getPrice);
+        if (!incomingIsBuy) byPrice = byPrice.reversed();   // a SELL hits the highest bid first
+        return byPrice
+                .thenComparing(Order::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(Order::getId);
     }
 }

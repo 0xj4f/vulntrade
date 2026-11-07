@@ -30,6 +30,7 @@ from playwright.sync_api import sync_playwright
 # ---------------------------------------------------------------------------
 BASE_URL = os.environ.get("SIM_BASE_URL", "https://d1v7uo8k715nt7.cloudfront.net")
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
+MAX_ORDER_QTY = 10000  # client-side cap in the dashboard order form
 AVATAR = os.path.join(os.path.dirname(__file__), "assets", "avatar.png")
 
 TRADE_BUDGET_PCT = 0.05     # never spend more than 5% of capital across all trades
@@ -186,6 +187,7 @@ def place_random_trades(page, balance):
         # Size the trade: a slice of the remaining budget, at least 1 unit.
         slice_budget = min(remaining, budget / n)
         qty = max(1, int(slice_budget / ask_price))
+        qty = min(qty, MAX_ORDER_QTY)          # the order form caps a single order at 10,000
         while qty * ask_price > remaining and qty > 1:
             qty -= 1
 
@@ -198,7 +200,8 @@ def place_random_trades(page, balance):
             price = ask_price
         else:
             page.locator("select").nth(1).select_option("LIMIT")
-            price = round(ask_price * 0.9, 2)   # below market -> rests as an open order
+            # below market -> rests as an open order; keep sub-cent coins (PEPE, DOGE) above 0
+            price = round(ask_price * 0.9, 2 if ask_price >= 1 else 8)
             page.locator('input[step="0.01"]').fill(str(price))
 
         page.locator('input[max="10000"]').fill(str(qty))

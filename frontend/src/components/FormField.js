@@ -1,60 +1,28 @@
-import React from 'react';
-import { inputStyle, labelStyle, formLabel } from '../styles/shared';
+import React, { useId } from 'react';
+import { labelStyle, inputStyle, inputFull, colors } from '../styles/shared';
 
 /**
- * Labeled form field wrapping an input.
- * @param {string} label - field label text
- * @param {'small'|'form'} labelVariant - 'small' uses 12px muted, 'form' uses 14px secondary
- * @param {string} width - input width override
+ * Labelled form field. The label is tied to the first child input via htmlFor/id.
  */
-export default function FormField({
-  label,
-  labelVariant = 'small',
-  width,
-  children,
-  style = {},
-}) {
-  const lbl = labelVariant === 'form' ? formLabel : labelStyle;
-
+export default function FormField({ label, hint, error, children, style = {}, grow = false }) {
+  const autoId = useId();
+  const child = React.Children.only(children);
+  const id = child.props.id || autoId;
+  const describedBy = error ? `${id}-err` : hint ? `${id}-hint` : undefined;
   return (
-    <div style={{ marginBottom: '4px', ...style }}>
-      {label && <label style={lbl}>{label}</label>}
-      {children || (
-        <input style={{ ...inputStyle, ...(width ? { width } : {}) }} />
-      )}
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, ...(grow ? { flex: 1 } : {}), ...style }}>
+      {label && <label htmlFor={id} style={labelStyle}>{label}</label>}
+      {React.cloneElement(child, { id, 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined })}
+      {error && <span id={`${id}-err`} role="alert" style={{ color: colors.redLight, fontSize: '12px', marginTop: '6px' }}>{error}</span>}
+      {!error && hint && <span id={`${id}-hint`} style={{ color: colors.textMuted, fontSize: '12px', marginTop: '6px' }}>{hint}</span>}
     </div>
   );
 }
 
-/**
- * Standalone input with shared styling.
- * Forwards all standard input props.
- */
 export function Input({ width, style = {}, ...props }) {
-  return (
-    <input
-      style={{
-        ...inputStyle,
-        ...(width ? { width } : {}),
-        ...style,
-      }}
-      {...props}
-    />
-  );
+  return <input {...props} style={{ ...inputStyle, ...(width ? { width } : {}), ...style }} />;
 }
 
-/**
- * Full-width input (for auth forms).
- */
 export function InputFull({ style = {}, ...props }) {
-  return (
-    <input
-      style={{
-        ...inputStyle,
-        width: '100%',
-        ...style,
-      }}
-      {...props}
-    />
-  );
+  return <input {...props} style={{ ...inputFull, ...style }} />;
 }

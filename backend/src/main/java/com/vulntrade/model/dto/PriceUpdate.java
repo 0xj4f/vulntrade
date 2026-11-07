@@ -16,6 +16,8 @@ public class PriceUpdate {
     private BigDecimal last;
     private Long volume;
     private Long timestamp;
+    private BigDecimal open;            // session open (first price since backend start)
+    private BigDecimal changePct;       // % change vs session open
 
     // VULN: Internal fields that should not be exposed
     private BigDecimal costBasis;       // Internal market maker cost

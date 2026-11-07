@@ -16,13 +16,16 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 /**
  * Liquidity Provider Service — acts as the house / market maker.
  *
- * Guarantees that MARKET orders always fill by providing counter-liquidity
- * from the house account when no matching orders exist in the book.
+ * Provides counter-liquidity from the house account: MARKET orders and marketable LIMIT
+ * orders that the book can't fill, and (through {@link HouseMarketMakerService}) resting
+ * LIMIT orders that a later price move crosses. The matching engine settles every house
+ * fill with the same never-negative rules as user fills.
  *
  * Configuration (application.yml):
  *   liquidity.house-user-id   — user ID of the house account (default: 1)
@@ -59,120 +62,52 @@ public class LiquidityProviderService {
     }
 
     /**
-     * Attempt to fill a MARKET order against the house.
-     *
-     * @param marketOrder  the unfilled (or partially filled) MARKET order
-     * @param quantity     the remaining quantity to fill
-     * @return the synthetic house counter-order if filled, or null if unable
+     * Price at which the house trades with a trader on {@code traderSide}:
+     * BUY → ask + spread (trader pays slightly more), SELL → bid − spread.
+     * Returns null when there is no usable quote.
      */
-    public Order fillMarketOrder(Order marketOrder, BigDecimal quantity) {
-        if (!enabled) {
-            logger.info("Liquidity provider disabled, skipping house fill");
-            return null;
+    public BigDecimal fillPrice(Symbol sym, String traderSide) {
+        if (sym == null) return null;
+        BigDecimal m = spreadMultiplier();
+        if ("BUY".equalsIgnoreCase(traderSide)) {
+            BigDecimal ask = sym.getAsk();
+            if (ask == null || ask.compareTo(BigDecimal.ZERO) <= 0) return null;
+            return ask.add(ask.multiply(m)).setScale(8, RoundingMode.HALF_UP);
         }
+        BigDecimal bid = sym.getBid();
+        if (bid == null || bid.compareTo(BigDecimal.ZERO) <= 0) return null;
+        return bid.subtract(bid.multiply(m)).setScale(8, RoundingMode.HALF_UP);
+    }
 
-        // Don't fill house orders against itself
-        if (houseUserId.equals(marketOrder.getUserId())) {
-            logger.debug("House order — no self-fill");
-            return null;
-        }
+    /** Same as {@link #fillPrice(Symbol, String)}, looked up by symbol. */
+    public BigDecimal fillPrice(String symbol, String traderSide) {
+        return symbolRepository.findById(symbol).map(s -> fillPrice(s, traderSide)).orElse(null);
+    }
 
-        // 1. Determine fill price from live market data + spread
-        BigDecimal fillPrice = calculateFillPrice(marketOrder.getSymbol(), marketOrder.getSide());
-        if (fillPrice == null) {
-            logger.warn("No market price available for {} — cannot provide liquidity", marketOrder.getSymbol());
-            return null;
-        }
+    /** spread-percent as a fraction (0.01% → 0.0001). */
+    public BigDecimal spreadMultiplier() {
+        return spreadPercent.divide(new BigDecimal("100"), 8, RoundingMode.HALF_UP);
+    }
 
-        // 2. Check house can fulfill the order
-        String houseSide = "BUY".equals(marketOrder.getSide()) ? "SELL" : "BUY";
-
-        if ("SELL".equals(houseSide)) {
-            // House is selling to the trader (trader is buying)
-            // House needs enough position
-            if (!houseHasPosition(marketOrder.getSymbol(), quantity)) {
-                logger.warn("House has insufficient position for {} {} — cannot fill",
-                        quantity, marketOrder.getSymbol());
-                return null;
-            }
-        } else {
-            // House is buying from the trader (trader is selling)
-            // House needs enough balance
-            BigDecimal cost = quantity.multiply(fillPrice);
-            if (!houseHasBalance(cost)) {
-                logger.warn("House has insufficient balance for ${} — cannot fill", cost);
-                return null;
-            }
-        }
-
-        // 3. Create synthetic house counter-order
+    /**
+     * Record the house's side of a fill as its own order (the engine fills it right away).
+     * Tagged "LP-" so it is never mistaken for a market-making ladder order.
+     */
+    public Order createHouseOrder(String symbol, String houseSide, BigDecimal quantity, BigDecimal price) {
         Order houseOrder = new Order();
         houseOrder.setUserId(houseUserId);
-        houseOrder.setSymbol(marketOrder.getSymbol());
+        houseOrder.setSymbol(symbol);
         houseOrder.setSide(houseSide);
         houseOrder.setOrderType("MARKET");
         houseOrder.setQuantity(quantity);
-        houseOrder.setPrice(fillPrice);
-        // Create as NEW with no fill yet; executeTrade() does the single fill (status,
-        // filled_qty, filled_price, executed_at). Previously this was pre-filled here AND
-        // again in executeTrade, double-counting filled_qty.
+        houseOrder.setPrice(price);
         houseOrder.setStatus("NEW");
         houseOrder.setFilledQty(BigDecimal.ZERO);
         houseOrder.setClientOrderId("LP-" + System.currentTimeMillis());
-        houseOrder.setCreatedAt(LocalDateTime.now());
+        houseOrder.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
         houseOrder = orderRepository.save(houseOrder);
-
-        logger.info("LP fill: {} {} {} x {} @ {} (spread={}%, houseOrder=#{})",
-                marketOrder.getSide(), marketOrder.getSymbol(),
-                quantity, fillPrice, spreadPercent, houseOrder.getId());
-
+        logger.debug("LP fill: house {} {} x {} @ {} (order #{})", houseSide, symbol, quantity, price, houseOrder.getId());
         return houseOrder;
-    }
-
-    /**
-     * Calculate the fill price with spread applied.
-     *
-     * BUY orders  → fill at ask + spread  (trader pays slightly more)
-     * SELL orders → fill at bid - spread  (trader receives slightly less)
-     */
-    private BigDecimal calculateFillPrice(String symbol, String traderSide) {
-        Optional<Symbol> symOpt = symbolRepository.findById(symbol);
-        if (symOpt.isEmpty()) return null;
-
-        Symbol sym = symOpt.get();
-        BigDecimal spreadMultiplier = spreadPercent.divide(new BigDecimal("100"), 8, RoundingMode.HALF_UP);
-
-        if ("BUY".equalsIgnoreCase(traderSide)) {
-            // Trader buying → house selling → use ask price + spread
-            BigDecimal ask = sym.getAsk();
-            if (ask == null || ask.compareTo(BigDecimal.ZERO) <= 0) return null;
-            BigDecimal spreadAmount = ask.multiply(spreadMultiplier);
-            return ask.add(spreadAmount).setScale(8, RoundingMode.HALF_UP);
-        } else {
-            // Trader selling → house buying → use bid price - spread
-            BigDecimal bid = sym.getBid();
-            if (bid == null || bid.compareTo(BigDecimal.ZERO) <= 0) return null;
-            BigDecimal spreadAmount = bid.multiply(spreadMultiplier);
-            return bid.subtract(spreadAmount).setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
-    /**
-     * Check if the house has enough position to sell.
-     */
-    private boolean houseHasPosition(String symbol, BigDecimal quantity) {
-        Optional<Position> posOpt = positionRepository.findByUserIdAndSymbol(houseUserId, symbol);
-        if (posOpt.isEmpty()) return false;
-        return posOpt.get().getQuantity().compareTo(quantity) >= 0;
-    }
-
-    /**
-     * Check if the house has enough balance to buy.
-     */
-    private boolean houseHasBalance(BigDecimal cost) {
-        Optional<User> userOpt = userRepository.findById(houseUserId);
-        if (userOpt.isEmpty()) return false;
-        return userOpt.get().getBalance().compareTo(cost) >= 0;
     }
 
     // --- Getters for config (useful for debugging / API exposure) ---

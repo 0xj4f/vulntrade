@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS orders (
     filled_qty DECIMAL(20,8) DEFAULT 0,
     filled_price DECIMAL(20,8),
     client_order_id VARCHAR(100),     -- VULN: not UNIQUE
+    status_reason VARCHAR(32),        -- why the engine closed it (INSUFFICIENT_FUNDS, NO_LIQUIDITY, ...)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     executed_at TIMESTAMP
 );
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS positions (
     quantity DECIMAL(20,8) DEFAULT 0,
     avg_price DECIMAL(20,8) DEFAULT 0,
     unrealized_pnl DECIMAL(20,8) DEFAULT 0,
+    realized_pnl DECIMAL(20,8) DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, symbol)
 );

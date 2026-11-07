@@ -34,6 +34,10 @@ public class Position {
     @Column(name = "unrealized_pnl", precision = 20, scale = 8)
     private BigDecimal unrealizedPnl = BigDecimal.ZERO;
 
+    /** Profit/loss locked in by sells: sum of (sell price - avg cost) x qty. */
+    @Column(name = "realized_pnl", precision = 20, scale = 8)
+    private BigDecimal realizedPnl = BigDecimal.ZERO;
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt = LocalDateTime.now();
 }

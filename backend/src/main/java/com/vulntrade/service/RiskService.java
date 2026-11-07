@@ -22,6 +22,10 @@ import java.util.Optional;
  * - Price > 0 (for LIMIT orders)
  * - Buyer has sufficient balance
  * - Seller has sufficient position (asset ownership)
+ *
+ * The check is advisory: nothing is reserved (vuln #43 spirit — several open orders may
+ * together exceed the balance). The matching engine re-checks at fill time and never lets
+ * a balance or a position go negative.
  */
 @Service
 public class RiskService {
@@ -30,13 +34,16 @@ public class RiskService {
     private final UserRepository userRepository;
     private final PositionRepository positionRepository;
     private final SymbolRepository symbolRepository;
+    private final LiquidityProviderService liquidityProvider;
 
     public RiskService(UserRepository userRepository,
                        PositionRepository positionRepository,
-                       SymbolRepository symbolRepository) {
+                       SymbolRepository symbolRepository,
+                       LiquidityProviderService liquidityProvider) {
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
         this.symbolRepository = symbolRepository;
+        this.liquidityProvider = liquidityProvider;
     }
 
     /**
@@ -69,14 +76,11 @@ public class RiskService {
             return "Symbol " + symbol + " is not currently tradable";
         }
 
-        // 4. Determine effective price for MARKET orders
+        // 4. Determine effective price for MARKET orders: what the house would charge
+        //    (touch +/- spread), so a max-size market buy can't overdraw on the spread.
         BigDecimal effectivePrice = price;
         if ("MARKET".equalsIgnoreCase(orderType)) {
-            if ("BUY".equalsIgnoreCase(side)) {
-                effectivePrice = sym.getAsk();
-            } else {
-                effectivePrice = sym.getBid();
-            }
+            effectivePrice = liquidityProvider.fillPrice(sym, side);
             if (effectivePrice == null || effectivePrice.compareTo(BigDecimal.ZERO) <= 0) {
                 return "No valid market price available for " + symbol;
             }

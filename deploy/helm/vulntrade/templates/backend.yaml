@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend                # fixed name: frontend/nginx.conf proxies to http://backend:8080
+  labels:
+    {{- include "vulntrade.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.backend.service.type }}
+  selector:
+    {{- include "vulntrade.selector" (dict "ctx" . "component" "backend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    {{- if .Values.backend.service.exposeDebugPorts }}
+    - name: jdwp
+      port: 5005
+      targetPort: 5005
+    - name: jmx
+      port: 9090
+      targetPort: 9090
+    {{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-uploads
+  labels:
+    {{- include "vulntrade.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.postgres.storage.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.uploads.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    {{- include "vulntrade.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  # One replica only: order matching uses an in-memory lock, and the uploads volume is RWO.
+  replicas: {{ .Values.backend.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "vulntrade.selector" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vulntrade.selector" (dict "ctx" . "component" "backend") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ .Values.postgres.image }}
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432; do echo waiting for postgres; sleep 2; done"]
+      containers:
+        - name: backend
+          image: {{ include "vulntrade.image" (dict "ctx" . "image" .Values.backend.image) }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.backend.springProfile | quote }}
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/{{ .Values.postgres.database }}"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ .Values.postgres.username | quote }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "vulntrade.secretName" . }}, key: POSTGRES_PASSWORD } }
+            - name: SPRING_REDIS_HOST
+              value: redis
+            - name: SPRING_REDIS_PORT
+              value: "6379"
+            - name: JWT_EXPIRATION
+              value: {{ .Values.backend.jwtExpiration | quote }}
+            {{- range $key := list "JWT_SECRET" "ADMIN_API_KEY" "FLAG_1" "FLAG_7" "FLAG_8" "FLAG_10" }}
+            - name: {{ $key }}
+              valueFrom: { secretKeyRef: { name: {{ include "vulntrade.secretName" $ }}, key: {{ $key }} } }
+            {{- end }}
+            {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: jdwp
+              containerPort: 5005
+            - name: jmx
+              containerPort: 9090
+          startupProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: {{ .Values.backend.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.backend.startupProbe.failureThreshold }}
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: flags
+              mountPath: /opt/flags
+              readOnly: true
+            - name: uploads
+              mountPath: /uploads/photos
+            - name: logs
+              mountPath: /var/log/vulntrade
+          {{- with .Values.backend.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- if .Values.logShipper.enabled }}
+        - name: log-shipper
+          image: {{ .Values.logShipper.image }}
+          env:
+            - name: S3_BUCKET
+              value: {{ .Values.logShipper.s3Bucket | quote }}
+            - name: AWS_REGION
+              value: {{ .Values.logShipper.awsRegion | quote }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.logShipper.awsRegion | quote }}
+            {{- range $key := list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SESSION_TOKEN" }}
+            - name: {{ $key }}
+              valueFrom: { secretKeyRef: { name: {{ include "vulntrade.secretName" $ }}, key: {{ $key }} } }
+            {{- end }}
+          volumeMounts:
+            - name: logs
+              mountPath: /var/log/vulntrade
+              readOnly: true
+            - name: log-shipper-config
+              mountPath: /fluent-bit/etc/fluent-bit.conf
+              subPath: fluent-bit.conf
+            - name: log-shipper-config
+              mountPath: /fluent-bit/etc/parsers.conf
+              subPath: parsers.conf
+            - name: fluent-bit-buffer
+              mountPath: /var/log/fluent-bit
+        {{- end }}
+      volumes:
+        - name: flags
+          configMap:
+            name: {{ .Release.Name }}-flags
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-uploads
+        - name: logs
+          emptyDir: {}
+        {{- if .Values.logShipper.enabled }}
+        - name: log-shipper-config
+          configMap:
+            name: {{ .Release.Name }}-log-shipper
+        - name: fluent-bit-buffer
+          emptyDir: {}
+        {{- end }}

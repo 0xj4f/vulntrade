@@ -52,6 +52,10 @@ public class Order {
     private String clientOrderId;
     // VULN: not unique - replay attacks possible
 
+    /** Why the engine closed the order (INSUFFICIENT_FUNDS, INSUFFICIENT_POSITION, NO_LIQUIDITY). */
+    @Column(name = "status_reason", length = 32)
+    private String statusReason;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 

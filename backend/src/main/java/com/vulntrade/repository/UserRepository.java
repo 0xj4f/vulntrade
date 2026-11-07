@@ -2,9 +2,13 @@ package com.vulntrade.repository;
 
 import com.vulntrade.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,4 +34,26 @@ public interface UserRepository extends JpaRepository<User, Long> {
     List<User> findByRole(String role);
 
     List<User> findByIsActive(Boolean isActive);
+
+    // ------------------------------------------------------------------
+    // Trade settlement — atomic, conditional balance moves. The trade path never
+    // saves a whole User entity, so a stale entity can't write an old balance back.
+    // ------------------------------------------------------------------
+
+    /** Debit only if the balance covers it. Returns 1 on success, 0 if the funds aren't there. */
+    @Transactional
+    @Modifying(flushAutomatically = true)
+    @Query(value = "UPDATE users SET balance = balance - :amount WHERE id = :id AND balance >= :amount",
+            nativeQuery = true)
+    int debitIfSufficient(@Param("id") Long id, @Param("amount") BigDecimal amount);
+
+    /** Add (or, with a negative amount, remove) funds unconditionally. */
+    @Transactional
+    @Modifying(flushAutomatically = true)
+    @Query(value = "UPDATE users SET balance = balance + :amount WHERE id = :id", nativeQuery = true)
+    int credit(@Param("id") Long id, @Param("amount") BigDecimal amount);
+
+    /** Current balance straight from the database (bypasses the persistence context). */
+    @Query(value = "SELECT balance FROM users WHERE id = :id", nativeQuery = true)
+    BigDecimal findBalanceById(@Param("id") Long id);
 }

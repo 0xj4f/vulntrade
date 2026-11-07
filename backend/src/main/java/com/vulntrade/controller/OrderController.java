@@ -62,7 +62,11 @@ public class OrderController {
             response.put("price", order.getPrice());
             response.put("status", order.getStatus());
             response.put("filledQty", order.getFilledQty());
-            response.put("filledPrice", order.getFilledPrice());
+            response.put("filledPrice", order.getFilledPrice());   // volume-weighted average
+            response.put("avgFillPrice", order.getFilledPrice());
+            response.put("remainingQty", order.getQuantity().subtract(
+                    order.getFilledQty() != null ? order.getFilledQty() : java.math.BigDecimal.ZERO));
+            response.put("reason", order.getStatusReason());
             response.put("clientOrderId", order.getClientOrderId());
             response.put("createdAt", order.getCreatedAt());
             response.put("message", "Order placed successfully");
@@ -187,13 +191,16 @@ public class OrderController {
         }
 
         // VULN: No ownership check - any user can delete any order
-        if (orderRepository.existsById(orderId)) {
-            orderRepository.deleteById(orderId);
-            log(SecurityEvent.SENSITIVE_DATA_DELETED, Outcome.SUCCESS,
-                    details("resource", "order", "orderId", orderId));
-            return ResponseEntity.ok(Map.of("message", "Order deleted", "orderId", orderId));
+        try {
+            if (orderService.deleteOrder(orderId)) {
+                log(SecurityEvent.SENSITIVE_DATA_DELETED, Outcome.SUCCESS,
+                        details("resource", "order", "orderId", orderId));
+                return ResponseEntity.ok(Map.of("message", "Order deleted", "orderId", orderId));
+            }
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
         }
-        return ResponseEntity.notFound().build();
     }
 
     private Long extractUserId(String authHeader) {

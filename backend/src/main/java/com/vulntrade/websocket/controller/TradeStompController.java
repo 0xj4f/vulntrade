@@ -92,7 +92,9 @@ public class TradeStompController {
             response.put("side", order.getSide());
             response.put("quantity", order.getQuantity());
             response.put("price", order.getPrice());
+            response.put("orderType", order.getOrderType());
             response.put("clientOrderId", order.getClientOrderId());
+            putFillDetails(response, order);
 
             messagingTemplate.convertAndSendToUser(
                     extractUsername(headerAccessor), "/queue/orders", response);
@@ -126,6 +128,8 @@ public class TradeStompController {
             response.put("type", "ORDER_CANCELLED");
             response.put("orderId", order.getId());
             response.put("status", order.getStatus());
+            response.put("symbol", order.getSymbol());
+            putFillDetails(response, order);
 
             messagingTemplate.convertAndSendToUser(
                     extractUsername(headerAccessor), "/queue/orders", response);
@@ -162,8 +166,10 @@ public class TradeStompController {
             response.put("type", "MARKET_ORDER_EXECUTED");
             response.put("orderId", order.getId());
             response.put("status", order.getStatus());
-            response.put("filledPrice", order.getFilledPrice());
-            response.put("filledQty", order.getFilledQty());
+            response.put("symbol", order.getSymbol());
+            response.put("side", order.getSide());
+            response.put("quantity", order.getQuantity());
+            putFillDetails(response, order);
 
             messagingTemplate.convertAndSendToUser(
                     extractUsername(headerAccessor), "/queue/orders", response);
@@ -428,6 +434,16 @@ public class TradeStompController {
         }
 
         return null;
+    }
+
+    /** filledQty, avgFillPrice (volume-weighted; also as filledPrice), remainingQty, reason. */
+    private static void putFillDetails(Map<String, Object> response, Order order) {
+        BigDecimal filled = order.getFilledQty() != null ? order.getFilledQty() : BigDecimal.ZERO;
+        response.put("filledQty", filled);
+        response.put("filledPrice", order.getFilledPrice());
+        response.put("avgFillPrice", order.getFilledPrice());
+        response.put("remainingQty", order.getQuantity() != null ? order.getQuantity().subtract(filled) : null);
+        response.put("reason", order.getStatusReason());
     }
 
     /**

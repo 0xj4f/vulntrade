@@ -1,0 +1,15 @@
+# OrbStack's built-in Kubernetes shares OrbStack's Docker engine, so images built there are
+# visible to the cluster without a load step — see `make orbstack-up`.
+backend:
+  image:
+    repository: vulntrade-backend
+    tag: local
+    pullPolicy: Never
+frontend:
+  image:
+    repository: vulntrade-frontend
+    tag: local
+    pullPolicy: Never
+postgres:
+  storage:
+    storageClass: ""       # OrbStack's default (local-path)

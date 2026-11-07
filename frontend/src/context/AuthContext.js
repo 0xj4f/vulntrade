@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/apiService';
+import { reconnectWebSocket } from '../services/websocketService';
 
 /**
  * VULN: Auth context stores role in client state.
@@ -123,6 +124,21 @@ export function AuthProvider({ children }) {
     return user?.role === 'DEVELOPER';
   };
 
+  // The API layer reports an expired/invalid token: end the session cleanly.
+  useEffect(() => {
+    const onExpired = () => {
+      if (!localStorage.getItem('token')) return;
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setToken(null);
+      setUser(null);
+      setIsAuthenticated(false);
+      window.dispatchEvent(new CustomEvent('vt:notice', { detail: 'Your session expired — please sign in again.' }));
+    };
+    window.addEventListener('vt:session-expired', onExpired);
+    return () => window.removeEventListener('vt:session-expired', onExpired);
+  }, []);
+
   // Keep userIdRef in sync so refreshUser never closes over a stale user object
   useEffect(() => { userIdRef.current = user?.userId || user?.id; }, [user?.userId, user?.id]);
 
@@ -171,6 +187,8 @@ export function AuthProvider({ children }) {
 
       setToken(data.token);
       setUser(merged);
+      // The WebSocket session still carries the old token's claims — reconnect with the new one.
+      reconnectWebSocket();
 
       return data;
     } catch (e) {

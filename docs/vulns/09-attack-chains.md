@@ -15,7 +15,7 @@ These are multi-step attack scenarios that chain 3+ vulnerabilities together for
 1. **Register** a new account (`POST /api/auth/register`)
 2. **Bypass KYC** — set any first name to auto-verify to Level 2 (BIZ-15)
 3. **Deposit unlimited funds** — no source verification (BIZ-05): `POST /api/accounts/deposit {"amount":1000000,"sourceAccount":"fake"}`
-4. **Buy VULN** — place a large market or limit order for VULN token (its price oscillates ~100 ±20 on a predictable sine wave, BIZ-16)
+4. **Buy VULN** — put most of that capital into VULN (its price oscillates ~100 ±20 on a predictable sine wave, BIZ-16). ROI is measured against net deposits, so the position must be large relative to what you deposited — the seeded #1 holds VULN too
 5. **Discover admin.setPrice has no authorization** — the `/app/admin.setPrice` handler has **no role check at all** (BIZ-01 / WS-02), so any authenticated non-admin can call it
 6. **Manipulate VULN price** — send via WebSocket: `sendMessage('/app/admin.setPrice', {symbol:'VULN', price:99999})`
 7. **Portfolio skyrockets** — VULN position now worth millions

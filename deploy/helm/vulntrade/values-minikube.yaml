@@ -1,0 +1,15 @@
+# minikube (docker driver, e.g. on Docker Desktop): images are built locally and loaded into
+# the minikube node with `minikube image load` — see `make minikube-up`.
+backend:
+  image:
+    repository: vulntrade-backend
+    tag: local
+    pullPolicy: Never
+frontend:
+  image:
+    repository: vulntrade-frontend
+    tag: local
+    pullPolicy: Never
+postgres:
+  storage:
+    storageClass: standard
