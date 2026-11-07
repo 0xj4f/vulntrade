@@ -30,7 +30,7 @@ EXPOSE 8080 5005 9090
 
 # VULN: Running with debug and JMX enabled
 # VULN: JNDI trust flags enable Log4Shell remote class loading (CVE-2021-44228)
-ENV JAVA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 \
+ENV JAVA_OPTS="-Duser.timezone=UTC -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 \
     -Dcom.sun.management.jmxremote \
     -Dcom.sun.management.jmxremote.port=9090 \
     -Dcom.sun.management.jmxremote.rmi.port=9090 \

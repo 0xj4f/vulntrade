@@ -9,6 +9,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 public class VulnTradeApplication {
 
     public static void main(String[] args) {
+        // All LocalDateTime values are UTC; the API writes them with a 'Z' suffix (JacksonConfig).
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"));
         SpringApplication.run(VulnTradeApplication.class, args);
     }
 }

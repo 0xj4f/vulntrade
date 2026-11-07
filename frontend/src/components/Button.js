@@ -1,39 +1,27 @@
 import React from 'react';
+import { Loader2 } from 'lucide-react';
 import { buttonStyles, btnSmall, btnMedium, btnLarge } from '../styles/shared';
 
+const SIZES = { small: btnSmall, medium: btnMedium, large: btnLarge };
+
 /**
- * Reusable button component.
- * @param {'green'|'red'|'blue'|'amber'|'purple'|'gray'|'darkRed'} variant
- * @param {'small'|'medium'|'large'} size
+ * Button. variant: green | red | blue | amber | purple | gray | ghost | darkRed
+ * `loading` disables it and shows a spinner; `icon` renders before the label.
  */
 export default function Button({
-  variant = 'green',
-  size = 'medium',
-  onClick,
-  type = 'button',
-  children,
-  style = {},
-  disabled = false,
-  ...rest
+  variant = 'blue', size = 'medium', children, style = {}, loading = false, icon,
+  disabled, type = 'button', className = '', ...props
 }) {
-  const sizeStyle =
-    size === 'small' ? btnSmall :
-    size === 'large' ? btnLarge :
-    btnMedium;
-
   return (
     <button
       type={type}
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        ...buttonStyles[variant],
-        ...sizeStyle,
-        ...style,
-        ...(disabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
-      }}
-      {...rest}
+      className={`vt-btn${variant === 'ghost' || variant === 'gray' ? ' vt-ghost' : ''} ${className}`}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      style={{ ...(buttonStyles[variant] || buttonStyles.blue), ...(SIZES[size] || btnMedium), ...style }}
+      {...props}
     >
+      {loading ? <Loader2 size={14} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : icon}
       {children}
     </button>
   );

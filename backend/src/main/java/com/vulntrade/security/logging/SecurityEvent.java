@@ -5,9 +5,9 @@ import java.util.Locale;
 /**
  * Every security event VulnTrade writes to security.log.
  *
- * <p>This list mirrors {@code data/VulnTrade Security Events.xlsx} (the source of
- * truth) and the catalog in {@code docs/logging-guide.md} §4. Each constant knows
- * its spreadsheet category. The JSON {@code eventType} is the constant name in
+ * <p>This list mirrors the security-events catalog in {@code docs/security-events.md}
+ * (the source of truth) and {@code docs/logging-guide.md} §4. Each constant knows
+ * its catalog category. The JSON {@code eventType} is the constant name in
  * lower case, e.g. {@code LOGIN_FAILURE} is written as {@code "login_failure"}.
  *
  * <p>Adding an event: add the sheet row first, then the constant here under its

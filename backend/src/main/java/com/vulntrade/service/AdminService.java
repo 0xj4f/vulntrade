@@ -55,12 +55,13 @@ public class AdminService {
      * VULN: Reason field logged without sanitization (log injection).
      */
     public BigDecimal adjustBalance(Long userId, BigDecimal amount, String reason) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+        if (amount == null || !userRepository.existsById(userId)) {
+            throw new RuntimeException("User not found: " + userId);
+        }
 
-        BigDecimal newBalance = user.getBalance().add(amount);
-        user.setBalance(newBalance);
-        userRepository.save(user);
+        // Atomic delta: a concurrent trade settlement can't be overwritten by a stale entity save.
+        userRepository.credit(userId, amount);
+        BigDecimal newBalance = userRepository.findBalanceById(userId);
 
         // Record transaction
         Transaction txn = new Transaction();
@@ -70,7 +71,7 @@ public class AdminService {
         txn.setBalanceAfter(newBalance);
         txn.setDescription("Admin adjustment: " + reason);  // VULN: unsanitized
         txn.setReferenceId("ADJ-" + System.currentTimeMillis());
-        txn.setCreatedAt(LocalDateTime.now());
+        txn.setCreatedAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         transactionRepository.save(txn);
 
         // VULN: Log injection via reason field

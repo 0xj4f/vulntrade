@@ -22,12 +22,18 @@ This is where VulnTrade truly differentiates from DVWA and Juice Shop. These vul
 **Description:** Any authenticated user can set arbitrary prices for any symbol via the admin WebSocket endpoint (see WS-02 / AUTHZ-09). `admin.setPrice` has no role enforcement — `StompChannelInterceptor` only *logs* a warning for a non-admin sender, it never blocks the message. The price persists permanently: `PriceSimulatorService.setPrice` adds the symbol to `overriddenSymbols`, so the simulator skips it until restart. Combined with position holding, this enables pump-and-dump attacks.
 
 **Attack scenario:**
-1. Buy 10,000 VULN at $42 (cost: $420,000)
-2. Send: `sendMessage('/app/admin.setPrice', {symbol: 'VULN', price: 99999})`
-3. Position now worth $999,990,000
-4. ROI skyrockets, you're #1 on leaderboard
+1. Get capital: verify (any first name, BIZ-15) and deposit, e.g. $1,000,000 (BIZ-05)
+2. Buy VULN with most of it — e.g. ~9,000 VULN at ~$100 (VULN trades on a predictable 80–120 sine)
+3. Send: `sendMessage('/app/admin.setPrice', {symbol: 'VULN', price: 99999})`
+4. The position is now worth ~$900M; your ROI jumps past every seeded trader and you're #1
 
-This corresponds to Flag 11 (`FLAG{m4rk3t_m4n1pul4t0r_numb3r_0n3}`). Note the app has no code path that auto-awards the flag string for reaching #1 — see [10-ctf-flags.md](10-ctf-flags.md) for how the flag value is actually retrieved.
+ROI is measured against **net deposits** (deposits − withdrawals ± adjustments), so the VULN position has
+to be large relative to the money you put in: the seeded #1 (`0xj4f`) also holds VULN, and you only
+overtake it if you hold more VULN per dollar of capital (roughly: put more than ~65% of your capital into
+VULN at ~$100). Depositing alone no longer raises ROI.
+
+This corresponds to Flag 11 (`FLAG{m4rk3t_m4n1pul4t0r_numb3r_0n3}`): `GET /api/leaderboard` returns it in
+the `flag` field when the caller is rank #1 — see [10-ctf-flags.md](10-ctf-flags.md).
 
 **What you learn:** Price oracles must be protected. In DeFi, oracle manipulation is the #1 attack vector. This simulates that exact class of vulnerability.
 
@@ -150,7 +156,7 @@ Send several concurrent requests each for more than half the balance. Serially o
 
 **Description:** Selling more shares than you own is now **rejected server-side**. `RiskService.checkPreTrade` requires the seller to hold enough of the asset and returns `"Insufficient position..."` otherwise; a SELL of 999999 AAPL with no position comes back as an `ERROR`. As a defence-in-depth backstop, `MatchingEngineService.updatePosition` also floors positions at zero instead of going negative.
 
-**Historical note:** Previously a position could go negative (naked short with no borrow/margin check) — kept as a documented control.
+**Historical note:** Previously a position could go negative (naked short with no borrow/margin check) — kept as a documented control. Until 0.6.0 the same shares could also be offered in two resting SELL orders and both would fill (the position floored at 0 while the seller was paid twice); settlement now re-checks the shares at fill and cancels the uncoverable order.
 
 ---
 

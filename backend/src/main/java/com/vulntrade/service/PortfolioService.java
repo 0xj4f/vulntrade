@@ -43,6 +43,7 @@ public class PortfolioService {
             posMap.put("symbol", pos.getSymbol());
             posMap.put("quantity", pos.getQuantity());
             posMap.put("avgPrice", pos.getAvgPrice());
+            posMap.put("realizedPnl", pos.getRealizedPnl() != null ? pos.getRealizedPnl() : BigDecimal.ZERO);
 
             // Calculate unrealized P&L using current price
             symbolRepository.findById(pos.getSymbol()).ifPresent(sym -> {

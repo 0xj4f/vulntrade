@@ -80,7 +80,7 @@ public class FamousTraderSeeder {
     private void seed0xj4f() {
         User u = createUser("0xj4f", "vulntrade", "0xj4f@proton.me", "0xj4f", "DevSecOps",
                 "Creator of VulnTrade. DevSecOps engineer. Eats bugs for breakfast. github.com/0xj4f -- FLAG{0xj4f_w4s_h3r3_bu1ld1ng_vuln5}",
-                "50000.00");
+                "4000000.00");
         // Every single sell is profitable. Suspiciously perfect.
         String[][] trades = {
             {"VULN", "BUY", "10000", "35.00", "168"}, {"VULN", "SELL", "2000", "42.00", "140"},
@@ -476,9 +476,42 @@ public class FamousTraderSeeder {
         return u;
     }
 
-    private void executeTrades(User trader, String[][] trades) {
+    /** Seed trades oldest first (the arrays are written roughly newest-last but not sorted). */
+    private static List<String[]> chronological(String[][] trades) {
+        List<String[]> ordered = new ArrayList<>(Arrays.asList(trades));
+        ordered.sort(Comparator.comparingInt((String[] t) -> Integer.parseInt(t[4])).reversed());
+        return ordered;
+    }
+
+    private void executeTrades(User trader, String[][] tradeSpecs) {
         Long traderId = trader.getId();
         Long adminId = admin.getId();
+        List<String[]> trades = chronological(tradeSpecs);
+
+        // Make sure the history is funded: if replaying it would take cash below zero,
+        // record an extra deposit up front that covers the deepest point (+5%).
+        BigDecimal running = trader.getBalance();
+        BigDecimal lowest = running;
+        for (String[] t : trades) {
+            BigDecimal value = new BigDecimal(t[2]).multiply(new BigDecimal(t[3]));
+            running = "BUY".equals(t[1]) ? running.subtract(value) : running.add(value);
+            lowest = lowest.min(running);
+        }
+        if (lowest.signum() < 0) {
+            BigDecimal topUp = lowest.negate().multiply(new BigDecimal("1.05"))
+                    .divide(new BigDecimal("10000"), 0, RoundingMode.CEILING)
+                    .multiply(new BigDecimal("10000"));
+            BigDecimal funded = trader.getBalance().add(topUp);
+            Transaction extra = new Transaction();
+            extra.setUserId(traderId);
+            extra.setType("DEPOSIT");
+            extra.setAmount(topUp);
+            extra.setBalanceAfter(funded);
+            extra.setDescription("Additional capital deposit");
+            extra.setCreatedAt(LocalDateTime.now().minusDays(8).plusMinutes(1));
+            transactionRepository.save(extra);
+            trader.setBalance(funded);
+        }
         BigDecimal runningBalance = trader.getBalance();
 
         for (String[] t : trades) {
@@ -551,55 +584,64 @@ public class FamousTraderSeeder {
 
         trader.setBalance(runningBalance);
         userRepository.save(trader);
-        buildPositions(trader, trades);
+        buildPositions(trader, tradeSpecs);
     }
 
-    private void buildPositions(User trader, String[][] trades) {
-        Map<String, BigDecimal> netQty = new HashMap<>();
+    private void buildPositions(User trader, String[][] tradeSpecs) {
+        Map<String, BigDecimal> netQty = new LinkedHashMap<>();
         Map<String, BigDecimal> totalCost = new HashMap<>();
+        Map<String, BigDecimal> realized = new HashMap<>();
 
-        for (String[] t : trades) {
+        for (String[] t : chronological(tradeSpecs)) {
             String symbol = t[0];
-            String side = t[1];
             BigDecimal qty = new BigDecimal(t[2]);
             BigDecimal price = new BigDecimal(t[3]);
 
-            netQty.putIfAbsent(symbol, BigDecimal.ZERO);
-            totalCost.putIfAbsent(symbol, BigDecimal.ZERO);
+            BigDecimal heldQty = netQty.getOrDefault(symbol, BigDecimal.ZERO);
+            BigDecimal heldCost = totalCost.getOrDefault(symbol, BigDecimal.ZERO);
 
-            if (side.equals("BUY")) {
-                totalCost.put(symbol, totalCost.get(symbol).add(qty.multiply(price)));
-                netQty.put(symbol, netQty.get(symbol).add(qty));
+            if ("BUY".equals(t[1])) {
+                netQty.put(symbol, heldQty.add(qty));
+                totalCost.put(symbol, heldCost.add(qty.multiply(price)));
             } else {
-                BigDecimal currentQty = netQty.get(symbol);
-                BigDecimal currentCost = totalCost.get(symbol);
-                if (currentQty.compareTo(BigDecimal.ZERO) > 0) {
-                    BigDecimal avgPrice = currentCost.divide(currentQty, 8, RoundingMode.HALF_UP);
-                    BigDecimal costReduction = qty.min(currentQty).multiply(avgPrice);
-                    totalCost.put(symbol, currentCost.subtract(costReduction));
-                }
-                netQty.put(symbol, netQty.get(symbol).subtract(qty));
+                BigDecimal avg = heldQty.signum() > 0 ? heldCost.divide(heldQty, 8, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                BigDecimal matched = qty.min(heldQty);
+                realized.merge(symbol, price.subtract(avg).multiply(matched), BigDecimal::add);
+                BigDecimal left = heldQty.subtract(matched);
+                netQty.put(symbol, left);
+                totalCost.put(symbol, left.signum() > 0 ? heldCost.subtract(avg.multiply(matched)) : BigDecimal.ZERO);
             }
         }
 
         for (Map.Entry<String, BigDecimal> entry : netQty.entrySet()) {
-            BigDecimal q = entry.getValue();
-            if (q.compareTo(BigDecimal.ZERO) == 0) continue;
-
             String symbol = entry.getKey();
+            BigDecimal q = entry.getValue().max(BigDecimal.ZERO);
             BigDecimal cost = totalCost.getOrDefault(symbol, BigDecimal.ZERO);
-            BigDecimal avgPrice = q.compareTo(BigDecimal.ZERO) > 0 && cost.compareTo(BigDecimal.ZERO) > 0
-                    ? cost.divide(q, 8, RoundingMode.HALF_UP)
-                    : BigDecimal.ZERO;
 
             Position pos = new Position();
             pos.setUserId(trader.getId());
             pos.setSymbol(symbol);
-            pos.setQuantity(q.abs());
-            pos.setAvgPrice(avgPrice.abs());
+            pos.setQuantity(q);
+            pos.setAvgPrice(q.signum() > 0 ? cost.divide(q, 8, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+            pos.setRealizedPnl(realized.getOrDefault(symbol, BigDecimal.ZERO).setScale(8, RoundingMode.HALF_UP));
             pos.setUpdatedAt(LocalDateTime.now());
             positionRepository.save(pos);
         }
+    }
+
+    /** Seed bid/ask (database/seed_data.sql) — open orders are kept on their side of it. */
+    private static final Map<String, BigDecimal[]> SEED_QUOTES = Map.ofEntries(
+            Map.entry("AAPL", q("178.45", "178.55")), Map.entry("GOOGL", q("141.75", "141.85")),
+            Map.entry("MSFT", q("378.85", "378.95")), Map.entry("TSLA", q("248.40", "248.60")),
+            Map.entry("AMZN", q("178.20", "178.30")), Map.entry("BTC-USD", q("67490.00", "67510.00")),
+            Map.entry("ETH-USD", q("3448.00", "3452.00")), Map.entry("VULN", q("80.00", "120.00")),
+            Map.entry("SOL-USD", q("184.80", "185.20")), Map.entry("DOGE-USD", q("0.16450", "0.16550")),
+            Map.entry("NVDA", q("892.30", "892.70")), Map.entry("XRP-USD", q("0.61800", "0.62200")),
+            Map.entry("AVAX-USD", q("38.40", "38.60")), Map.entry("PEPE-USD", q("0.00001240", "0.00001260")),
+            Map.entry("GME", q("28.40", "28.60")));
+
+    private static BigDecimal[] q(String bid, String ask) {
+        return new BigDecimal[]{new BigDecimal(bid), new BigDecimal(ask)};
     }
 
     private void seedOpenLimitOrders(User trader, String[][] orderSpecs) {
@@ -612,13 +654,25 @@ public class FamousTraderSeeder {
             BigDecimal step = new BigDecimal(spec[3]);
             int count = Integer.parseInt(spec[4]);
 
+            // Keep the book uncrossed: a resting bid starts at least 0.5% under the seed bid
+            // and steps down; a resting ask starts at least 0.5% over the seed ask and steps up.
+            BigDecimal[] quote = SEED_QUOTES.get(symbol);
+            BigDecimal start = basePrice;
+            if (quote != null) {
+                start = side.equals("BUY")
+                        ? basePrice.min(quote[0].multiply(new BigDecimal("0.995")))
+                        : basePrice.max(quote[1].multiply(new BigDecimal("1.005")));
+                start = start.setScale(Math.max(basePrice.scale(), 2), side.equals("BUY") ? RoundingMode.FLOOR : RoundingMode.CEILING);
+            }
+
             for (int i = 0; i < count; i++) {
                 BigDecimal price;
                 if (side.equals("BUY")) {
-                    price = basePrice.add(step.multiply(new BigDecimal(i)));
+                    price = start.subtract(step.multiply(new BigDecimal(i)));
                 } else {
-                    price = basePrice.subtract(step.multiply(new BigDecimal(i)));
+                    price = start.add(step.multiply(new BigDecimal(i)));
                 }
+                if (price.signum() <= 0) break;
 
                 int baseQty = symbol.contains("BTC") ? 1 : symbol.contains("PEPE") ? 5000000 :
                         symbol.contains("DOGE") || symbol.contains("XRP") ? 10000 :

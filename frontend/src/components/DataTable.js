@@ -1,86 +1,56 @@
 import React from 'react';
-import {
-  tableStyle, tableSmall,
-  thStyle, thStyleSmall,
-  trBorder, trBorderMedium, trBorderHeavy,
-  colors,
-} from '../styles/shared';
+import { colors, num } from '../styles/shared';
 
 /**
- * Reusable data table with column definitions.
+ * Config-driven table.
  *
- * @param {Array<{key, label, align, render, headerStyle, cellStyle}>} columns
- * @param {Array<object>} data
- * @param {function} rowKey - (row, index) => unique key
- * @param {string} emptyText
- * @param {boolean} small - use smaller font size
- * @param {string} maxHeight - scrollable container height
- * @param {'default'|'medium'|'heavy'} headerBorder
+ * columns: [{ key, label, align, render(row, i), width, mono, nowrap }]
+ * Numeric columns (align: 'right') get tabular figures. The header sticks inside a
+ * `maxHeight` scroll area; wide tables scroll horizontally inside their card.
  */
 export default function DataTable({
-  columns = [],
-  data = [],
-  rowKey,
-  emptyText = 'No data',
-  small = false,
-  maxHeight,
-  headerBorder = 'default',
+  columns, data, rowKey, emptyText = 'No data', empty, small = false, maxHeight,
+  onRowClick, rowStyle, rowClassName, style = {}, caption,
 }) {
-  const tStyle = small ? tableSmall : tableStyle;
-  const thFn = small ? thStyleSmall : thStyle;
-  const hBorder =
-    headerBorder === 'heavy' ? trBorderHeavy :
-    headerBorder === 'medium' ? trBorderMedium :
-    trBorderMedium;
-
-  const table = (
-    <table style={tStyle}>
-      <thead>
-        <tr style={{ ...hBorder, backgroundColor: colors.bgStat }}>
-          {columns.map((col, i) => (
-            <th key={i} style={{ ...thFn(col.align || 'left'), ...col.headerStyle }}>
-              {col.label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {data.length > 0 ? data.map((row, i) => (
-          <tr key={rowKey ? rowKey(row, i) : i} style={trBorder}>
-            {columns.map((col, j) => (
-              <td
-                key={j}
-                style={{
-                  padding: small ? '8px 10px' : '10px 12px',
-                  textAlign: col.align || 'left',
-                  ...col.cellStyle,
-                }}
-              >
-                {col.render ? col.render(row, i) : row[col.key]}
-              </td>
+  const rows = data || [];
+  return (
+    <div className="vt-scroll-x" style={{ ...(maxHeight ? { maxHeight, overflowY: 'auto' } : {}), ...style }}>
+      <table className={`vt-table${small ? ' dense' : ''}`}>
+        {caption && <caption style={{ position: 'absolute', left: '-9999px' }}>{caption}</caption>}
+        <thead>
+          <tr>
+            {columns.map(col => (
+              <th key={col.key} scope="col" style={{ textAlign: col.align || 'left', width: col.width }}>{col.label}</th>
             ))}
           </tr>
-        )) : (
-          <tr>
-            <td
-              colSpan={columns.length}
-              style={{
-                padding: '32px 16px',
-                textAlign: 'center',
-                color: colors.textDim,
-                fontSize: '13px',
-              }}
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={columns.length} style={{ padding: '28px 12px', textAlign: 'center', color: colors.textMuted }}>
+                {empty || emptyText}
+              </td>
+            </tr>
+          ) : rows.map((row, i) => (
+            <tr
+              key={rowKey ? rowKey(row, i) : i}
+              className={`vt-row${onRowClick ? ' vt-row-click' : ''}${rowClassName ? ' ' + rowClassName(row, i) : ''}`}
+              onClick={onRowClick ? () => onRowClick(row, i) : undefined}
+              style={rowStyle ? rowStyle(row, i) : undefined}
             >
-              {emptyText}
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
+              {columns.map(col => (
+                <td key={col.key} style={{
+                  textAlign: col.align || 'left',
+                  whiteSpace: col.nowrap || col.align === 'right' ? 'nowrap' : undefined,
+                  ...(col.mono || col.align === 'right' ? num : {}),
+                }}>
+                  {col.render ? col.render(row, i) : (row[col.key] ?? '—')}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
-
-  if (maxHeight) {
-    return <div style={{ maxHeight, overflow: 'auto', borderRadius: '8px' }}>{table}</div>;
-  }
-  return table;
 }

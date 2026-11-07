@@ -26,11 +26,14 @@ public class AdminController {
 
     private final UserRepository userRepository;
     private final CustomQueryRepository customQueryRepository;
+    private final com.vulntrade.repository.TransactionRepository transactionRepository;
 
     public AdminController(UserRepository userRepository,
-                           CustomQueryRepository customQueryRepository) {
+                           CustomQueryRepository customQueryRepository,
+                           com.vulntrade.repository.TransactionRepository transactionRepository) {
         this.userRepository = userRepository;
         this.customQueryRepository = customQueryRepository;
+        this.transactionRepository = transactionRepository;
     }
 
     /**
@@ -137,28 +140,40 @@ public class AdminController {
         Double amount = Double.valueOf(request.get("amount").toString());
         String reason = (String) request.get("reason");
 
-        return userRepository.findById(userId)
-            .map(user -> {
-                java.math.BigDecimal adjustment = java.math.BigDecimal.valueOf(amount);
-                user.setBalance(user.getBalance().add(adjustment));
-                userRepository.save(user);
+        if (!userRepository.existsById(userId)) {
+            return ResponseEntity.notFound().build();
+        }
+        java.math.BigDecimal adjustment = java.math.BigDecimal.valueOf(amount);
+        // Atomic: a concurrent trade settlement can't be overwritten by a stale entity save.
+        userRepository.credit(userId, adjustment);
+        java.math.BigDecimal newBalance = userRepository.findBalanceById(userId);
 
-                // VULN: reason field logged without sanitization (log injection)
-                System.out.println("[ADMIN] Balance adjusted for user " + userId
-                    + " by " + amount + " reason: " + reason);
+        // Ledger row, like the STOMP admin.adjustBalance path: the balance must always equal
+        // the sum of the user's transactions (and the leaderboard counts it as capital).
+        com.vulntrade.model.Transaction txn = new com.vulntrade.model.Transaction();
+        txn.setUserId(userId);
+        txn.setType("ADJUSTMENT");
+        txn.setAmount(adjustment);
+        txn.setBalanceAfter(newBalance);
+        txn.setDescription("Admin adjustment: " + reason);  // VULN: unsanitized
+        txn.setReferenceId("ADJ-" + System.currentTimeMillis());
+        txn.setCreatedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+        transactionRepository.save(txn);
 
-                // reason is logged raw on purpose: Wazuh scans it for CR/LF and Log4Shell
-                log(SecurityEvent.ADMIN_ACTION, Outcome.SUCCESS,
-                        details("action", "adjust_balance", "targetUserId", userId,
-                                "amount", amount, "reason", reason));
+        // VULN: reason field logged without sanitization (log injection)
+        System.out.println("[ADMIN] Balance adjusted for user " + userId
+            + " by " + amount + " reason: " + reason);
 
-                return ResponseEntity.ok(Map.of(
-                    "message", "Balance adjusted",
-                    "userId", userId,
-                    "newBalance", user.getBalance(),
-                    "adjustment", amount
-                ));
-            })
-            .orElse(ResponseEntity.notFound().build());
+        // reason is logged raw on purpose: Wazuh scans it for CR/LF and Log4Shell
+        log(SecurityEvent.ADMIN_ACTION, Outcome.SUCCESS,
+                details("action", "adjust_balance", "targetUserId", userId,
+                        "amount", amount, "reason", reason));
+
+        return ResponseEntity.ok(Map.of(
+            "message", "Balance adjusted",
+            "userId", userId,
+            "newBalance", newBalance,
+            "adjustment", amount
+        ));
     }
 }

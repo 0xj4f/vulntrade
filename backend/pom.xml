@@ -15,7 +15,7 @@
 
     <groupId>com.vulntrade</groupId>
     <artifactId>vulntrade-backend</artifactId>
-    <version>1.0.0</version>
+    <version>0.6.0</version>
     <name>VulnTrade Backend</name>
     <description>Deliberately vulnerable trading platform for red team training</description>
 

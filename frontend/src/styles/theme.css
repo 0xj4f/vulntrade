@@ -1,0 +1,337 @@
+/* ==========================================================================
+   VulnTrade design tokens — dark (default) and light themes.
+   Every colour in the app comes from these variables: styles/shared.js maps
+   its `colors` object onto them, so inline styles theme automatically.
+   ========================================================================== */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --vt-bg: #0a0e17;
+  --vt-bg-elev: #0c111b;
+  --vt-surface: #0f1521;
+  --vt-surface-2: #141b29;
+  --vt-surface-3: #1a2233;
+  --vt-input: #0b1019;
+  --vt-overlay: rgba(3, 6, 12, 0.68);
+
+  /* Lines */
+  --vt-border: #1c2433;
+  --vt-border-strong: #2a3446;
+  --vt-focus: #3b82f6;
+
+  /* Text (contrast on --vt-surface: 15.6 / 8.1 / 4.9 / 3.1) */
+  --vt-text: #e6eaf2;
+  --vt-text-2: #a6afc0;
+  --vt-text-3: #7f8a9d;
+  --vt-text-4: #5a6476;
+  --vt-on-accent: #ffffff;
+
+  /* Market colours — *-fill for solid buttons/bars, pos/neg for text */
+  --vt-pos: #16c784;
+  --vt-neg: #ff5a64;
+  --vt-up-fill: #16c784;
+  --vt-on-up: #03140c;
+  --vt-down-fill: #ea3943;
+  --vt-on-down: #ffffff;
+  --vt-accent-fill: #2563eb;
+  --vt-up: #16c784;
+  --vt-up-text: #3ddc97;
+  --vt-up-soft: rgba(22, 199, 132, 0.12);
+  --vt-up-border: rgba(22, 199, 132, 0.28);
+  --vt-down: #ea3943;
+  --vt-down-text: #ff6b73;
+  --vt-down-soft: rgba(234, 57, 67, 0.12);
+  --vt-down-border: rgba(234, 57, 67, 0.3);
+
+  /* Accents */
+  --vt-accent: #3b82f6;
+  --vt-accent-hover: #2f6fe0;
+  --vt-accent-text: #82adff;
+  --vt-accent-soft: rgba(59, 130, 246, 0.14);
+  --vt-accent-border: rgba(59, 130, 246, 0.35);
+  --vt-warn: #f5a524;
+  --vt-warn-text: #ffc266;
+  --vt-warn-soft: rgba(245, 165, 36, 0.12);
+  --vt-warn-border: rgba(245, 165, 36, 0.3);
+  --vt-violet: #8b5cf6;
+  --vt-violet-text: #b9a2ff;
+  --vt-violet-soft: rgba(139, 92, 246, 0.14);
+  --vt-gold: #f5c451;
+  --vt-silver: #c3cbd8;
+  --vt-bronze: #d08b55;
+
+  /* Depth */
+  --vt-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --vt-shadow-2: 0 8px 24px rgba(0, 0, 0, 0.38);
+  --vt-shadow-3: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --vt-ring: 0 0 0 3px rgba(59, 130, 246, 0.35);
+
+  /* Charts */
+  --vt-chart-grid: rgba(148, 163, 184, 0.07);
+  --vt-chart-text: #7f8a9d;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --vt-bg: #f4f6f9;
+  --vt-bg-elev: #ffffff;
+  --vt-surface: #ffffff;
+  --vt-surface-2: #f6f7f9;
+  --vt-surface-3: #eef0f4;
+  --vt-input: #ffffff;
+  --vt-overlay: rgba(16, 24, 40, 0.45);
+
+  --vt-border: #e3e7ee;
+  --vt-border-strong: #cfd5df;
+  --vt-focus: #2563eb;
+
+  /* Contrast on white: 18.3 / 7.6 / 4.8 / 2.6 */
+  --vt-text: #0b1220;
+  --vt-text-2: #475467;
+  --vt-text-3: #667085;
+  --vt-text-4: #98a2b3;
+  --vt-on-accent: #ffffff;
+
+  --vt-pos: #047857;
+  --vt-neg: #c4281c;
+  --vt-up-fill: #0a8f62;
+  --vt-on-up: #ffffff;
+  --vt-down-fill: #d92d20;
+  --vt-on-down: #ffffff;
+  --vt-accent-fill: #2563eb;
+  --vt-up: #0e9f6e;
+  --vt-up-text: #047857;
+  --vt-up-soft: rgba(14, 159, 110, 0.1);
+  --vt-up-border: rgba(14, 159, 110, 0.3);
+  --vt-down: #d92d20;
+  --vt-down-text: #b42318;
+  --vt-down-soft: rgba(217, 45, 32, 0.08);
+  --vt-down-border: rgba(217, 45, 32, 0.28);
+
+  --vt-accent: #2563eb;
+  --vt-accent-hover: #1d4ed8;
+  --vt-accent-text: #1d4ed8;
+  --vt-accent-soft: rgba(37, 99, 235, 0.09);
+  --vt-accent-border: rgba(37, 99, 235, 0.3);
+  --vt-warn: #dc8b0b;
+  --vt-warn-text: #b54708;
+  --vt-warn-soft: rgba(245, 165, 36, 0.14);
+  --vt-warn-border: rgba(220, 139, 11, 0.35);
+  --vt-violet: #7c3aed;
+  --vt-violet-text: #6d28d9;
+  --vt-violet-soft: rgba(124, 58, 237, 0.1);
+  --vt-gold: #c99410;
+  --vt-silver: #8a94a6;
+  --vt-bronze: #b0672f;
+
+  --vt-shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --vt-shadow-2: 0 6px 20px rgba(16, 24, 40, 0.08);
+  --vt-shadow-3: 0 24px 56px rgba(16, 24, 40, 0.18);
+  --vt-ring: 0 0 0 3px rgba(37, 99, 235, 0.25);
+
+  --vt-chart-grid: rgba(15, 23, 42, 0.06);
+  --vt-chart-text: #667085;
+}
+
+/* ── Type & scale ─────────────────────────────────────────────────────────── */
+:root {
+  --vt-font: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --vt-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  --vt-radius-sm: 6px;
+  --vt-radius: 10px;
+  --vt-radius-lg: 14px;
+  --vt-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--vt-font);
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  background-color: var(--vt-bg);
+  color: var(--vt-text);
+  line-height: 1.5;
+  min-height: 100vh;
+  transition: background-color 0.2s var(--vt-ease), color 0.2s var(--vt-ease);
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+a { color: var(--vt-accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+img { max-width: 100%; }
+
+::selection { background: var(--vt-accent-soft); color: var(--vt-text); }
+
+/* Visible keyboard focus everywhere (mouse clicks don't show it) */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--vt-focus); outline-offset: 2px; border-radius: 4px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--vt-focus) !important;
+  box-shadow: var(--vt-ring) !important;
+}
+input, select, textarea { transition: border-color 0.15s var(--vt-ease), box-shadow 0.15s var(--vt-ease); }
+input::placeholder, textarea::placeholder { color: var(--vt-text-4); }
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type='number'] { -moz-appearance: textfield; }
+select { appearance: none; -webkit-appearance: none; }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--vt-border-strong) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--vt-border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+
+/* ── Numbers ─────────────────────────────────────────────────────────────── */
+.num, td, th, input[type='number'] { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--vt-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.label-caps { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--vt-text-3); }
+
+/* ── Interactive surfaces ─────────────────────────────────────────────────── */
+.vt-btn { transition: background-color 0.15s var(--vt-ease), border-color 0.15s var(--vt-ease), color 0.15s var(--vt-ease), opacity 0.15s; }
+.vt-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.vt-btn:active:not(:disabled) { filter: brightness(0.96); }
+.vt-btn:disabled { opacity: 0.45; }
+.vt-ghost:hover:not(:disabled) { background-color: var(--vt-surface-2) !important; filter: none; }
+.vt-row { transition: background-color 0.12s var(--vt-ease); }
+.vt-row:hover { background-color: var(--vt-surface-2); }
+.vt-row-click { cursor: pointer; }
+.vt-link-row { color: inherit; text-decoration: none !important; }
+
+/* Tables */
+.vt-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.vt-table th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--vt-surface);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--vt-text-3);
+  padding: 10px 12px; border-bottom: 1px solid var(--vt-border);
+  white-space: nowrap;
+}
+.vt-table td { padding: 10px 12px; border-bottom: 1px solid var(--vt-border); font-size: 13px; color: var(--vt-text); vertical-align: middle; }
+.vt-table.dense th { padding: 8px 10px; }
+.vt-table.dense td { padding: 7px 10px; font-size: 12.5px; }
+.vt-table tbody tr:last-child td { border-bottom: none; }
+.vt-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ── Motion ──────────────────────────────────────────────────────────────── */
+@keyframes vt-flash-up { 0% { background-color: var(--vt-up-soft); color: var(--vt-up-text); } 100% { background-color: transparent; } }
+@keyframes vt-flash-down { 0% { background-color: var(--vt-down-soft); color: var(--vt-down-text); } 100% { background-color: transparent; } }
+.flash-up { animation: vt-flash-up 0.7s var(--vt-ease); border-radius: 4px; }
+.flash-down { animation: vt-flash-down 0.7s var(--vt-ease); border-radius: 4px; }
+
+@keyframes vt-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.live-dot { animation: vt-pulse 1.8s ease-in-out infinite; }
+
+@keyframes vt-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: vt-fade-in 0.22s var(--vt-ease); } /* no fill-mode: a lingering transform would trap position:fixed children */
+
+@keyframes vt-pop { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+.vt-pop { animation: vt-pop 0.18s var(--vt-ease) both; }
+
+@keyframes vt-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.skeleton {
+  background: linear-gradient(90deg, var(--vt-surface-2) 25%, var(--vt-surface-3) 50%, var(--vt-surface-2) 75%);
+  background-size: 200% 100%;
+  animation: vt-shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
+/* ── Layout helpers ─────────────────────────────────────────────────────── */
+.vt-page { width: 100%; max-width: var(--vt-page-max, 1280px); margin: 0 auto; padding: 24px 24px 48px; }
+.vt-grid { display: grid; gap: 16px; }
+.vt-stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.vt-cols-2 { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+.vt-cols-3 { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); }
+
+/* Trading terminal: watchlist | chart+blotter | ticket+book */
+.vt-terminal { display: grid; gap: 12px; grid-template-columns: 280px minmax(0, 1fr) 340px; align-items: start; }
+.vt-terminal > * { min-width: 0; }
+
+/* Auth: brand panel + form */
+.vt-auth { display: grid; grid-template-columns: 1.1fr 1fr; min-height: 100vh; }
+
+/* Settings-style two columns */
+.vt-settings { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+
+/* Top bar */
+.vt-topbar { display: flex; align-items: center; gap: 16px; height: 56px; padding: 0 20px; }
+.vt-nav-desktop { display: flex; align-items: center; gap: 2px; }
+.vt-nav-burger { display: none; }
+.vt-ticker { flex: 1; min-width: 0; overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+.vt-hide-sm { }
+
+@media (max-width: 1279px) {
+  .vt-terminal { grid-template-columns: minmax(0, 1fr) 340px; }
+  .vt-terminal .vt-watch { grid-column: 1 / -1; order: 3; }
+}
+@media (max-width: 1023px) {
+  .vt-terminal { grid-template-columns: 1fr; }
+  .vt-terminal .vt-watch { order: 3; }
+  .vt-nav-desktop, .vt-ticker { display: none; }
+  .vt-nav-burger { display: inline-flex; }
+  .vt-auth { grid-template-columns: 1fr; }
+  .vt-auth .vt-auth-brand { display: none; }
+  .vt-settings { grid-template-columns: 1fr; }
+  .vt-cols-3 { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 767px) {
+  .vt-page { padding: 16px 16px 40px; }
+  .vt-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vt-cols-2, .vt-cols-3 { grid-template-columns: 1fr; }
+  .vt-hide-sm { display: none !important; }
+  .vt-topbar { padding: 0 12px; gap: 10px; }
+}
+
+/* ── Toasts (react-toastify) ─────────────────────────────────────────────── */
+.Toastify__toast {
+  background: var(--vt-surface) !important;
+  color: var(--vt-text) !important;
+  border: 1px solid var(--vt-border) !important;
+  border-radius: var(--vt-radius) !important;
+  box-shadow: var(--vt-shadow-2) !important;
+  font-family: var(--vt-font) !important;
+  font-size: 13px !important;
+  min-height: 52px !important;
+}
+.Toastify__close-button { color: var(--vt-text-3) !important; opacity: 1 !important; }
+.Toastify__progress-bar--success { background: var(--vt-up) !important; }
+.Toastify__progress-bar--error { background: var(--vt-down) !important; }
+.Toastify__progress-bar--info { background: var(--vt-accent) !important; }
+.Toastify__progress-bar--warning { background: var(--vt-warn) !important; }
+.Toastify__toast-icon svg { width: 18px; height: 18px; }
+
+/* Tooltip */
+[data-tooltip] { position: relative; }
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  background: var(--vt-surface-3); color: var(--vt-text-2);
+  padding: 6px 10px; border-radius: 6px; font-size: 11px; white-space: nowrap;
+  border: 1px solid var(--vt-border); box-shadow: var(--vt-shadow-2); z-index: 50; pointer-events: none;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Logo above the auth form only when the brand panel is hidden */
+.vt-hide-lg { display: none !important; }
+@media (max-width: 1023px) { .vt-hide-lg { display: flex !important; } }

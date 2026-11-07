@@ -1,60 +1,104 @@
 /**
  * Shared style objects used across all pages.
- * Single source of truth for the app's visual language.
  *
- * MODERNIZED — deep navy palette, rounded cards, glassmorphism accents.
+ * Every colour is a CSS variable from styles/theme.css, so the same inline styles render
+ * correctly in the dark and the light theme. Spacing follows a 4px grid
+ * (4 · 8 · 12 · 16 · 20 · 24 · 32 · 48); radii are 6 (controls) · 10 (cards) · 14 (dialogs).
  */
 
-// ── Colors ──────────────────────────────────────────────
+// ── Colors (theme variables) ────────────────────────────
 export const colors = {
   // Backgrounds
-  bgPage:       '#0B1426',
-  bgCard:       '#111D35',
-  bgCardHover:  '#152240',
-  bgInput:      '#0D1829',
-  bgStat:       '#0A1628',
-  bgNav:        '#0E1A2E',
+  bgPage:       'var(--vt-bg)',
+  bgCard:       'var(--vt-surface)',
+  bgCardHover:  'var(--vt-surface-2)',
+  bgInput:      'var(--vt-input)',
+  bgStat:       'var(--vt-surface-2)',
+  bgNav:        'var(--vt-bg-elev)',
+  bgRaised:     'var(--vt-surface-3)',
+  overlay:      'var(--vt-overlay)',
 
   // Borders
-  borderDefault: '#1E2D45',
-  borderMedium:  '#263A56',
-  borderLight:   '#2E4468',
-  borderDanger:  '#5C1D1D',
-  borderWarning: '#6B4106',
+  borderDefault: 'var(--vt-border)',
+  borderMedium:  'var(--vt-border-strong)',
+  borderLight:   'var(--vt-border-strong)',
+  borderDanger:  'var(--vt-down-border)',
+  borderWarning: 'var(--vt-warn-border)',
+  borderAccent:  'var(--vt-accent-border)',
+  borderUp:      'var(--vt-up-border)',
 
   // Text
-  textPrimary:   '#FFFFFF',
-  textSecondary: '#8F9BB3',
-  textMuted:     '#5E6B82',
-  textDim:       '#3D4A5C',
+  textPrimary:   'var(--vt-text)',
+  textSecondary: 'var(--vt-text-2)',
+  textMuted:     'var(--vt-text-3)',
+  textDim:       'var(--vt-text-4)',
 
-  // Accents
-  green:      '#00D68F',
-  red:        '#FF3D71',
-  blue:       '#4F8BFF',
-  amber:      '#FFAA00',
-  purple:     '#8B5CF6',
+  // Accents (text-safe in both themes)
+  green:      'var(--vt-pos)',
+  red:        'var(--vt-neg)',
+  blue:       'var(--vt-accent-text)',
+  amber:      'var(--vt-warn-text)',
+  purple:     'var(--vt-violet-text)',
 
-  // Accent darks (for backgrounds)
-  greenDark:  '#0A2E1F',
-  redDark:    '#2E0F1A',
-  blueDark:   '#0F1F3D',
-  purpleDark: '#1A1040',
-  amberDark:  '#2E2000',
+  // Solid fills (buttons, bars) and the text that sits on them
+  upFill:     'var(--vt-up-fill)',
+  onUp:       'var(--vt-on-up)',
+  downFill:   'var(--vt-down-fill)',
+  onDown:     'var(--vt-on-down)',
+  accentFill: 'var(--vt-accent-fill)',
+  onAccent:   'var(--vt-on-accent)',
+  warnFill:   'var(--vt-warn)',
+  violetFill: 'var(--vt-violet)',
 
-  // Accent lights (for text on dark accent bg)
-  greenLight:  '#6EEDB8',
-  redLight:    '#FF8FAA',
-  purpleLight: '#B4A5FC',
-  amberLight:  '#FFD166',
-  blueLight:   '#8FB8FF',
+  // Tinted backgrounds
+  greenDark:  'var(--vt-up-soft)',
+  redDark:    'var(--vt-down-soft)',
+  blueDark:   'var(--vt-accent-soft)',
+  purpleDark: 'var(--vt-violet-soft)',
+  amberDark:  'var(--vt-warn-soft)',
+
+  // Text on tinted backgrounds
+  greenLight:  'var(--vt-up-text)',
+  redLight:    'var(--vt-down-text)',
+  purpleLight: 'var(--vt-violet-text)',
+  amberLight:  'var(--vt-warn-text)',
+  blueLight:   'var(--vt-accent-text)',
+
+  // Ranks
+  gold:   'var(--vt-gold)',
+  silver: 'var(--vt-silver)',
+  bronze: 'var(--vt-bronze)',
 };
 
+export const fonts = {
+  sans: 'var(--vt-font)',
+  mono: 'var(--vt-mono)',
+};
+
+export const space = { 1: '4px', 2: '8px', 3: '12px', 4: '16px', 5: '20px', 6: '24px', 8: '32px', 12: '48px' };
+export const radius = { sm: 'var(--vt-radius-sm)', md: 'var(--vt-radius)', lg: 'var(--vt-radius-lg)', pill: '999px' };
+
+/** Type scale (px): 11 caps · 12 meta · 13 dense · 14 body · 16 section · 20 title · 28 hero · 36 display */
+export const type = {
+  caps:    { fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.textMuted },
+  meta:    { fontSize: '12px', color: colors.textMuted },
+  dense:   { fontSize: '13px' },
+  body:    { fontSize: '14px' },
+  section: { fontSize: '16px', fontWeight: 600, letterSpacing: '-0.01em' },
+  title:   { fontSize: '20px', fontWeight: 600, letterSpacing: '-0.02em' },
+  hero:    { fontSize: '28px', fontWeight: 600, letterSpacing: '-0.02em' },
+  display: { fontSize: '36px', fontWeight: 700, letterSpacing: '-0.03em' },
+};
+
+/** Monospaced, tabular numerals for prices, quantities and ids */
+export const num = { fontFamily: fonts.mono, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em' };
+
 // ── Layout ──────────────────────────────────────────────
-export const pageContainer = (maxWidth = '1200px') => ({
-  padding: '28px 24px',
+export const pageContainer = (maxWidth = '1280px') => ({
+  padding: '24px 24px 48px',
   maxWidth,
   margin: '0 auto',
+  width: '100%',
 });
 
 export const authContainer = {
@@ -62,274 +106,271 @@ export const authContainer = {
   justifyContent: 'center',
   alignItems: 'center',
   minHeight: '100vh',
-  background: `linear-gradient(135deg, ${colors.bgPage} 0%, #0F1D32 50%, #0B1426 100%)`,
+  background: colors.bgPage,
 };
 
 export const authCard = (width = '420px') => ({
   backgroundColor: colors.bgCard,
-  padding: '44px 40px',
-  borderRadius: '16px',
-  width,
+  padding: '32px',
+  borderRadius: radius.lg,
+  width: '100%',
+  maxWidth: width,
   border: `1px solid ${colors.borderDefault}`,
-  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+  boxShadow: 'var(--vt-shadow-2)',
 });
 
 // ── Cards ───────────────────────────────────────────────
 export const cardStyle = {
   backgroundColor: colors.bgCard,
-  padding: '24px',
-  borderRadius: '14px',
-  marginBottom: '20px',
+  padding: '16px 20px',
+  borderRadius: radius.md,
+  marginBottom: '16px',
   border: `1px solid ${colors.borderDefault}`,
-  boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
-  transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+  boxShadow: 'var(--vt-shadow-1)',
 };
 
 export const cardDanger = {
   ...cardStyle,
   border: `1px solid ${colors.borderDanger}`,
-  boxShadow: `0 2px 12px rgba(92,29,29,0.15)`,
 };
 
 export const cardWarning = {
   ...cardStyle,
   border: `1px solid ${colors.borderWarning}`,
-  boxShadow: `0 2px 12px rgba(107,65,6,0.15)`,
 };
 
 export const statCard = {
-  padding: '20px',
-  background: `linear-gradient(135deg, ${colors.bgStat} 0%, ${colors.bgCard} 100%)`,
-  borderRadius: '12px',
+  backgroundColor: colors.bgCard,
+  padding: '14px 16px',
+  borderRadius: radius.md,
   border: `1px solid ${colors.borderDefault}`,
 };
 
 // ── Inputs ──────────────────────────────────────────────
 export const inputStyle = {
-  padding: '11px 14px',
-  backgroundColor: colors.bgInput,
+  height: '36px',
+  padding: '0 12px',
+  background: colors.bgInput,
   border: `1px solid ${colors.borderMedium}`,
-  borderRadius: '10px',
+  borderRadius: radius.sm,
   color: colors.textPrimary,
-  boxSizing: 'border-box',
-  fontSize: '14px',
+  fontSize: '13px',
   outline: 'none',
-  transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+  minWidth: 0,
 };
 
 export const inputFull = {
   ...inputStyle,
   width: '100%',
+  height: '40px',
+  fontSize: '14px',
 };
 
 // ── Buttons ─────────────────────────────────────────────
-const buttonBase = {
-  border: 'none',
-  borderRadius: '10px',
-  color: 'white',
+const btnBase = {
+  border: '1px solid transparent',
+  borderRadius: radius.sm,
   cursor: 'pointer',
-  fontWeight: '600',
-  fontSize: '14px',
+  fontWeight: 600,
   letterSpacing: '0.01em',
-  transition: 'transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '6px',
+  whiteSpace: 'nowrap',
 };
 
 export const buttonStyles = {
-  green:   { ...buttonBase, background: `linear-gradient(135deg, ${colors.green}, #00B87A)` },
-  red:     { ...buttonBase, background: `linear-gradient(135deg, ${colors.red}, #E0284F)` },
-  blue:    { ...buttonBase, background: `linear-gradient(135deg, ${colors.blue}, #3A6FE0)` },
-  amber:   { ...buttonBase, background: `linear-gradient(135deg, ${colors.amber}, #E09500)`, color: '#1A1400' },
-  purple:  { ...buttonBase, background: `linear-gradient(135deg, ${colors.purple}, #7044E0)` },
-  gray:    { ...buttonBase, backgroundColor: colors.borderMedium, color: colors.textSecondary, fontWeight: '500' },
-  darkRed: { ...buttonBase, backgroundColor: colors.redDark, color: colors.redLight, fontWeight: '500', border: `1px solid ${colors.borderDanger}` },
+  green:   { ...btnBase, background: colors.upFill, color: colors.onUp },
+  red:     { ...btnBase, background: colors.downFill, color: colors.onDown },
+  blue:    { ...btnBase, background: colors.accentFill, color: colors.onAccent },
+  amber:   { ...btnBase, background: colors.amberDark, color: colors.amber, border: `1px solid ${colors.borderWarning}` },
+  purple:  { ...btnBase, background: colors.purpleDark, color: colors.purple, border: '1px solid var(--vt-violet-soft)' },
+  gray:    { ...btnBase, background: colors.bgCard, color: colors.textSecondary, border: `1px solid ${colors.borderMedium}`, fontWeight: 500 },
+  ghost:   { ...btnBase, background: 'transparent', color: colors.textSecondary, fontWeight: 500 },
+  darkRed: { ...btnBase, background: colors.redDark, color: colors.red, border: `1px solid ${colors.borderDanger}` },
 };
 
-export const btnSmall  = { padding: '6px 16px', fontSize: '12px' };
-export const btnMedium = { padding: '10px 22px', fontSize: '14px' };
-export const btnLarge  = { padding: '14px', width: '100%', fontSize: '16px' };
+export const btnSmall  = { height: '28px', padding: '0 10px', fontSize: '12px' };
+export const btnMedium = { height: '36px', padding: '0 16px', fontSize: '13px' };
+export const btnLarge  = { height: '44px', padding: '0 16px', width: '100%', fontSize: '14px' };
 
 // ── Labels ──────────────────────────────────────────────
 export const labelStyle = {
-  color: colors.textMuted,
-  fontSize: '12px',
+  ...type.caps,
   display: 'block',
   marginBottom: '6px',
-  fontWeight: '500',
-  letterSpacing: '0.03em',
-  textTransform: 'uppercase',
 };
 
 export const formLabel = {
   display: 'block',
-  color: colors.textSecondary,
   marginBottom: '6px',
-  fontSize: '14px',
-  fontWeight: '500',
+  color: colors.textSecondary,
+  fontSize: '13px',
+  fontWeight: 500,
 };
 
 // ── Tables ──────────────────────────────────────────────
 export const tableStyle = {
   width: '100%',
   borderCollapse: 'separate',
-  borderSpacing: '0',
+  borderSpacing: 0,
 };
 
 export const tableSmall = {
   ...tableStyle,
-  fontSize: '13px',
+  fontSize: '12.5px',
 };
 
 export const thStyle = (align = 'left') => ({
   textAlign: align,
   padding: '10px 12px',
   color: colors.textMuted,
+  fontWeight: 600,
   fontSize: '11px',
-  fontWeight: '600',
   textTransform: 'uppercase',
-  letterSpacing: '0.06em',
+  letterSpacing: '0.05em',
+  borderBottom: `1px solid ${colors.borderDefault}`,
+  background: colors.bgCard,
+  whiteSpace: 'nowrap',
 });
 
 export const thStyleSmall = (align = 'left') => ({
-  textAlign: align,
+  ...thStyle(align),
   padding: '8px 10px',
-  color: colors.textMuted,
-  fontSize: '10px',
-  fontWeight: '600',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
 });
 
-export const trBorder = {
-  borderBottom: `1px solid ${colors.borderDefault}`,
-};
-
-export const trBorderMedium = {
-  borderBottom: `1px solid ${colors.borderMedium}`,
-};
-
-export const trBorderHeavy = {
-  borderBottom: `2px solid ${colors.borderMedium}`,
-};
+export const trBorder = {};
+export const trBorderMedium = {};
+export const trBorderHeavy = {};
 
 export const tdStyle = (align = 'left') => ({
-  padding: '10px 12px',
   textAlign: align,
+  padding: '10px 12px',
+  borderBottom: `1px solid ${colors.borderDefault}`,
+  fontSize: '13px',
 });
 
 export const tdStyleSmall = (align = 'left') => ({
-  padding: '8px 10px',
   textAlign: align,
+  padding: '7px 10px',
+  borderBottom: `1px solid ${colors.borderDefault}`,
+  fontSize: '12.5px',
 });
 
 export const emptyRow = (colSpan) => ({
-  padding: '24px 16px',
+  padding: '28px 12px',
   textAlign: 'center',
-  color: colors.textDim,
+  color: colors.textMuted,
+  fontSize: '13px',
 });
 
-// ── Alerts / Banners ────────────────────────────────────
+// ── Banners ─────────────────────────────────────────────
 export const errorBanner = {
-  backgroundColor: colors.redDark,
   color: colors.redLight,
-  padding: '12px 16px',
-  borderRadius: '10px',
-  marginBottom: '16px',
-  fontSize: '14px',
+  background: colors.redDark,
   border: `1px solid ${colors.borderDanger}`,
+  padding: '10px 14px',
+  borderRadius: radius.sm,
+  marginBottom: '16px',
+  fontSize: '13px',
+  lineHeight: 1.5,
 };
 
 export const successBanner = {
-  backgroundColor: colors.greenDark,
   color: colors.greenLight,
-  padding: '12px 16px',
-  borderRadius: '10px',
+  background: colors.greenDark,
+  border: `1px solid ${colors.borderUp}`,
+  padding: '10px 14px',
+  borderRadius: radius.sm,
   marginBottom: '16px',
-  fontSize: '14px',
-  border: `1px solid rgba(0,214,143,0.2)`,
+  fontSize: '13px',
+  lineHeight: 1.5,
 };
 
 export const debugBanner = {
-  backgroundColor: colors.purpleDark,
-  color: colors.purpleLight,
-  padding: '12px 16px',
-  borderRadius: '10px',
+  background: colors.amberDark,
+  color: colors.amber,
+  padding: '10px 14px',
+  borderRadius: radius.sm,
+  border: `1px solid ${colors.borderWarning}`,
   marginBottom: '16px',
   fontSize: '12px',
-  fontFamily: 'monospace',
-  border: `1px solid rgba(139,92,246,0.2)`,
+  fontFamily: fonts.mono,
+  lineHeight: 1.6,
 };
 
-// ── Modals ──────────────────────────────────────────────
+// ── Modal ───────────────────────────────────────────────
 export const modalOverlay = {
   position: 'fixed',
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: 'rgba(5,10,20,0.80)',
-  backdropFilter: 'blur(8px)',
-  WebkitBackdropFilter: 'blur(8px)',
+  inset: 0,
+  backgroundColor: colors.overlay,
+  backdropFilter: 'blur(4px)',
+  WebkitBackdropFilter: 'blur(4px)',
   display: 'flex',
   justifyContent: 'center',
   alignItems: 'center',
   zIndex: 1000,
+  padding: '16px',
 };
 
 export const modalContent = (width = '420px') => ({
+  position: 'relative',
   backgroundColor: colors.bgCard,
-  padding: '36px',
-  borderRadius: '16px',
-  border: `1px solid ${colors.borderMedium}`,
-  width,
-  textAlign: 'center',
-  boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
+  padding: '24px',
+  borderRadius: radius.lg,
+  width: '100%',
+  maxWidth: width,
+  maxHeight: 'calc(100vh - 32px)',
+  overflowY: 'auto',
+  border: `1px solid ${colors.borderDefault}`,
+  boxShadow: 'var(--vt-shadow-3)',
 });
 
 // ── Misc ────────────────────────────────────────────────
 export const preBlock = {
-  marginTop: '12px',
-  padding: '16px',
-  backgroundColor: colors.bgStat,
-  borderRadius: '10px',
-  fontSize: '12px',
-  overflow: 'auto',
-  color: colors.purpleLight,
-  maxHeight: '300px',
+  background: colors.bgInput,
+  padding: '12px 14px',
+  borderRadius: radius.sm,
   border: `1px solid ${colors.borderDefault}`,
-  fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+  overflow: 'auto',
+  color: colors.textSecondary,
+  fontSize: '12px',
+  fontFamily: fonts.mono,
+  lineHeight: 1.6,
+  maxHeight: '420px',
 };
 
 export const sectionHeading = (color = colors.textSecondary) => ({
+  ...type.caps,
   color,
   marginBottom: '12px',
-  fontSize: '15px',
-  fontWeight: '600',
 });
 
-export const pageHeading = (color = colors.green) => ({
+export const pageHeading = (color = colors.textPrimary) => ({
+  ...type.title,
   color,
-  marginBottom: '28px',
-  fontSize: '22px',
-  fontWeight: '700',
-  letterSpacing: '-0.01em',
+  marginBottom: '16px',
 });
 
 export const hintText = {
   color: colors.textMuted,
   fontSize: '12px',
-  marginBottom: '12px',
+  marginTop: '8px',
+  lineHeight: 1.6,
 };
 
 export const flexRow = (gap = '8px') => ({
   display: 'flex',
   gap,
+  alignItems: 'center',
 });
 
 export const flexRowWrap = (gap = '8px') => ({
   display: 'flex',
   gap,
-  flexWrap: 'wrap',
   alignItems: 'flex-end',
+  flexWrap: 'wrap',
 });
 
 export const gridCols = (cols = '1fr 1fr') => ({
@@ -338,122 +379,115 @@ export const gridCols = (cols = '1fr 1fr') => ({
   gap: '16px',
 });
 
-// ── Textarea ────────────────────────────────────────────
 export const textareaStyle = {
-  ...inputStyle,
-  width: '100%',
-  fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+  ...inputFull,
+  height: 'auto',
+  padding: '10px 12px',
+  fontFamily: fonts.mono,
+  fontSize: '12.5px',
   resize: 'vertical',
+  lineHeight: 1.6,
 };
 
-// ── Inline code / monospace ─────────────────────────────
 export const codeInline = (color = colors.amber) => ({
   color,
+  fontFamily: fonts.mono,
   fontSize: '12px',
-  fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+  wordBreak: 'break-all',
 });
 
-// ── Select (dropdown) ───────────────────────────────────
 export const selectStyle = {
-  background: colors.bgInput,
-  color: colors.textPrimary,
-  border: `1px solid ${colors.borderMedium}`,
-  padding: '10px 14px',
-  borderRadius: '10px',
-  fontSize: '14px',
-  outline: 'none',
-  transition: 'border-color 0.2s ease',
+  ...inputStyle,
+  paddingRight: '30px',
+  cursor: 'pointer',
+  backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237f8a9d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 10px center',
 };
 
-// ── Order-error banner ──────────────────────────────────
 export const orderErrorBanner = {
   marginTop: '12px',
-  padding: '14px 18px',
-  background: colors.redDark,
-  border: `1px solid ${colors.red}`,
-  borderRadius: '10px',
-  fontSize: '14px',
+  padding: '10px 12px',
+  borderRadius: radius.sm,
+  backgroundColor: colors.redDark,
+  border: `1px solid ${colors.borderDanger}`,
   color: colors.redLight,
+  fontSize: '12.5px',
   display: 'flex',
   justifyContent: 'space-between',
-  alignItems: 'center',
+  alignItems: 'flex-start',
+  gap: '8px',
 };
 
-// ── Order-status banner ─────────────────────────────────
 export const orderStatusBanner = (filled = false) => ({
   marginTop: '12px',
-  padding: '12px 18px',
-  background: filled ? colors.greenDark : colors.bgInput,
-  border: `1px solid ${filled ? colors.green : colors.borderMedium}`,
-  borderRadius: '10px',
-  fontSize: '13px',
-  color: colors.textPrimary,
+  padding: '10px 12px',
+  borderRadius: radius.sm,
+  fontSize: '12.5px',
+  backgroundColor: filled ? colors.greenDark : colors.blueDark,
+  border: `1px solid ${filled ? colors.borderUp : colors.borderAccent}`,
+  color: filled ? colors.greenLight : colors.blueLight,
 });
 
-// ── Misc small helpers ──────────────────────────────────
 export const lineHeight2 = { lineHeight: '2', fontSize: '14px' };
 
 export const smallText = (color = colors.textMuted) => ({
   color,
-  fontSize: '11px',
-  marginTop: '4px',
+  fontSize: '12px',
 });
 
-// ── Account Level ──────────────────────────────────────
+// ── Account Level / Verification ────────────────────────
 export const levelBadge = (isVerified) => ({
   display: 'inline-flex',
   alignItems: 'center',
   gap: '4px',
-  padding: '3px 10px',
-  borderRadius: '20px',
+  padding: '2px 8px',
+  borderRadius: '999px',
   fontSize: '11px',
-  fontWeight: '600',
-  letterSpacing: '0.04em',
-  backgroundColor: isVerified ? colors.greenDark : '#1A1F2E',
-  color: isVerified ? colors.greenLight : colors.textMuted,
-  border: `1px solid ${isVerified ? 'rgba(0,214,143,0.3)' : colors.borderDefault}`,
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+  backgroundColor: isVerified ? colors.greenDark : colors.amberDark,
+  color: isVerified ? colors.greenLight : colors.amber,
+  border: `1px solid ${isVerified ? colors.borderUp : colors.borderWarning}`,
 });
 
 export const verifiedRing = {
-  width: '32px',
-  height: '32px',
-  borderRadius: '50%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontSize: '14px',
-  fontWeight: '700',
-  position: 'relative',
+  border: `2px solid ${colors.upFill}`,
+  boxShadow: '0 0 0 3px var(--vt-up-soft)',
 };
 
 export const progressBarTrack = {
   width: '100%',
-  height: '8px',
-  backgroundColor: colors.bgInput,
-  borderRadius: '4px',
+  height: '6px',
+  backgroundColor: colors.bgRaised,
+  borderRadius: '999px',
   overflow: 'hidden',
-  border: `1px solid ${colors.borderDefault}`,
 };
 
 export const progressBarFill = (percent) => ({
-  width: `${Math.min(percent, 100)}%`,
+  width: `${percent}%`,
   height: '100%',
-  background: `linear-gradient(90deg, ${colors.green}, #00B87A)`,
-  borderRadius: '4px',
-  transition: 'width 0.4s ease',
+  background: `linear-gradient(90deg, ${colors.accentFill}, ${colors.upFill})`,
+  borderRadius: '999px',
+  transition: 'width 0.5s var(--vt-ease)',
 });
 
 export const lockOverlay = {
-  opacity: 0.5,
+  position: 'relative',
+  opacity: 0.45,
   pointerEvents: 'none',
-  filter: 'grayscale(30%)',
+  userSelect: 'none',
 };
 
 export const lockBanner = {
-  backgroundColor: colors.bgInput,
-  border: `1px solid ${colors.borderMedium}`,
-  borderRadius: '10px',
-  padding: '16px 20px',
-  textAlign: 'center',
+  padding: '12px 16px',
+  borderRadius: radius.sm,
+  backgroundColor: colors.amberDark,
+  border: `1px solid ${colors.borderWarning}`,
+  color: colors.amber,
+  fontSize: '13px',
   marginBottom: '16px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
 };

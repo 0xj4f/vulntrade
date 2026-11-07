@@ -268,6 +268,10 @@ public final class SecurityEventLogger {
                 path = http.getRequestURI();
                 userId = toLong(http.getAttribute(USER_ID));
                 username = asString(http.getAttribute(USERNAME));
+            } else {
+                // Background work with no request behind it (the house market maker's sweep
+                // and re-quote, startup reconcile).
+                transport = "SYSTEM";
             }
 
             // 2. Who did it? logAs() and logStomp() name the user explicitly.

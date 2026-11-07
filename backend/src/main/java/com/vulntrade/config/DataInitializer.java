@@ -175,96 +175,74 @@ public class DataInitializer {
     }
 
     /**
-     * Give the admin/house account inventory (positions) in all symbols
-     * and place SELL limit orders at various price levels.
-     * This creates a functioning order book for new traders to buy into.
+     * Give the admin/house account inventory (positions) in every symbol.
+     *
+     * The house's two-sided order book is quoted live by HouseMarketMakerService (tagged
+     * HOUSE-MM-* ladders that follow the price). VULN is the exception: it keeps a static
+     * ladder around ~100 that never moves while its price swings on a predictable sine —
+     * part of the predictable-price lesson. Ladder levels are sized at 2% of the position so
+     * the house always keeps free inventory and cash.
      */
     private void seedHouseInventory(User admin,
                                      PositionRepository positionRepository,
                                      OrderRepository orderRepository) {
-        System.out.println("[INIT] Seeding house inventory and order book...");
+        System.out.println("[INIT] Seeding house inventory...");
 
         Long adminId = admin.getId();
 
-        // Define house inventory: symbol, quantity held, base ask price, price step
-        // House inventory — large positions so the liquidity provider can fill orders
+        // symbol, quantity held, average cost
         Object[][] inventory = {
-            {"AAPL",    100000, "178.55", "0.10"},
-            {"GOOGL",   100000, "141.85", "0.10"},
-            {"MSFT",    100000, "378.95", "0.15"},
-            {"TSLA",    100000, "248.60", "0.20"},
-            {"AMZN",    100000, "178.30", "0.10"},
-            {"BTC-USD",  10000, "67510.00", "50.00"},
-            {"ETH-USD", 100000, "3452.00", "5.00"},
-            {"VULN",   1000000, "100.05", "0.05"},  // base ask ~100.05 (bids ~99.95) to match VULN's ~100 sinusoid
-            {"SOL-USD",  50000, "185.20", "0.50"},
-            {"DOGE-USD", 50000000, "0.1655", "0.0010"},
-            {"NVDA",     50000, "892.70", "1.00"},
-            {"XRP-USD",  10000000, "0.622", "0.005"},
-            {"AVAX-USD", 200000, "38.60", "0.20"},
-            {"PEPE-USD", 999999999, "0.00001260", "0.00000010"},
-            {"GME",      500000, "28.60", "0.20"},
+            {"AAPL",    100000, "178.55"},
+            {"GOOGL",   100000, "141.85"},
+            {"MSFT",    100000, "378.95"},
+            {"TSLA",    100000, "248.60"},
+            {"AMZN",    100000, "178.30"},
+            {"BTC-USD",  10000, "67510.00"},
+            {"ETH-USD", 100000, "3452.00"},
+            {"VULN",   1000000, "100.05"},
+            {"SOL-USD",  50000, "185.20"},
+            {"DOGE-USD", 50000000, "0.1655"},
+            {"NVDA",     50000, "892.70"},
+            {"XRP-USD",  10000000, "0.622"},
+            {"AVAX-USD", 200000, "38.60"},
+            {"PEPE-USD", 999999999, "0.00001260"},
+            {"GME",      500000, "28.60"},
         };
 
         for (Object[] item : inventory) {
-            String symbol = (String) item[0];
-            int qty = (int) item[1];
-            BigDecimal basePrice = new BigDecimal((String) item[2]);
-            BigDecimal priceStep = new BigDecimal((String) item[3]);
-
-            // Create position for admin
             Position pos = new Position();
             pos.setUserId(adminId);
-            pos.setSymbol(symbol);
-            pos.setQuantity(new BigDecimal(qty));
-            pos.setAvgPrice(basePrice);
+            pos.setSymbol((String) item[0]);
+            pos.setQuantity(new BigDecimal((int) item[1]));
+            pos.setAvgPrice(new BigDecimal((String) item[2]));
             pos.setUpdatedAt(LocalDateTime.now());
             positionRepository.save(pos);
-
-            // Place 5 sell orders at increasing price levels (ask side)
-            int orderQtyPerLevel = qty / 5;
-            for (int level = 0; level < 5; level++) {
-                BigDecimal price = basePrice.add(priceStep.multiply(new BigDecimal(level)));
-                Order sellOrder = new Order();
-                sellOrder.setUserId(adminId);
-                sellOrder.setSymbol(symbol);
-                sellOrder.setSide("SELL");
-                sellOrder.setOrderType("LIMIT");
-                sellOrder.setQuantity(new BigDecimal(orderQtyPerLevel));
-                sellOrder.setPrice(price);
-                sellOrder.setStatus("NEW");
-                sellOrder.setFilledQty(BigDecimal.ZERO);
-                sellOrder.setCreatedAt(LocalDateTime.now().minusMinutes(30 - level));
-                orderRepository.save(sellOrder);
-            }
-
-            // Place 5 buy orders at decreasing price levels (bid side)
-            // So when traders SELL, there are buy orders to match against
-            BigDecimal bidBase = basePrice.subtract(priceStep.multiply(new BigDecimal(2)));
-            for (int level = 0; level < 5; level++) {
-                BigDecimal price = bidBase.subtract(priceStep.multiply(new BigDecimal(level)));
-                Order buyOrder = new Order();
-                buyOrder.setUserId(adminId);
-                buyOrder.setSymbol(symbol);
-                buyOrder.setSide("BUY");
-                buyOrder.setOrderType("LIMIT");
-                buyOrder.setQuantity(new BigDecimal(orderQtyPerLevel));
-                buyOrder.setPrice(price);
-                buyOrder.setStatus("NEW");
-                buyOrder.setFilledQty(BigDecimal.ZERO);
-                buyOrder.setCreatedAt(LocalDateTime.now().minusMinutes(30 - level));
-                orderRepository.save(buyOrder);
-            }
-
-            System.out.println("[INIT] Seeded " + symbol + ": position=" + qty
-                    + ", 5 sell + 5 buy orders starting @ " + basePrice);
         }
 
-        System.out.println("[INIT] House inventory and order book seeded.");
+        // VULN: static ladder (asks from 100.05, bids from 99.95, 0.05 apart), 20,000 per level.
+        BigDecimal vulnLevelQty = new BigDecimal("20000");
+        for (int level = 0; level < 5; level++) {
+            BigDecimal offset = new BigDecimal("0.05").multiply(new BigDecimal(level));
+            for (String side : new String[]{"SELL", "BUY"}) {
+                Order o = new Order();
+                o.setUserId(adminId);
+                o.setSymbol("VULN");
+                o.setSide(side);
+                o.setOrderType("LIMIT");
+                o.setQuantity(vulnLevelQty);
+                o.setPrice("SELL".equals(side) ? new BigDecimal("100.05").add(offset) : new BigDecimal("99.95").subtract(offset));
+                o.setStatus("NEW");
+                o.setFilledQty(BigDecimal.ZERO);
+                o.setCreatedAt(LocalDateTime.now().minusMinutes(30 - level));
+                orderRepository.save(o);
+            }
+        }
+
+        System.out.println("[INIT] House inventory seeded (ladders are quoted live by the market maker).");
     }
 
     /**
-     * Seed 10 limit BUY orders for the developer account across various symbols.
+     * Seed resting limit BUY orders for the developer account across various symbols.
      */
     private void seedDevOrders(User dev, OrderRepository orderRepository) {
         Long devId = dev.getId();
@@ -273,13 +251,10 @@ public class DataInitializer {
             {"AAPL",    "BUY",  "50",  "175.00"},
             {"GOOGL",   "BUY",  "30",  "139.50"},
             {"MSFT",    "BUY",  "20",  "375.00"},
-            {"TSLA",    "SELL", "15",  "252.00"},
             {"AMZN",    "BUY",  "40",  "176.00"},
             {"BTC-USD", "BUY",  "1",   "66000.00"},
             {"ETH-USD", "BUY",  "10",  "3400.00"},
-            {"VULN",    "BUY",  "500", "99.00"},
-            {"AAPL",    "SELL", "25",  "182.00"},
-            {"GOOGL",   "SELL", "20",  "145.00"},
+            {"VULN",    "BUY",  "500", "75.00"},   // below the sine's 80-120 range: rests
         };
 
         for (int i = 0; i < devOrders.length; i++) {
@@ -297,7 +272,7 @@ public class DataInitializer {
             orderRepository.save(order);
         }
 
-        System.out.println("[INIT] Seeded 10 limit orders for dev user.");
+        System.out.println("[INIT] Seeded " + devOrders.length + " limit orders for dev user.");
     }
 
     /**

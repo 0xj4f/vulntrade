@@ -1,106 +1,135 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import api from '../services/apiService';
-import { sendMessage, subscribe, isConnected } from '../services/websocketService';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
-
+import { Download, FileDown, RefreshCw, Radio } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useDebug } from '../context/DebugContext';
+import api from '../services/apiService';
+import { sendMessage } from '../services/websocketService';
+import { useStomp } from '../hooks/useStomp';
 import PageLayout from '../components/PageLayout';
 import Card from '../components/Card';
+import DataTable from '../components/DataTable';
 import Button from '../components/Button';
 import FormField, { Input } from '../components/FormField';
-import DataTable from '../components/DataTable';
-import { colors, flexRowWrap } from '../styles/shared';
-import { fmtPrice, sideColor } from '../utils/format';
-import { useDebug } from '../context/DebugContext';
+import StatusBadge from '../components/StatusBadge';
+import { Chip } from '../components/ui';
+import { colors, num } from '../styles/shared';
+import { fmtDate, fmtPrice, fmtQty } from '../utils/format';
+
+/** RFC-4180-ish CSV parse (quoted fields, embedded commas/quotes). */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some(v => v !== '')) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); if (row.some(v => v !== '')) rows.push(row); }
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => h.trim());
+  return rows.slice(1).map(vals => Object.fromEntries(headers.map((h, i) => [h, (vals[i] ?? '').trim()])));
+}
 
 /**
- * PHASE 6: Trade History page
- * - VULN: SQL injection via date parameters (WebSocket getHistory)
- * - VULN: CSV export with injection payloads
- * - VULN: IDOR via userId parameter on export
+ * Trade history.
+ *
+ * VULN (kept, #53/#90): start/end dates and symbol are free text sent to the SQL-injectable
+ * WebSocket history query.
+ * VULN (kept, #91): CSV export is unsanitised (formula injection) and takes a userId (IDOR).
  */
 function HistoryPage() {
   const { user } = useAuth();
   const isDebug = useDebug();
-  const [trades, setTrades] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [source, setSource] = useState('orders');   // 'orders' (REST) | 'trades' (WebSocket)
+  const [loading, setLoading] = useState(false);
   const [startDate, setStartDate] = useState('2020-01-01');
   const [endDate, setEndDate] = useState('2030-12-31');
   const [symbol, setSymbol] = useState('');
+  const wsPending = useRef(false);
 
-  // Subscribe to WebSocket response channels
-  useEffect(() => {
-    const setupSubs = () => {
-      if (!isConnected()) return false;
-      subscribe('/user/queue/history', (response) => {
-        if (response.type === 'TRADE_HISTORY') {
-          // Backend returns Object[] arrays from native SQL query:
-          // [id, symbol, quantity, price, executed_at]
-          const rows = (response.trades || []).map(row => {
-            if (Array.isArray(row)) {
-              return { id: row[0], symbol: row[1], quantity: row[2], price: row[3], executedAt: row[4] };
-            }
-            return row; // already an object (e.g. from UNION injection)
-          });
-          setTrades(rows);
-          toast.success(`Loaded ${response.count || 0} trades via WebSocket`);
-        }
-      });
-      subscribe('/user/queue/errors', (error) => {
-        // VULN: Error messages reveal database structure
-        toast.error(error.message || 'WebSocket query failed', { autoClose: 8000 });
-      });
-      return true;
-    };
-    if (!setupSubs()) {
-      const iv = setInterval(() => { if (setupSubs()) clearInterval(iv); }, 500);
-      return () => clearInterval(iv);
-    }
-  }, []);
+  useStomp('/user/queue/history', (response) => {
+    if (!response || response.type !== 'TRADE_HISTORY') return;
+    wsPending.current = false;
+    setLoading(false);
+    // Native SQL rows: [id, symbol, quantity, price, executed_at] (or objects from UNION payloads)
+    const list = (response.trades || []).map(r => (Array.isArray(r)
+      ? { id: r[0], symbol: r[1], quantity: r[2], price: r[3], executedAt: r[4] }
+      : r));
+    setRows(list);
+    setSource('trades');
+    toast.success(`Loaded ${list.length} trade${list.length === 1 ? '' : 's'}`);
+  });
 
-  // Fetch trades via REST export endpoint
-  const fetchTrades = async () => {
+  useStomp('/user/queue/errors', (error) => {
+    if (!wsPending.current) return;
+    wsPending.current = false;
+    setLoading(false);
+    // VULN: Error messages reveal database structure
+    toast.error(error?.message || 'History query failed', { autoClose: 8000 });
+  });
+
+  // VULN: userId param enables IDOR
+  const loadOrders = useCallback(async (quiet = false) => {
+    setLoading(true);
     try {
-      // VULN: userId param enables IDOR
       const params = new URLSearchParams();
       if (user?.userId) params.append('userId', user.userId);
       if (symbol) params.append('symbol', symbol);
       params.append('format', 'json');
-
-      const res = await api.get(`/api/export/trades?${params.toString()}`);
-      // Parse CSV or handle JSON
-      if (typeof res.data === 'string') {
-        const lines = res.data.split('\n').filter(l => l.trim());
-        if (lines.length > 1) {
-          const headers = lines[0].split(',');
-          const parsed = lines.slice(1).map(line => {
-            const vals = line.split(',');
-            const obj = {};
-            headers.forEach((h, i) => { obj[h.trim()] = vals[i]?.trim(); });
-            return obj;
-          });
-          setTrades(parsed);
-        }
-      } else if (Array.isArray(res.data)) {
-        setTrades(res.data);
-      }
-      toast.success(`Loaded ${trades.length} trades`);
+      const res = await api.get(`/api/export/trades?${params.toString()}`, { responseType: 'text' });
+      const list = typeof res.data === 'string' ? parseCsv(res.data) : Array.isArray(res.data) ? res.data : [];
+      const mapped = list.map(o => ({
+        id: o['Order ID'] ?? o.id, symbol: o.Symbol ?? o.symbol, side: o.Side ?? o.side, type: o.Type ?? o.orderType,
+        quantity: o.Quantity ?? o.quantity, price: o.Price ?? o.price, status: o.Status ?? o.status,
+        clientOrderId: o['Client Order ID'] ?? o.clientOrderId, createdAt: o['Created At'] ?? o.createdAt, executedAt: o['Executed At'] ?? o.executedAt,
+      })).sort((a, b) => Number(b.id) - Number(a.id));
+      setRows(mapped);
+      setSource('orders');
+      if (!quiet) toast.success(`Loaded ${mapped.length} order${mapped.length === 1 ? '' : 's'}`);
     } catch (err) {
-      toast.error('Failed to load trades');
+      toast.error('Failed to load history');
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [user?.userId, symbol]);
+
+  useEffect(() => { loadOrders(true); }, []); // eslint-disable-line
 
   // VULN: SQL injection via WebSocket getHistory
   const fetchViaWebSocket = () => {
-    sendMessage('/app/trade.getHistory', {
-      startDate: startDate,
-      endDate: endDate,
-      symbol: symbol || null
-    });
-    toast.info('History request sent via WebSocket (check console for response)');
+    wsPending.current = true;
+    if (!sendMessage('/app/trade.getHistory', { startDate, endDate, symbol: symbol || null })) {
+      wsPending.current = false;
+      toast.error('Not connected — try again in a moment');
+      return;
+    }
+    setLoading(true);
   };
 
-  // VULN: CSV export with potential injection
-  // VULN: userId param enables IDOR — export any user's trades
+  const downloadBlob = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  // VULN: CSV export with potential injection; userId param enables IDOR
   const exportCSV = async () => {
     try {
       const params = new URLSearchParams();
@@ -127,85 +156,60 @@ function HistoryPage() {
     }
   };
 
-  // Helper: trigger browser download from a blob
-  const downloadBlob = (blob, filename) => {
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
-  };
-
-  /* -- Column definitions for the trades table -- */
+  const orderColumns = [
+    { key: 'id', label: 'Order', render: o => <span style={{ ...num, color: colors.textMuted }}>#{o.id}</span> },
+    { key: 'symbol', label: 'Symbol', render: o => <span style={{ fontWeight: 600 }}>{o.symbol}</span> },
+    { key: 'side', label: 'Side', render: o => (o.side ? <Chip tone={o.side === 'BUY' ? 'up' : 'down'}>{o.side}</Chip> : '—') },
+    { key: 'type', label: 'Type', render: o => <span style={{ color: colors.textSecondary }}>{o.type || '—'}</span> },
+    { key: 'quantity', label: 'Qty', align: 'right', render: o => fmtQty(o.quantity) },
+    { key: 'price', label: 'Price', align: 'right', render: o => (o.price && o.price !== 'null' ? fmtPrice(o.price) : 'MKT') },
+    { key: 'status', label: 'Status', render: o => <StatusBadge status={o.status} /> },
+    { key: 'coid', label: 'Client ID', render: o => <span style={{ ...num, color: colors.textDim, fontSize: '11.5px' }}>{o.clientOrderId && o.clientOrderId !== 'null' ? o.clientOrderId : '—'}</span> },
+    { key: 'created', label: 'Placed', render: o => <span style={{ color: colors.textMuted }}>{fmtDate(o.createdAt)}</span> },
+  ];
   const tradeColumns = [
-    { key: 'id', label: 'ID', render: (t, i) => <span style={{ color: colors.textMuted, fontFamily: "'SF Mono', monospace", fontSize: '12px' }}>{t.id || t['Trade ID'] || i}</span> },
-    { key: 'symbol', label: 'Symbol', render: (t) => <span style={{ color: colors.textPrimary, fontWeight: '700', fontSize: '14px' }}>{t.symbol || t.Symbol}</span> },
-    {
-      key: 'side', label: 'Side',
-      render: (t) => {
-        const side = t.side || t.Side || '\u2014';
-        return <span style={{
-          color: sideColor(side),
-          fontWeight: '600', fontSize: '12px',
-          padding: '2px 8px', borderRadius: '6px',
-          backgroundColor: side === 'BUY' ? 'rgba(0,214,143,0.1)' : 'rgba(255,61,113,0.1)',
-        }}>{side}</span>;
-      },
-    },
-    { key: 'quantity', label: 'Qty', align: 'right', render: (t) => <span style={{ fontWeight: '500' }}>{t.quantity || t.Quantity || '\u2014'}</span> },
-    {
-      key: 'price', label: 'Price', align: 'right',
-      render: (t) => {
-        const raw = t.price ?? t.Price ?? t.filledPrice;
-        return (raw != null && raw !== '' && !isNaN(Number(raw)))
-          ? <span style={{ color: colors.green, fontWeight: '500' }}>{fmtPrice(raw)}</span>
-          : <span style={{ color: colors.textMuted }}>MKT</span>;
-      },
-    },
-    { key: 'status', label: 'Status', render: (t) => <span style={{ color: colors.textSecondary, fontSize: '12px' }}>{t.status || t.Status || '\u2014'}</span> },
-    { key: 'date', label: 'Date', render: (t) => <span style={{ color: colors.textMuted, fontSize: '12px' }}>{t.executedAt || t['Executed At'] || t.createdAt || '\u2014'}</span> },
+    { key: 'id', label: 'Trade', render: (t, i) => <span style={{ ...num, color: colors.textMuted }}>#{t.id ?? i}</span> },
+    { key: 'symbol', label: 'Symbol', render: t => <span style={{ fontWeight: 600 }}>{String(t.symbol ?? '')}</span> },
+    { key: 'quantity', label: 'Qty', align: 'right', render: t => (Number.isFinite(Number(t.quantity)) ? fmtQty(t.quantity) : String(t.quantity ?? '—')) },
+    { key: 'price', label: 'Price', align: 'right', render: t => (Number.isFinite(Number(t.price)) ? fmtPrice(t.price) : String(t.price ?? '—')) },
+    { key: 'date', label: 'Executed', render: t => <span style={{ color: colors.textMuted }}>{fmtDate(t.executedAt) !== '—' ? fmtDate(t.executedAt) : String(t.executedAt ?? '—')}</span> },
   ];
 
   return (
-    <PageLayout title="Trade History">
-
-      {/* Filters */}
-      <Card title="Filters & Export">
-        <div style={flexRowWrap('10px')}>
-          <FormField label="Start Date">
+    <PageLayout title="History" subtitle="Your orders and executed trades — export for your records">
+      <Card title="Filters & export">
+        <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+          <FormField label="Start date">
             {/* VULN: Date sent to SQL injection-vulnerable endpoint */}
             <Input type="text" value={startDate} onChange={e => setStartDate(e.target.value)}
-              placeholder={isDebug ? "2020-01-01 or SQL payload" : "2020-01-01"} width="200px" />
+              placeholder={isDebug ? '2020-01-01 or SQL payload' : 'YYYY-MM-DD'} style={{ width: '100%' }} />
           </FormField>
-          <FormField label="End Date">
+          <FormField label="End date">
             <Input type="text" value={endDate} onChange={e => setEndDate(e.target.value)}
-              placeholder={isDebug ? "2030-12-31 or SQL payload" : "2030-12-31"} width="200px" />
+              placeholder={isDebug ? '2030-12-31 or SQL payload' : 'YYYY-MM-DD'} style={{ width: '100%' }} />
           </FormField>
           <FormField label="Symbol">
             <Input type="text" value={symbol} onChange={e => setSymbol(e.target.value)}
-              placeholder={isDebug ? "AAPL (or SQL injection)" : "AAPL"} width="150px" />
+              placeholder={isDebug ? 'Symbol (or SQL injection)' : 'All symbols'} style={{ width: '100%' }} />
           </FormField>
         </div>
         <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
-          <Button variant="blue" onClick={fetchTrades}>Load Trades (REST)</Button>
-          <Button variant="purple" onClick={fetchViaWebSocket}>{isDebug ? 'Load via WS (SQLi)' : 'Load via WebSocket'}</Button>
-          <Button variant="amber" onClick={exportCSV}>Export CSV</Button>
-          <Button variant="red" onClick={exportAllTrades}>{isDebug ? 'Export All (SQLi)' : 'Export All'}</Button>
+          <Button variant="blue" icon={<RefreshCw size={14} aria-hidden="true" />} onClick={() => loadOrders(false)} loading={loading && source === 'orders'}>Load orders</Button>
+          <Button variant="purple" icon={<Radio size={14} aria-hidden="true" />} onClick={fetchViaWebSocket}>{isDebug ? 'Load trades via WS (SQLi)' : 'Load executed trades'}</Button>
+          <span style={{ flex: 1 }} />
+          <Button variant="gray" icon={<FileDown size={14} aria-hidden="true" />} onClick={exportCSV}>Export CSV</Button>
+          <Button variant="gray" icon={<Download size={14} aria-hidden="true" />} onClick={exportAllTrades}>{isDebug ? 'Export all (SQLi)' : 'Export all trades'}</Button>
         </div>
       </Card>
 
-      {/* Trades Table */}
-      <Card title={<span>Trades <span style={{ color: colors.textMuted, fontWeight: '400', fontSize: '14px' }}>({trades.length})</span></span>}>
+      <Card flush title={source === 'orders' ? 'Orders' : 'Executed trades'} subtitle={`${rows.length} row${rows.length === 1 ? '' : 's'}`}>
         <DataTable
-          columns={tradeColumns}
-          data={trades}
           small
-          maxHeight="500px"
-          emptyText='No trades loaded — click "Load Trades" to fetch.'
-          headerBorder="heavy"
+          maxHeight="560px"
+          columns={source === 'orders' ? orderColumns : tradeColumns}
+          data={rows}
+          rowKey={(r, i) => `${r.id}-${i}`}
+          emptyText={loading ? 'Loading…' : 'Nothing here yet — place a trade from the dashboard.'}
         />
       </Card>
     </PageLayout>

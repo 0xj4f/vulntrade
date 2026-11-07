@@ -39,4 +39,12 @@ public class Symbol {
 
     @Column(name = "is_tradable")
     private Boolean isTradable = true;
+
+    /** Session open (first price since the backend started) — filled in by the API, not stored. */
+    @Transient
+    private BigDecimal openPrice;
+
+    /** % change vs the session open — filled in by the API, not stored. */
+    @Transient
+    private BigDecimal changePct;
 }

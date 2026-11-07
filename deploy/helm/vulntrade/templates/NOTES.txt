@@ -1,0 +1,19 @@
+VulnTrade {{ .Chart.AppVersion }} is deploying into namespace "{{ .Release.Namespace }}".
+
+  ⚠  Intentionally vulnerable — keep this cluster local / isolated.
+
+Wait for it (the backend takes a minute or two to boot and seed):
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/backend --timeout=10m
+
+Open it:
+{{- if .Values.ingress.enabled }}
+  http://{{ default "<ingress address>" .Values.ingress.host }}/
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/frontend 3001:80   # http://localhost:3001
+  kubectl -n {{ .Release.Namespace }} port-forward svc/backend 8085:8080  # API http://localhost:8085
+{{- end }}
+{{- if .Values.adminer.enabled }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/adminer 8081:8080  # Adminer (server: postgres)
+{{- end }}
+
+Sign in with trader1 / password (see the readme for all lab accounts).

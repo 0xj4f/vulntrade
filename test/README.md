@@ -59,6 +59,40 @@ chmod +x test-phase1.sh test-phase2.sh test-phase3.sh run-all-tests.sh
 | `test-phase2.sh` | Auth flows, IDOR, JWT, password reset, user enumeration | 2-3 min |
 | `test-phase3.sh` | Order placement, trading, IDOR, sign flip, XSS, SQL injection | 2-3 min |
 | `run-all-tests.sh` | Master script - runs all three phases sequentially | 5-8 min |
+| `trading_integrity.py` | **Business-logic regression suite** (fills, settlement, house market maker, leaderboard, candles) — see below | ~1 min |
+| `test-security-events.sh` | Every flow writes the right `security.log` event (logging-guide §2-4) | 2-3 min |
+
+## 📈 Trading-integrity suite (`trading_integrity.py`)
+
+Checks that the trading business logic is correct end to end — not the vulnerabilities (the exploit
+matrix covers those). 60 checks across ten scenarios:
+
+1. partial fills across makers → `ORDER_UPDATE` on `/user/queue/order-updates`, volume-weighted average
+   fill price, weighted average cost, realized P&L, cash exact to the 8th decimal, book shows remaining qty;
+2. two unreserved BUYs, one fill → the second resting order is cancelled `INSUFFICIENT_FUNDS`, cash ≥ 0;
+3. the same shares offered twice → the second SELL is cancelled `INSUFFICIENT_POSITION`, no shares minted;
+4. the house fills a resting LIMIT once the price crosses it; leaderboard ROI / win rate / rank for a live
+   trader; a deposit is capital, not profit;
+5. wash trade (intentional) → recorded, cash and shares net to zero;
+6. 20 concurrent takers vs a 10-lot → exactly 10 fills; an IDOR cancel racing a fill → exactly one wins;
+7. invalid side / type / precision rejected;
+8. `setPrice` broadcast, price 0 rejected, sub-cent precision, candles aligned and consistent, UTC `Z` timestamps;
+9. every balance change has a ledger row;
+10. the FLAG 11 pump chain still overtakes the seeded #1;
+
+plus database invariants (no negative balance/position, no over-fill, `filled_qty` = Σ trades,
+balance = Σ ledger, no resting MARKET order, no crossed book).
+
+```bash
+pip install requests websocket-client
+python3 test/trading_integrity.py                          # docker compose (localhost:8085)
+python3 test/trading_integrity.py --base-url http://localhost:8095   # e.g. a port-forwarded k8s backend
+python3 test/trading_integrity.py --skip-flag              # skip the FLAG 11 pump (it leaves VULN overridden)
+```
+
+It uses the lab's own weaknesses as tooling (admin/admin123, the admin SQL endpoint, the unauthenticated
+`admin.setPrice`) to pin GME and read exact values, creates its own `ti_<run>` users, and restores GME's
+price at the end. Exit code 0 = all checks passed.
 
 ## 🔍 What Gets Tested
 

@@ -1,511 +1,178 @@
-# Order Flow Documentation
+# Order Flow
 
-> Analysis of the trading order lifecycle in VulnTrade.  
-> Source files: `OrderService`, `RiskService`, `MatchingEngineService`
+> How an order travels through VulnTrade, from the order ticket to settlement and notifications
+> (0.6.0). Source: `OrderService`, `RiskService`, `MatchingEngineService`,
+> `LiquidityProviderService`, `HouseMarketMakerService`, `MatchingCoordinator`, `TradingEvents`.
+> The intentional business-logic vulnerabilities are listed at the end — they are part of the lab.
 
----
-
-## Table of Contents
+## Contents
 
 1. [Overview](#overview)
-2. [Market Buy Flow (Step-by-Step)](#market-buy-flow)
-3. [Market Sell Flow (Step-by-Step)](#market-sell-flow)
-4. [Matching Engine: How Orders Get Filled](#matching-engine)
-5. [Balance & Position Updates on Fill](#balance--position-updates-on-fill)
-6. [Full Example: Trader 1 Buys, Trader 2 Sells](#full-example)
-7. [Limit Order Flow](#limit-order-flow)
-8. [Key Observations & Issues](#key-observations--issues)
+2. [Placing an order](#placing-an-order)
+3. [Matching](#matching)
+4. [Settlement](#settlement)
+5. [The house: liquidity and market making](#the-house-liquidity-and-market-making)
+6. [Cancels](#cancels)
+7. [Notifications](#notifications)
+8. [Worked example](#worked-example)
+9. [Behaviour summary](#behaviour-summary)
+10. [Intentional business-logic vulnerabilities](#intentional-business-logic-vulnerabilities)
 
 ---
 
 ## Overview
 
-The order system has four main services:
-
-| Service                      | Responsibility                                     |
-|------------------------------|----------------------------------------------------|
-| `OrderService`               | Receives order requests, runs risk checks, saves order, triggers matching |
-| `RiskService`                | Pre-trade validation (balance, position, symbol checks) |
-| `MatchingEngineService`      | Matches buy vs sell orders, executes trades, updates balances & positions |
-| `LiquidityProviderService`   | House market maker — guarantees MARKET order fills when no book match exists |
-
-**Order lifecycle:** `NEW` → `PARTIAL` → `FILLED` (or `CANCELLED`)
-
----
-
-## Market Buy Flow
-
-**Example:** Trader 1 places a MARKET BUY for 0.5 BTC-USD.
-
-### Step 1: `OrderService.placeOrder()` is called
-
-```
-userId = 1, type = "MARKET", side = "BUY", symbol = "BTC-USD", quantity = 0.5
-```
-
-### Step 2: Halt check — enforced for ALL order types
-
-The halt check (`priceSimulator.isHalted()`) runs for every order, MARKET and LIMIT alike
-(`OrderService.placeOrder`). A market order on a halted symbol is rejected with
-`Trading halted for <symbol>`.
-
-> *Historical:* earlier builds skipped the halt check for MARKET orders. That gap is closed.
-
-### Step 3: `RiskService.checkPreTrade()` — runs for ALL order types
-
-`checkPreTrade()` (`RiskService.java:47`) runs for MARKET and LIMIT orders and validates, in
-order: quantity > 0, price > 0 (LIMIT only), symbol exists and is tradable, buyer balance ≥
-order value (BUY), and position ≥ quantity (SELL). For MARKET orders it resolves the effective
-price from the live `ask` (BUY) / `bid` (SELL) before the balance check.
-
-**The buyer's balance IS verified before a MARKET buy is accepted.**
-
-> *Historical:* earlier builds returned `null` (pass) immediately for any MARKET order, so no
-> balance/position check ran. That gap is closed.
-
-### Step 4: Order saved to DB with status `NEW`
-
-The order is persisted with the current ask price from the Symbol table.  
-For market buys, the price is set to the current `ask` price of the symbol.
-
-### Step 5: `matchingEngine.tryMatch(order)` — immediate matching attempt
-
-The matching engine looks for opposing `SELL` orders with status `NEW` on the same symbol.
-
-- If a matching sell order exists → trade executes immediately
-- If no matching sell order exists → order stays as `NEW` in the book
-
-### Step 6: WebSocket notifications sent
-
-- Order status pushed to the user via `/queue/orders`
-- Order book broadcast updated via `/topic/orderbook`
-
-### What happens to Trader 1's balance at this point?
-
-**NOTHING.** The balance is only deducted when the order is **matched and filled** (inside `MatchingEngineService.executeTrade()`). If there's no opposing sell order, the buy order sits in the book with status `NEW` and the trader's balance is untouched.
-
----
-
-## Market Sell Flow
-
-**Example:** Trader 2 places a MARKET SELL for 0.5 BTC-USD.
-
-### Step 1–4: Same as buy flow
-
-- Halt check: enforced (all order types)
-- Risk check: enforced (all order types)
-- **Position check applies to the SELL side.** `RiskService.checkPreTrade()` requires the seller
-  to already hold ≥ the quantity being sold, otherwise the order is rejected with
-  `Insufficient position. Required: <qty> <symbol>, Available: <held>`. Selling 0.5 BTC with a
-  0 BTC position is denied.
-- Order saved with current `bid` price from Symbol table
-
-> *Historical:* earlier builds had no sell-side validation (naked short selling). That gap is
-> closed — see "Business-logic vulns that remain" below for what is still exploitable.
-
-### Step 5: Matching attempt
-
-The engine looks for opposing `BUY` orders with status `NEW`.  
-If Trader 1's buy order from above exists, it will match.
-
----
-
-## Matching Engine
-
-### How `tryMatch()` works
-
-```
-1. Find all opposing orders: same symbol, opposite side, status = "NEW"
-2. Sort by price-time priority:
-   - Buy incoming  → match against LOWEST sell prices first
-   - Sell incoming → match against HIGHEST buy prices first
-3. For each opposing order:
-   a. Check price compatibility:
-      - Buy:  incoming.price >= opposing.price
-      - Sell: incoming.price <= opposing.price
-   b. Calculate fill quantity = min(remaining incoming, remaining opposing)
-   c. Execute trade at the RESTING order's price (the order already in the book)
-   d. Subtract fill from remaining quantity
-4. Update incoming order status: FILLED / PARTIAL / stays NEW
-```
-
-### Price used for execution
-
-The trade always executes at the **resting order's price** (the order that was already in the book), not the incoming order's price.
-
----
-
-## Balance & Position Updates on Fill
-
-When two orders match, `executeTrade()` does the following **atomically per trade** (but not in a DB transaction):
-
-### 1. Trade record created
-
-```
-Trade { buyOrderId, sellOrderId, symbol, quantity, price, executedAt }
-```
-
-### 2. Both orders updated
-
-```
-filledQty += fillQuantity
-filledPrice = execution price
-status = "FILLED" if filledQty >= quantity, else "PARTIAL"
-```
-
-### 3. Buyer's balance DEDUCTED
-
-```java
-tradeValue = quantity * price
-buyer.balance = buyer.balance - tradeValue
-// Transaction record: type = "TRADE_BUY", amount = -tradeValue
-```
-
-### 4. Seller's balance CREDITED
-
-```java
-seller.balance = seller.balance + tradeValue
-// Transaction record: type = "TRADE_SELL", amount = +tradeValue
-```
-
-### 5. Positions updated
-
-**Buyer:** Position quantity increases, average price recalculated  
-**Seller:** Position quantity decreases, clamped at 0 (`MatchingEngineService` prevents negative positions; the `RiskService` position check already rejects a sell larger than the holding)
-
----
-
-## Full Example
-
-> *Note:* this walkthrough illustrates the matching-engine mechanics. Under the current
-> pre-trade controls, Trader 2's MARKET SELL only passes risk checks if Trader 2 actually holds
-> ≥ 0.5 BTC (or is the house / liquidity provider). Positions no longer go negative —
-> `MatchingEngineService` clamps fills at 0 and the `RiskService` position check rejects naked
-> shorts up front. Assume Trader 2 holds the 0.5 BTC for the numbers below.
-
-### Setup
-- **Trader 1**: balance = $100,000, no positions
-- **Trader 2**: balance = $50,000, holds 0.5 BTC
-- **BTC-USD**: bid = $64,000, ask = $64,100
-
-### Step 1: Trader 1 places MARKET BUY 0.5 BTC-USD
-
-1. `OrderService.placeOrder(userId=1, MARKET, BUY, BTC-USD, qty=0.5)`
-2. Price set to ask: **$64,100**
-3. Risk check: **enforced** (MARKET order) — balance ≥ 0.5 × $64,100 = $32,050 ✓
-4. Order saved: `{id=1, userId=1, BUY, MARKET, BTC-USD, qty=0.5, price=$64,100, status=NEW}`
-5. `tryMatch()` runs → no SELL orders exist → **no match**
-6. Order stays `NEW` in the order book
-7. **Trader 1 balance: still $100,000** (no deduction yet)
-
-### Step 2: Trader 2 places MARKET SELL 0.5 BTC-USD
-
-1. `OrderService.placeOrder(userId=2, MARKET, SELL, BTC-USD, qty=0.5)`
-2. Price set to bid: **$64,000**
-3. Risk check: **enforced** (MARKET order) — balance/position/symbol/qty all validated
-4. **Position check passes** because Trader 2 holds 0.5 BTC (a 0-position seller would be rejected)
-5. Order saved: `{id=2, userId=2, SELL, MARKET, BTC-USD, qty=0.5, price=$64,000, status=NEW}`
-6. `tryMatch()` runs → finds Trader 1's BUY order
-
-### Step 3: Match found — trade executes
-
-```
-Incoming: SELL @ $64,000
-Resting:  BUY  @ $64,100
-
-Price check: sell.price ($64,000) <= buy.price ($64,100) ✓
-Fill quantity: min(0.5, 0.5) = 0.5
-Execution price: $64,100 (resting order's price — the BUY)
-```
-
-Wait — actually, the incoming order is the SELL, and it matches against the resting BUY. The execution price is the **resting** order's price = **$64,100**.
-
-### Step 4: `executeTrade()` runs
-
-```
-Trade value = 0.5 × $64,100 = $32,050
-
-Trader 1 (buyer):
-  balance: $100,000 - $32,050 = $67,950
-  position: BTC-USD qty = +0.5, avgPrice = $64,100
-  transaction: TRADE_BUY, amount = -$32,050
-
-Trader 2 (seller):
-  balance: $50,000 + $32,050 = $82,050
-  position: BTC-USD qty 0.5 → 0.0 (positions clamp at 0; naked shorts are rejected pre-trade)
-  transaction: TRADE_SELL, amount = +$32,050
-```
-
-### Step 5: Both orders marked FILLED
-
-```
-Order 1: status=FILLED, filledQty=0.5, filledPrice=$64,100
-Order 2: status=FILLED, filledQty=0.5, filledPrice=$64,100
-```
-
-### Final State
-
-| Trader   | Balance   | BTC-USD Position |
-|----------|-----------|------------------|
-| Trader 1 | $67,950   | +0.5 BTC         |
-| Trader 2 | $82,050   | 0.0 BTC          |
-
----
-
-## Limit Order Flow
-
-Limit orders follow the same path but with two differences:
-
-### 1. Halt check IS enforced
-
-```java
-if ("LIMIT".equalsIgnoreCase(request.getType())) {
-    if (priceSimulator.isHalted(request.getSymbol())) {
-        throw new RuntimeException("Trading halted for " + request.getSymbol());
-    }
-}
-```
-
-### 2. Risk check IS performed (both sides)
-
-```
-LIMIT BUY : balance  ≥ quantity × price   (else "Insufficient balance")
-LIMIT SELL: position ≥ quantity            (else "Insufficient position")
-both sides: quantity > 0, price > 0, symbol exists & tradable
-```
-
-**However:** the balance is only **checked**, not **reserved/locked**. This creates a TOCTOU (Time-of-Check, Time-of-Use) gap — the balance could change between the check and the actual trade execution (still exploitable; see #43/#51 in `vulnerabilities.md`).
-
----
-
-## Key Observations & Issues
-
-### 1. Balance is NOT deducted at order placement
-
-Balance is only deducted when the order is **filled** (matched with an opposing order). A market buy order with no opposing sell will sit in the book without affecting the trader's balance.
-
-### 2. Sell-side position check IS enforced *(hardened)*
-
-A trader can no longer sell assets they don't own. `RiskService.checkPreTrade()` requires
-`position ≥ quantity` for every SELL (MARKET and LIMIT); otherwise the order is rejected with
-`Insufficient position …`. Negative positions are additionally prevented in
-`MatchingEngineService` (fills clamp at 0).
-
-> *Historical:* earlier builds had no sell-side validation (naked shorting). Fixed.
-
-### 3. Market orders run the full risk check *(hardened)*
-
-`RiskService.checkPreTrade()` runs for every order type, including `MARKET` — balance, position,
-symbol existence/tradability and quantity are all validated.
-
-> *Historical:* earlier builds returned `null` (pass) immediately for MARKET orders. Fixed.
-
-### 4. Pre-trade validation covers all combinations *(hardened)*
-
-Validation is not limited to LIMIT BUY. Every order is checked for quantity > 0, price > 0
-(LIMIT), symbol existence/tradability, buyer balance (BUY) and seller position (SELL).
-
-### 5. No balance reservation / locking
-
-Even when the LIMIT BUY balance check passes, the balance is not locked or reserved. A trader could place multiple limit buy orders that each pass the balance check individually but collectively exceed their balance.
-
-### 6. Self-matching is allowed (wash trading)
-
-The matching engine does not check if the buyer and seller are the same user. A single trader can create both a buy and sell order and match with themselves.
-
-### 7. Execution price is always the resting order's price
-
-When a trade matches, the price used is the price of the order that was already in the book (the "maker"), not the incoming order (the "taker").
-
-### Summary Table (current behaviour)
-
-| Check                        | MARKET BUY | MARKET SELL | LIMIT BUY | LIMIT SELL |
-|------------------------------|:----------:|:-----------:|:---------:|:----------:|
-| Symbol exists & tradable     | ✅         | ✅          | ✅        | ✅         |
-| Quantity > 0                 | ✅         | ✅          | ✅        | ✅         |
-| Halt check                   | ✅         | ✅          | ✅        | ✅         |
-| Balance check (BUY)          | ✅         | N/A         | ✅        | N/A        |
-| Position/asset check (SELL)  | N/A        | ✅          | N/A       | ✅         |
-| Balance reservation          | ❌         | ❌          | ❌        | ❌         |
-| Balance deducted on fill     | ✅         | N/A         | ✅        | N/A        |
-| Balance credited on fill     | N/A        | ✅          | N/A       | ✅         |
-
-Balance reservation is still **not** done (the TOCTOU gap above remains the live
-double-spend bug).
-
-### Business-logic vulns that remain
-
-The pre-trade hardening (symbol / qty / halt / balance / position checks) closed the input-
-validation gaps, but the trading flow is still deliberately exploitable:
+| Component | Responsibility |
+|---|---|
+| `OrderService` | Validates the request, runs the risk check, saves the order, asks the engine to match it |
+| `RiskService` | Pre-trade check: quantity, price, symbol, buyer cash (BUY), seller shares (SELL). Advisory — nothing is reserved |
+| `MatchingEngineService` | Matches against the book, settles each fill, closes or rests the remainder |
+| `LiquidityProviderService` | Prices house fills (touch ± 0.01 % spread) and records the house's side of a fill |
+| `HouseMarketMakerService` | Every second: fills resting LIMIT orders the price has crossed; re-quotes the house ladder |
+| `MatchingCoordinator` | One global lock + one transaction around every book change |
+| `TradingEvents` | After commit: order updates to owners, trades, order-book broadcasts |
+
+**Order statuses:** `NEW` → `PARTIAL` → `FILLED`, or `CANCELLED` (with an optional `statusReason`:
+`INSUFFICIENT_FUNDS`, `INSUFFICIENT_POSITION`, `NO_LIQUIDITY`).
+
+Orders arrive over STOMP (`/app/trade.placeOrder`, `/app/trade.executeMarket`) or REST
+(`POST /api/orders`); both go through `OrderService.placeOrder`.
+
+## Placing an order
+
+1. **Normalise and validate** — side must be `BUY`/`SELL`, type `LIMIT`/`MARKET` (a missing type means
+   MARKET without a price, LIMIT with one), quantity and price at most 8 decimals. A rejection is sent to
+   `/user/queue/errors` and logged as `order_rejected`.
+2. **Take the matching lock** (`MatchingCoordinator`): one fair global lock, then one transaction. All
+   reads after this point are fresh.
+3. **MARKET price** — if none was sent, the live ask (BUY) or bid (SELL) is used. A client-supplied
+   MARKET price is kept and caps book matching (vuln #45).
+4. **Halt check** — a halted symbol rejects every order type.
+5. **Risk check** (`RiskService.checkPreTrade`) — quantity > 0, price > 0 for LIMIT, known tradable
+   symbol, buyer cash ≥ quantity × price (MARKET BUY uses the house fill price, ask + spread), seller
+   shares ≥ quantity. **Nothing is reserved**: several open orders may together exceed the balance.
+6. **Save** the order as `NEW`, log `order_created`, then **match**.
+
+## Matching
+
+`MatchingEngineService.match(order)`:
+
+1. Load the opposite side's open LIMIT orders for the symbol, best price first, then oldest first.
+2. Walk the book while the incoming price crosses: BUY ≥ ask, SELL ≤ bid. Each fill is
+   `min(remaining, resting remaining)` at the **resting (maker) price** and goes through
+   [settlement](#settlement).
+3. **House liquidity** for what is left:
+   - MARKET → the house fills at ask × 1.0001 (BUY) or bid × 0.9999 (SELL);
+   - a **marketable LIMIT** (BUY limit ≥ ask, SELL limit ≤ bid) → the house fills at the better of the
+     limit and its own price;
+   - the house fills as much as its inventory (sells) or cash (buys) allows.
+4. **Remainder:** a LIMIT order rests (`NEW` or `PARTIAL`); a MARKET order is cancelled with
+   `NO_LIQUIDITY`; an order whose owner couldn't cover a fill is cancelled with the shortfall reason.
+
+The reply carries the final `status`, `filledQty`, `avgFillPrice` (volume-weighted across every fill),
+`remainingQty` and `reason`.
+
+## Settlement
+
+Each fill settles inside the transaction, with conditional SQL so a balance or position can never go
+below zero:
+
+| Step | Statement |
+|---|---|
+| Seller holds the shares? | `SELECT quantity …` (positions only change under the lock) |
+| Debit buyer | `UPDATE users SET balance = balance - :v WHERE id = :buyer AND balance >= :v` |
+| Take shares from seller | `UPDATE positions … quantity = quantity - :q, realized_pnl += (:price - avg_price) × :q … WHERE quantity >= :q` |
+| Credit seller | `UPDATE users SET balance = balance + :v` |
+| Give shares to buyer | `INSERT … ON CONFLICT (user_id, symbol) DO UPDATE` (weighted average cost) |
+
+- If the **resting** order's owner can't cover the fill, that order is cancelled
+  (`INSUFFICIENT_FUNDS` / `INSUFFICIENT_POSITION`) and matching moves to the next level.
+- If the **incoming** order's owner can't cover it, matching stops and the remainder is cancelled.
+- Each fill writes one `trades` row and two ledger rows (`TRADE_BUY` −value, `TRADE_SELL` +value), so a
+  balance always equals the sum of its transactions.
+- **Wash trades** (#62): when both sides belong to the same user the trade and both ledger rows are
+  recorded (`selfTrade=true`) but cash and shares net to zero.
+- Realized P&L is booked on every sell against the average cost; the average resets when a position
+  closes.
+
+## The house: liquidity and market making
+
+The house is user 1 (`admin`), with $1 B of cash and large positions. See
+[liquidity-provider.md](liquidity-provider.md) for prices, ladders and inventory. In short:
+
+- **Sweep** (every second): resting user LIMIT orders that the live quote now crosses are filled by the
+  house at their limit price — a limit order no longer waits for another trader.
+- **Re-quote** (every 2 s, or at once when its quotes fall behind the price): a 5-level ladder per side,
+  tagged `HOUSE-MM-<symbol>-<side>-<level>`, re-priced in place around the live quote.
+- **VULN** keeps a static seeded ladder (~100.05 / 99.95) while its price follows a predictable sine.
+
+## Cancels
+
+`/app/trade.cancelOrder` and `POST /api/orders/{id}/cancel` → `OrderService.cancelOrder`, under the same
+lock: an open order becomes `CANCELLED`; a filled or already-cancelled one returns
+`Order already FILLED|CANCELLED`. There is **no ownership check** (vuln #44). The owner is told through
+`/user/queue/order-updates`. `DELETE /api/orders/{id}` hard-deletes an order with no fills (also no
+ownership check); one that traded returns `409`.
+
+## Notifications
+
+Sent only after the transaction commits (nothing is sent for a rolled-back attempt):
+
+| Destination | Payload | Audience |
+|---|---|---|
+| `/user/queue/orders` | `ORDER_PLACED`, `ORDER_CANCELLED`, `MARKET_ORDER_EXECUTED` replies | the caller |
+| `/user/queue/errors` | `ERROR` replies | the caller |
+| `/user/queue/order-updates` | `ORDER_UPDATE` for every order that changed (fills of resting orders, auto-cancels, IDOR cancels) | the order's owner (by username; never the house) |
+| `/topic/trades` | `TradeNotification` (includes buyer/seller ids — vuln #61) | everyone |
+| `/topic/orderbook` | open orders of one symbol (ids, user ids, usernames — vuln #60) | everyone |
+| `/topic/orderbook/{symbol}` | `{symbol, bids, asks, levels}` | everyone |
+
+## Worked example
+
+GME pinned at 28.50 (bid 28.48575, ask 28.51425); house fills BUY at ask × 1.0001 = 28.51710143.
+
+1. **S** sends MARKET BUY 10 → the house fills 10 @ 28.51710143. S: cash 10,000 − 285.17101430,
+   position 10 @ 28.51710143.
+2. **S** places LIMIT SELL 6 @ 28.50 → not marketable (28.50 > bid) → rests `NEW`.
+3. **B** places LIMIT BUY 4 @ 28.50 → crosses S → fill 4 @ 28.50. B's order `FILLED`; S gets
+   `ORDER_UPDATE PARTIAL` (filled 4, remaining 2).
+4. **B** places LIMIT BUY 5 @ 28.51 → fills S's last 2 @ 28.50, rests 3 @ 28.51 (`PARTIAL`, avg 28.50);
+   S gets `ORDER_UPDATE FILLED`.
+5. Result: B cash 9,829.00, position 6 @ 28.50; S position 4 @ 28.51710143, realized P&L
+   6 × (28.50 − 28.51710143) = −0.10260858. The book shows B's bid with **remaining** quantity 3.
+
+This scenario (and the settlement, sweep, concurrency and leaderboard cases) is checked by
+`test/trading_integrity.py`.
+
+## Behaviour summary
+
+| | MARKET BUY | MARKET SELL | LIMIT BUY | LIMIT SELL |
+|---|:---:|:---:|:---:|:---:|
+| Side / type / precision validated | ✅ | ✅ | ✅ | ✅ |
+| Symbol, quantity > 0, halt | ✅ | ✅ | ✅ | ✅ |
+| Price > 0 | — | — | ✅ | ✅ |
+| Risk check: cash (BUY) / shares (SELL) | ✅ (incl. spread) | ✅ | ✅ | ✅ |
+| Cash / shares **reserved** at placement | ❌ | ❌ | ❌ | ❌ |
+| Settlement re-checks cash / shares at fill | ✅ | ✅ | ✅ | ✅ |
+| House fills when the book can't | ✅ | ✅ | when marketable | when marketable |
+| Rests in the book | never | never | ✅ | ✅ |
+| Filled by the house later if the price crosses | — | — | ✅ | ✅ |
+
+## Intentional business-logic vulnerabilities
+
+The validation and settlement fixes close input and accounting gaps; these stay exploitable on purpose:
 
 | Vuln | Where | Ref |
-|------|-------|-----|
-| Sign-flip withdrawal (negative = deposit) | `AccountController` / withdraw | #50 |
-| TOCTOU double-spend (concurrent withdrawals) | balance checked, not locked | #43 / #51 |
+|---|---|---|
+| Sign-flip withdrawal (negative = deposit) | `AccountController` withdraw | #50 |
+| TOCTOU double-spend on concurrent withdrawals (and a racing withdraw can overwrite a concurrent trade settlement) | withdraw read-check-write, no lock | #43 / #51 |
 | Deposit without source verification | deposit endpoint | #52 |
 | Wash trading (self-matching) | `MatchingEngineService` (no self-trade guard) | #62 |
-| No price band on LIMIT orders | `RiskService` (price>0 only) | #40 |
+| No price band on LIMIT orders | `RiskService` (price > 0 only) | #40 |
 | clientOrderId replay | `OrderService` (no uniqueness) | #41 |
-| No slippage protection on MARKET orders | `executeMarketOrder` | #45 |
-| IDOR cancel any order | `OrderService.cancelOrder` (no ownership check) | #44 |
+| No slippage protection on MARKET orders | client price caps the book; the house fills at its price | #45 |
+| IDOR cancel / delete any order | `OrderService.cancelOrder`, `deleteOrder` | #44 |
+| Order placed as another user (hidden `userId`) | `TradeStompController.placeOrder` | #71 |
+| Market price manipulation (`admin.setPrice` has no authorization) | `AdminStompController` | #58 / BIZ-01 |
 
-(Numbers reference `vulnerabilities.md`.)
-
----
-
-## Fix Plan: Making VulnTrade a Working Trading App
-
-> While VulnTrade is designed with intentional vulnerabilities, the core trading logic
-> must be functional so it can be tested as a real trading application.
-
-### Implemented Fixes
-
-| # | Fix | File |
-|---|-----|------|
-| 1 | Risk checks for ALL order types (balance, position, symbol, qty) | `RiskService.java` |
-| 2 | Halt check for all order types, symbol validation | `OrderService.java` |
-| 3 | Prevent negative positions (no naked shorts) | `MatchingEngineService.java` |
-| 4 | REST order endpoint routes through OrderService (same validation as WS) | `OrderController.java` |
-| 5 | **Liquidity Provider Service** — house market maker for guaranteed MARKET fills | `LiquidityProviderService.java` |
-| 6 | House seeded with $1B balance and large positions | `DataInitializer.java` |
-
-### Post-Fix Validation Summary
-
-| Check                        | MARKET BUY | MARKET SELL | LIMIT BUY | LIMIT SELL |
-|------------------------------|:----------:|:-----------:|:---------:|:----------:|
-| Symbol validation            | ✅         | ✅          | ✅        | ✅         |
-| Quantity > 0                 | ✅         | ✅          | ✅        | ✅         |
-| Halt check                   | ✅         | ✅          | ✅        | ✅         |
-| Balance check (BUY)          | ✅         | N/A         | ✅        | N/A        |
-| Position check (SELL)        | N/A        | ✅          | N/A       | ✅         |
-| Liquidity provider fill      | ✅         | ✅          | ❌        | ❌         |
-| Balance deducted on fill     | ✅         | N/A         | ✅        | N/A        |
-| Balance credited on fill     | N/A        | ✅          | N/A       | ✅         |
-
----
-
-## Liquidity Provider Service
-
-**File:** `backend/src/main/java/com/vulntrade/service/LiquidityProviderService.java`
-
-The liquidity provider acts as the **house / market maker**. It guarantees that
-MARKET orders always execute, even when there are no matching orders in the book.
-
-### How It Works
-
-```
-Trader places MARKET BUY 10 AAPL
-        │
-        ▼
-  OrderService.placeOrder()
-        │  ✓ risk checks pass (balance, symbol, qty)
-        ▼
-  MatchingEngine.tryMatch()
-        │
-        ├── Found matching SELL orders in book?
-        │       YES → execute trades (price-time priority)
-        │       NO  ↓
-        │
-        └── Remaining unfilled qty > 0 AND order is MARKET?
-                │
-                ▼
-        LiquidityProvider.fillMarketOrder(order, remainingQty)
-                │
-                ├── Get live price from Symbol table (ask for BUY, bid for SELL)
-                ├── Apply spread: 0.01% (configurable)
-                │     BUY  → fill at ask × 1.0001  (trader pays slightly more)
-                │     SELL → fill at bid × 0.9999  (trader receives slightly less)
-                ├── Check house has enough position (for sells to trader)
-                ├── Check house has enough balance (for buys from trader)
-                ├── Create synthetic house counter-order (status=FILLED)
-                └── MatchingEngine.executeTrade() handles the rest
-```
-
-### Configuration
-
-In `application.yml`:
-
-```yaml
-liquidity:
-  enabled: true              # enable/disable the provider
-  house-user-id: 1           # user ID of the house account
-  spread-percent: 0.01       # 0.01% spread fee on house fills
-```
-
-### Key Design Decisions
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Spread fee | **0.01%** (configurable) | Simulates real market maker spread. Variable in config. |
-| House balance | **$1,000,000,000** | Large enough for testing. No auto-replenish. |
-| House inventory | 100k–1M per symbol | Drains as traders buy. Finite. |
-| LIMIT order fill | **No** — book only | LIMIT orders only match real orders. House doesn't fill them. |
-| MARKET order fill | **Yes** — guaranteed | The whole point. MARKET orders always execute. |
-| Self-fill | **No** | House won't fill its own orders. |
-| Price source | **Live bid/ask** from Symbol table | Not the order's stale price. Fresh market data. |
-
-### Spread Calculation Example
-
-Trader places MARKET BUY 10 AAPL. Current ask = $178.55.
-
-```
-spread_percent = 0.01
-spread_amount  = 178.55 × (0.01 / 100) = $0.017855
-fill_price     = 178.55 + 0.017855     = $178.567855
-
-Trade value    = 10 × $178.567855      = $1,785.68
-Spread revenue = 10 × $0.017855        = $0.18 (goes to house)
-```
-
-Trader places MARKET SELL 10 AAPL. Current bid = $178.45.
-
-```
-spread_amount  = 178.45 × (0.01 / 100) = $0.017845
-fill_price     = 178.45 - 0.017845     = $178.432155
-
-Trade value    = 10 × $178.432155      = $1,784.32
-Spread cost    = 10 × $0.017845        = $0.18 (house keeps the difference)
-```
-
----
-
-## Seeded Order Book (House Inventory)
-
-On startup, the admin/house account is seeded with:
-- **$1,000,000,000** cash balance
-- Large positions in all tradable symbols
-- **5 SELL + 5 BUY limit orders** per symbol at various price levels
-
-This creates a two-sided order book so traders can both buy and sell via the book,
-plus the liquidity provider as a backstop for MARKET orders.
-
-### Seeded Symbols & Order Book Depth
-
-| Symbol   | House Position | Orders/Side | Ask Levels (5)                       | Bid Levels (5)                       |
-|----------|---------------|-------------|--------------------------------------|--------------------------------------|
-| AAPL     | 100,000       | 20,000 each | $178.55 → $178.95                    | $178.35 → $177.95                    |
-| GOOGL    | 100,000       | 20,000 each | $141.85 → $142.25                    | $141.65 → $141.25                    |
-| MSFT     | 100,000       | 20,000 each | $378.95 → $379.55                    | $378.65 → $378.05                    |
-| TSLA     | 100,000       | 20,000 each | $248.60 → $249.40                    | $248.20 → $247.40                    |
-| AMZN     | 100,000       | 20,000 each | $178.30 → $178.70                    | $178.10 → $177.70                    |
-| BTC-USD  | 10,000        | 2,000 each  | $67,510 → $67,710                    | $67,410 → $67,210                    |
-| ETH-USD  | 100,000       | 20,000 each | $3,452 → $3,472                      | $3,442 → $3,422                      |
-| VULN     | 1,000,000     | 200,000 each| $42.05 → $42.25                      | $41.95 → $41.75                      |
-
-### MARKET Order Fill Priority
-
-```
-1. Match against real orders in the book (price-time priority)
-2. If unfilled remainder → LiquidityProviderService fills at live price + 0.01% spread
-3. LIMIT orders → book only, no liquidity provider
-```
-
-### New Trader Test Flow
-
-1. Register a new account → starts with default balance
-2. Place a MARKET BUY for e.g. 10 AAPL
-3. Risk check passes (balance ≥ 10 × $178.55 = $1,785.50)
-4. Matching engine finds admin's SELL order at $178.55 → trade executes
-5. If no book match → liquidity provider fills at $178.57 (ask + 0.01% spread)
-6. Position created, balance deducted, order status = FILLED
-7. Sell the position → MARKET SELL matches admin's BUY orders or LP fills at bid - spread
+(Numbers reference [vulnerabilities.md](vulnerabilities.md).)

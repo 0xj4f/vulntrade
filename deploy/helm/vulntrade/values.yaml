@@ -1,0 +1,87 @@
+# VulnTrade Helm values.
+#
+# WARNING: VulnTrade is intentionally vulnerable. Deploy it only to a local or isolated lab
+# cluster. The exposed debug/JMX ports, Adminer, weak secrets and flags are part of the lab.
+#
+# Defaults pull the published images (0xj4f/vulntrade-*:<appVersion>). For local clusters use
+# values-minikube.yaml or values-orbstack.yaml (locally built images, see deploy/README.md).
+
+nameOverride: ""
+
+backend:
+  image:
+    repository: 0xj4f/vulntrade-backend
+    tag: ""                # defaults to the chart appVersion
+    pullPolicy: IfNotPresent
+  # The matching engine serialises trading with an in-memory lock: keep exactly one replica.
+  replicas: 1
+  springProfile: dev
+  jwtExpiration: "86400000"
+  service:
+    type: ClusterIP
+    # The JDWP debug (5005) and unauthenticated JMX (9090) ports are lab features.
+    exposeDebugPorts: true
+  uploads:
+    size: 1Gi
+  resources: {}            # no limits by default (lab); set requests/limits if your cluster needs them
+  startupProbe:
+    failureThreshold: 60   # JDK 11 + Spring Boot + seeding can take a couple of minutes on a laptop
+    periodSeconds: 5
+  extraEnv: []
+
+frontend:
+  image:
+    repository: 0xj4f/vulntrade-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP        # NodePort or LoadBalancer if you prefer that to port-forward/ingress
+    nodePort: null
+  resources: {}
+
+postgres:
+  image: postgres:13
+  database: vulntrade
+  username: postgres
+  storage:
+    size: 2Gi
+    storageClass: ""       # "" = cluster default
+  resources: {}
+
+redis:
+  image: redis:7-alpine
+  resources: {}
+
+adminer:
+  enabled: true
+  image: adminer:4.8.1
+  resources: {}
+
+# Weak on purpose (the lab depends on them). Change them only if you know which challenges break.
+secrets:
+  postgresPassword: postgres
+  jwtSecret: vulntrade-secret
+  adminApiKey: vt-api-key-12345-not-so-secret
+  flags:
+    flag1: "FLAG{4ctu4t0r_3xp0s3d_s3cr3ts}"
+    flag7: "FLAG{st0mp_4dm1n_ch4nn3l_l34k}"
+    flag8: "FLAG{h34pdump_m3m0ry_s3cr3ts}"
+    flag10: "FLAG{jwt_f0rg3d_4dm1n_m4st3r}"
+
+# Optional Fluent Bit sidecar that ships security.log / app.log to S3 (see docs/log-shipping.md).
+logShipper:
+  enabled: false
+  image: fluent/fluent-bit:3.1
+  s3Bucket: wazuh-application-logs
+  awsRegion: eu-west-1
+  awsAccessKeyId: ""
+  awsSecretAccessKey: ""
+  awsSessionToken: ""
+
+ingress:
+  enabled: false
+  className: ""            # e.g. nginx (minikube addon) or traefik
+  host: ""                 # empty = any host
+  annotations: {}
+  tls: []

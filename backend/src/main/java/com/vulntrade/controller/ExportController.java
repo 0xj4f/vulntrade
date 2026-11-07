@@ -186,8 +186,9 @@ public class ExportController {
         Long lookupUserId = (targetUserId != null) ? targetUserId : userId;
 
         try {
-            String sql = "SELECT p.symbol, p.quantity, p.avg_price, p.unrealized_pnl, " +
-                         "s.current_price, s.bid, s.ask " +
+            String sql = "SELECT p.symbol, p.quantity, p.avg_price, " +
+                         "ROUND((s.current_price - p.avg_price) * p.quantity, 2) AS unrealized_pnl, " +
+                         "s.current_price, s.bid, s.ask, p.realized_pnl " +
                          "FROM positions p LEFT JOIN symbols s ON p.symbol = s.symbol " +
                          "WHERE p.user_id = " + lookupUserId;
 

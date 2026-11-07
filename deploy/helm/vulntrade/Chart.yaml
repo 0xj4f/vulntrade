@@ -1,0 +1,13 @@
+apiVersion: v2
+name: vulntrade
+description: >-
+  VulnTrade — a deliberately vulnerable trading platform for security training
+  (Spring Boot backend, React frontend, PostgreSQL, Redis, Adminer). Lab use only.
+type: application
+version: 0.6.0
+appVersion: "0.6.0"
+keywords: [security-training, vulnerable-app, ctf, trading]
+home: https://github.com/0xj4f/vulntrade
+sources: [https://github.com/0xj4f/vulntrade]
+annotations:
+  category: Training

@@ -1,0 +1,40 @@
+# Database bootstrap scripts (run by postgres on an empty data volume, in name order) and the
+# flag files the RCE challenges read from /opt/flags.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-db-init
+  labels:
+    {{- include "vulntrade.labels" . | nindent 4 }}
+data:
+  01-init.sql: |-
+{{ .Files.Get "files/sql/init.sql" | indent 4 }}
+  02-seed.sql: |-
+{{ .Files.Get "files/sql/seed_data.sql" | indent 4 }}
+  03-flags.sql: |-
+{{ .Files.Get "files/sql/flags.sql" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-flags
+  labels:
+    {{- include "vulntrade.labels" . | nindent 4 }}
+data:
+{{- range $path, $_ := .Files.Glob "files/flags/*" }}
+  {{ base $path }}: {{ $.Files.Get $path | quote }}
+{{- end }}
+{{- if .Values.logShipper.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-log-shipper
+  labels:
+    {{- include "vulntrade.labels" . | nindent 4 }}
+data:
+  fluent-bit.conf: |-
+{{ .Files.Get "files/log-shipper/fluent-bit.conf" | indent 4 }}
+  parsers.conf: |-
+{{ .Files.Get "files/log-shipper/parsers.conf" | indent 4 }}
+{{- end }}
