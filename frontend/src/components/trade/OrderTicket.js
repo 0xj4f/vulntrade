@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Info, PauseCircle } from 'lucide-react';
 import { useMarketData } from '../../context/MarketDataContext';
+import { productOf } from '../../services/websocketService';
 import Button from '../Button';
 import { KV } from '../ui';
 import { colors, inputStyle, labelStyle, num, selectStyle, type } from '../../styles/shared';
@@ -19,6 +20,9 @@ export const MAX_ORDER_QTY = 10000;
  * VULN (kept, FE-06): the 10,000 size cap exists only here in the browser.
  * VULN (kept, FE-09): a hidden, editable user id travels with every order.
  * VULN (kept, #40/#45): MARKET orders carry the client's price.
+ *
+ * `balance` is the USD available in the symbol's product account (EQUITIES for stocks,
+ * CRYPTO for coins); `positions` holds the shares and coins that can be sold.
  */
 export default function OrderTicket({
   userId, symbol, onSymbolChange, side, onSideChange, balance, positions, busy, error, onDismissError,
@@ -175,7 +179,8 @@ export default function OrderTicket({
       <div style={{ borderTop: `1px dashed ${colors.borderDefault}`, paddingTop: '8px', marginBottom: '12px' }}>
         <KV label={side === 'BUY' ? 'Est. cost' : 'Est. proceeds'} value={notional != null ? fmtUSD(notional) : '—'} valueColor={overBudget ? colors.red : colors.textPrimary} />
         {orderType === 'MARKET' && <KV label="Fill price (incl. 0.01% house spread)" value={Number.isFinite(px) ? fmtPrice(px) : '—'} />}
-        <KV label="Available" value={side === 'BUY' ? fmtUSD(cash) : `${fmtQty(held)} ${symbol}`} />
+        <KV label={side === 'BUY' ? `Available · ${productOf(symbol) === 'crypto' ? 'crypto' : 'equities'} account` : 'Available'}
+          value={side === 'BUY' ? fmtUSD(cash) : `${fmtQty(held)} ${symbol}`} />
         {overBudget && (
           <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', color: colors.amber, fontSize: '12px', marginTop: '6px' }}>
             <AlertTriangle size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />

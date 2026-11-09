@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import api from '../../services/apiService';
 import { useStomp } from '../../hooks/useStomp';
+import { productOf } from '../../services/websocketService';
 import { colors, num, type } from '../../styles/shared';
 import { fmtPrice, fmtQty } from '../../utils/format';
 
@@ -9,7 +10,8 @@ const DEPTH = 8;
 
 /**
  * Order book for one symbol: asks above, bids below, spread in between, depth bars from
- * cumulative size. Click a price to use it in the ticket.
+ * cumulative size. Click a price to use it in the ticket. Loaded from the symbol's product
+ * gateway (/api/equities or /api/crypto) and kept live from /topic/<product>/orderbook/<symbol>.
  *
  * VULN (kept, #60/#72): every row shows the order id and owner and has a Cancel button —
  * including other people's orders (the backend doesn't check ownership).
@@ -17,18 +19,19 @@ const DEPTH = 8;
 export default function OrderBook({ symbol, userId, onCancel, onPickPrice }) {
   const [book, setBook] = useState({ bids: [], asks: [] });
   const [loading, setLoading] = useState(true);
+  const product = productOf(symbol);
 
   const load = useCallback(() => {
-    api.get(`/api/market/orderbook/${encodeURIComponent(symbol)}`)
+    api.get(`/api/${product}/market/orderbook/${encodeURIComponent(symbol)}`)
       .then(res => setBook({ bids: res.data.bids || [], asks: res.data.asks || [] }))
       .catch(err => console.error('Failed to fetch orderbook:', err))
       .finally(() => setLoading(false));
-  }, [symbol]);
+  }, [symbol, product]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
-  useStomp(`/topic/orderbook/${symbol}`, (msg) => {
+  useStomp(`/topic/${product}/orderbook/${symbol}`, (msg) => {
     if (msg && msg.symbol === symbol) setBook({ bids: msg.bids || [], asks: msg.asks || [] });
-  });
+  }, product);
 
   const { asks, bids, maxCum, spread, mid } = useMemo(() => {
     const a = (book.asks || []).slice(0, DEPTH);
@@ -64,7 +67,7 @@ export default function OrderBook({ symbol, userId, onCancel, onPickPrice }) {
         <span title={`Order #${r.orderId} · user #${r.userId}`} style={{ position: 'relative', textAlign: 'right', color: mine ? colors.blueLight : colors.textMuted, fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {r.username || `User#${r.userId}`}
         </span>
-        <button type="button" onClick={() => onCancel(r.orderId)} aria-label={`Cancel order #${r.orderId}`} title={`Cancel #${r.orderId}`}
+        <button type="button" onClick={() => onCancel(r.orderId, symbol)} aria-label={`Cancel order #${r.orderId}`} title={`Cancel #${r.orderId}`}
           className="vt-btn vt-ghost"
           style={{ position: 'relative', width: '20px', height: '20px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '4px', background: 'transparent', color: colors.textDim }}>
           <X size={12} aria-hidden="true" />

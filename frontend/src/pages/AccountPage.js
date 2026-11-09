@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
-import { ArrowDownToLine, ArrowUpFromLine, BadgeCheck, Camera, KeyRound, Lock, Mail, ShieldCheck, ZoomIn } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, BadgeCheck, Camera, KeyRound, Lock, Mail, ShieldCheck, ZoomIn } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useDebug } from '../context/DebugContext';
 import api from '../services/apiService';
 import { sendMessage } from '../services/websocketService';
+import { ACCOUNT_PRODUCTS, fetchAccounts } from '../services/accounts';
 import { useStomp } from '../hooks/useStomp';
 import PageLayout from '../components/PageLayout';
 import Card from '../components/Card';
@@ -14,15 +15,18 @@ import Modal from '../components/Modal';
 import JsonPreview from '../components/JsonPreview';
 import VerificationBadge from '../components/VerificationBadge';
 import { Avatar, Chip, KV } from '../components/ui';
-import { colors, num, progressBarFill, progressBarTrack, type } from '../styles/shared';
-import { fmtDateShort, fmtUSD } from '../utils/format';
+import { colors, num, progressBarFill, progressBarTrack, selectStyle, type } from '../styles/shared';
+import { fmtDateShort, fmtQty, fmtUSD } from '../utils/format';
 
 const CROP_SIZE = 280;
 const DAILY_LIMIT = 100000;
 const today = () => new Date().toISOString().split('T')[0];
 
 /**
- * Account settings: profile & verification, security, funds.
+ * Account settings: profile & verification, security, funds, accounts & transfers.
+ *
+ * Deposits and withdrawals use the MAIN account; transfers move USD between the user's own
+ * MAIN / FX / EQUITIES / CRYPTO accounts (POST /api/accounts/transfer).
  *
  * VULN (kept): password change without the old password; email change without verification;
  *   userId in API paths (IDOR lookup in debug); decorative 2FA (FE-14); JS-only amount checks
@@ -47,6 +51,9 @@ function AccountPage() {
   const [show2FA, setShow2FA] = useState(false);
   const [twoFACode, setTwoFACode] = useState('');
   const [busy, setBusy] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [transfer, setTransfer] = useState({ from: 'MAIN', to: 'EQUITIES', amount: '' });
+  const [transferError, setTransferError] = useState(null);
   const [profileForm, setProfileForm] = useState({
     firstName: '', lastName: '', dateOfBirth: '', phoneNumber: '',
     ssn: '', addressLine1: '', addressLine2: '', city: '', state: '', zipCode: '', country: '',
@@ -73,6 +80,7 @@ function AccountPage() {
   });
 
   const loadBalance = useCallback(() => api.get('/api/accounts/balance').then(r => setBalance(r.data)).catch(() => {}), []);
+  const loadAccounts = useCallback(() => fetchAccounts().then(setAccounts).catch(() => {}), []);
 
   // Load the profile once per user (not on every balance refresh — that used to wipe edits).
   useEffect(() => {
@@ -92,10 +100,12 @@ function AccountPage() {
       })
       .catch(err => console.error('Failed to fetch profile:', err));
     loadBalance();
+    loadAccounts();
   }, [userId]); // eslint-disable-line
 
   const afterMoneyMove = () => {
     loadBalance();
+    loadAccounts();
     refreshUser && refreshUser();
   };
 
@@ -298,6 +308,29 @@ function AccountPage() {
       afterMoneyMove();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Deposit failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // ── Transfers between my own accounts (USD only) ──
+  const handleTransfer = async (e) => {
+    e.preventDefault();
+    setTransferError(null);
+    setBusy('transfer');
+    try {
+      const res = await api.post('/api/accounts/transfer', {
+        from: transfer.from,
+        to: transfer.to,
+        amount: parseFloat(transfer.amount),
+      });
+      toast.success(`Moved ${fmtUSD(res.data.amount)} from ${res.data.from} to ${res.data.to}`);
+      setTransfer(t => ({ ...t, amount: '' }));
+      afterMoneyMove();
+    } catch (err) {
+      const message = err.response?.data?.error || 'Transfer failed';
+      setTransferError(message);
+      toast.error(message);
     } finally {
       setBusy(null);
     }
@@ -540,10 +573,54 @@ function AccountPage() {
             </Card>
           </div>
 
+          {/* Accounts & transfers */}
+          <Card title={<><ArrowLeftRight size={15} aria-hidden="true" style={{ color: colors.blue }} />Accounts & transfers</>}
+            subtitle="Stocks trade from EQUITIES, coins from CRYPTO, currencies from FX">
+            <div style={{ display: 'grid', gap: '8px', marginBottom: '14px' }}>
+              {ACCOUNT_PRODUCTS.map(product => {
+                const rows = accounts.find(a => a.product === product)?.balances || [];
+                return (
+                  <div key={product} style={{ padding: '8px 12px', borderRadius: '8px', background: colors.bgStat, border: `1px solid ${colors.borderDefault}` }}>
+                    <div style={{ ...type.caps, fontSize: '10px', marginBottom: '2px' }}>{product}</div>
+                    {rows.length === 0 && <div style={{ color: colors.textMuted, fontSize: '12.5px', padding: '4px 0' }}>No balance</div>}
+                    {rows.map(b => (
+                      <KV key={b.asset} label={b.asset}
+                        value={`${b.asset === 'USD' ? fmtUSD(b.available) : fmtQty(b.available)}${Number(b.held) > 0 ? ` · held ${fmtQty(b.held)}` : ''}`} />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            <form onSubmit={handleTransfer}>
+              <div className="vt-cols-3" style={{ gap: '10px' }}>
+                <FormField label="From">
+                  <select value={transfer.from} onChange={(e) => setTransfer(t => ({ ...t, from: e.target.value }))} style={{ ...selectStyle, width: '100%' }}>
+                    {ACCOUNT_PRODUCTS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="To">
+                  <select value={transfer.to} onChange={(e) => setTransfer(t => ({ ...t, to: e.target.value }))} style={{ ...selectStyle, width: '100%' }}>
+                    {ACCOUNT_PRODUCTS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Amount (USD)">
+                  <Input type="number" value={transfer.amount} onChange={(e) => setTransfer(t => ({ ...t, amount: e.target.value }))}
+                    placeholder="0.00" min="0.01" step="0.01" inputMode="decimal" style={{ width: '100%', ...num }} />
+                </FormField>
+              </div>
+              {transferError && <div role="alert" style={{ color: colors.redLight, fontSize: '12.5px', marginTop: '8px' }}>{transferError}</div>}
+              <div style={{ marginTop: '10px' }}>
+                <Button type="submit" variant="blue" loading={busy === 'transfer'} icon={<ArrowLeftRight size={14} aria-hidden="true" />}>Transfer</Button>
+              </div>
+            </form>
+          </Card>
+
           <Card title="Limits & fees">
             <KV label="Daily withdrawal limit" value={fmtUSD(DAILY_LIMIT)} />
             <KV label="House spread on market orders" value="0.01%" />
             <KV label="Max order size" value="10,000 units" />
+            <KV label="Stock commission" value="$0.005 / share (min $1)" />
+            <KV label="Crypto fees" value="maker 0.10% · taker 0.20%" />
           </Card>
         </div>
       </div>

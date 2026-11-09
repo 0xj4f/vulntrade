@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { ToastContainer, toast } from 'react-toastify';
 import {
-  LayoutDashboard, PieChart, Trophy, History, UserRound, ShieldAlert, LogOut, ChevronDown, Menu, X, Wallet,
+  LayoutDashboard, PieChart, Trophy, History, UserRound, ShieldAlert, LogOut, ChevronDown, Menu, X, Wallet, Globe,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DebugProvider } from './context/DebugContext';
@@ -18,6 +18,7 @@ import AdminPage from './pages/AdminPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import SymbolDetailPage from './pages/SymbolDetailPage';
 import LeaderboardPage from './pages/LeaderboardPage';
+import FxPage from './pages/FxPage';
 import { connectWebSocket, disconnectWebSocket } from './services/websocketService';
 import VerificationBadge from './components/VerificationBadge';
 import BrandMark from './components/BrandMark';
@@ -26,7 +27,7 @@ import { Avatar, ChangeChip, ConnectionPill, PriceText, ThemeToggle } from './co
 import { colors, num } from './styles/shared';
 import { fmtBalance } from './utils/format';
 
-const APP_VERSION = process.env.REACT_APP_VERSION || '0.6.0';
+const APP_VERSION = process.env.REACT_APP_VERSION || '1.0.0';
 
 /* ── Primary nav link with active state ─────────────────── */
 function NavItem({ to, label, icon: Icon, match = [], onNavigate }) {
@@ -167,6 +168,7 @@ function TopBar() {
 
   const links = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, match: ['/symbol/'] },
+    { to: '/fx', label: 'FX', icon: Globe },
     { to: '/portfolio', label: 'Portfolio', icon: PieChart },
     { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   ];
@@ -233,7 +235,8 @@ function AppContent() {
   const { isAuthenticated } = useAuth();
   const { theme } = useTheme();
 
-  // One WebSocket for the whole session (it re-subscribes by itself after reconnects).
+  // The platform WebSocket for the whole session (it re-subscribes by itself after reconnects).
+  // The product sockets (equities, crypto, fx) open on first use; logout closes them all.
   useEffect(() => {
     if (isAuthenticated) {
       connectWebSocket(() => console.log('[App] WebSocket connected'), (err) => console.error('[App] WebSocket error:', err));
@@ -264,6 +267,7 @@ function AppContent() {
             <Route path="/dashboard" element={guard(<DashboardPage />)} />
             <Route path="/portfolio" element={guard(<PortfolioPage />)} />
             <Route path="/leaderboard" element={guard(<LeaderboardPage />)} />
+            <Route path="/fx" element={guard(<FxPage />)} />
             <Route path="/history" element={guard(<HistoryPage />)} />
             <Route path="/account" element={guard(<AccountPage />)} />
             {/* VULN: Admin route only protected client-side */}

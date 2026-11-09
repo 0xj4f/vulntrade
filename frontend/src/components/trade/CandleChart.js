@@ -3,6 +3,7 @@ import { createChart, CrosshairMode } from 'lightweight-charts';
 import api from '../../services/apiService';
 import { useThemeColors } from '../../context/ThemeContext';
 import { useMarketData } from '../../context/MarketDataContext';
+import { productOf } from '../../services/websocketService';
 import { colors } from '../../styles/shared';
 import { priceDecimals } from '../../utils/format';
 
@@ -14,7 +15,7 @@ export const INTERVALS = [
 ];
 
 /**
- * Candlestick + volume chart fed by /api/market/candles, kept live from the shared price
+ * Candlestick + volume chart fed by /api/<product>/market/candles, kept live from the shared price
  * feed (the last bar updates on every tick; a new bar opens when the interval rolls).
  * Reports OHLC of the hovered (or latest) bar through onBar.
  */
@@ -98,7 +99,7 @@ export default function CandleChart({ symbol, interval = '1m', height = 420, onB
     setState('loading');
     lastBarRef.current = null;
     barsRef.current = [];
-    api.get('/api/market/candles', { params: { symbol, interval, limit: compact ? 120 : 400 } })
+    api.get(`/api/${productOf(symbol)}/market/candles`, { params: { symbol, interval, limit: compact ? 120 : 400 } })
       .then(res => {
         if (cancelled || !candleRef.current) return;
         const bars = (res.data?.candles || []).map(b => ({

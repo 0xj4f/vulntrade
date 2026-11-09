@@ -3,12 +3,13 @@ import api from '../services/apiService';
 import { subscribe, unsubscribe } from '../services/websocketService';
 
 /**
- * One live price feed for the whole app.
+ * One live price feed for the whole app (stocks + crypto).
  *
- * Loads /api/market/prices once, then applies /topic/prices ticks. Ticks are buffered and
- * flushed to React state at most every 250 ms. Each quote carries `dir` ('up' | 'down') and
- * `tick` (increments on every change) so cells can flash; `history` keeps the last 60 prices
- * per symbol for sparklines.
+ * Loads /api/equities/market/prices and /api/crypto/market/prices once, then applies the
+ * /topic/equities/prices and /topic/crypto/prices ticks (each on its product socket). Ticks
+ * are buffered and flushed to React state at most every 250 ms. Each quote carries `dir`
+ * ('up' | 'down') and `tick` (increments on every change) so cells can flash; `history`
+ * keeps the last 60 prices per symbol for sparklines.
  *
  * VULN (kept, #69): the internal fields of each tick (costBasis, marketMakerId, spreadBps)
  * are stored and can be shown in debug mode.
@@ -17,6 +18,12 @@ const MarketDataContext = createContext(null);
 
 const HISTORY = 60;
 const FLUSH_MS = 250;
+const PRODUCTS = ['equities', 'crypto'];
+
+/** GET one product's price list (an empty list if that gateway is down). */
+const fetchPrices = (product) => api.get(`/api/${product}/market/prices`)
+  .then(res => (Array.isArray(res.data) ? res.data : []))
+  .catch(err => { console.error(`Failed to fetch ${product} prices:`, err); return []; });
 
 export function MarketDataProvider({ enabled, children }) {
   const [quotes, setQuotes] = useState({});
@@ -28,8 +35,8 @@ export function MarketDataProvider({ enabled, children }) {
   const historyRef = useRef({});
   const dirtyRef = useRef(false);
 
-  const load = useCallback(() => api.get('/api/market/prices').then(res => {
-    const list = Array.isArray(res.data) ? res.data : [];
+  const load = useCallback(() => Promise.all(PRODUCTS.map(fetchPrices)).then(lists => {
+    const list = [].concat(...lists);   // stocks first, then crypto
     const next = { ...quotesRef.current };
     list.forEach(s => {
       next[s.symbol] = { ...next[s.symbol], ...s, open: s.openPrice ?? next[s.symbol]?.open, changePct: s.changePct ?? next[s.symbol]?.changePct };
@@ -40,12 +47,12 @@ export function MarketDataProvider({ enabled, children }) {
     setQuotes(next);
     setHistory({ ...historyRef.current });
     setLoaded(true);
-  }).catch(err => console.error('Failed to fetch prices:', err)), []);
+  }), []);
 
   useEffect(() => {
     if (!enabled) return undefined;
     load();
-    const handle = subscribe('/topic/prices', (u) => {
+    const onTick = (u) => {
       if (!u || typeof u !== 'object') return;
       if (u.type === 'TRADING_HALT') {
         if (u.symbol) setHalted(h => ({ ...h, [u.symbol]: true }));
@@ -79,14 +86,15 @@ export function MarketDataProvider({ enabled, children }) {
         historyRef.current[u.symbol] = h.length >= HISTORY ? [...h.slice(1), last] : [...h, last];
       }
       dirtyRef.current = true;
-    });
+    };
+    const handles = PRODUCTS.map(p => subscribe(`/topic/${p}/prices`, onTick, p));
     const iv = setInterval(() => {
       if (!dirtyRef.current) return;
       dirtyRef.current = false;
       setQuotes(quotesRef.current);
       setHistory({ ...historyRef.current });
     }, FLUSH_MS);
-    return () => { unsubscribe(handle); clearInterval(iv); };
+    return () => { handles.forEach(unsubscribe); clearInterval(iv); };
   }, [enabled, load]);
 
   const markResumed = useCallback((symbol) => setHalted(h => { const n = { ...h }; delete n[symbol]; return n; }), []);
