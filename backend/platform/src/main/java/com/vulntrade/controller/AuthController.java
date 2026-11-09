@@ -2,6 +2,7 @@ package com.vulntrade.controller;
 
 import com.vulntrade.model.PasswordResetToken;
 import com.vulntrade.model.Transaction;
+import com.vulntrade.money.Accounts;
 import com.vulntrade.model.User;
 import com.vulntrade.model.dto.LoginRequest;
 import com.vulntrade.model.dto.RegisterRequest;
@@ -41,6 +42,7 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final PasswordResetTokenRepository resetTokenRepository;
     private final TransactionRepository transactionRepository;
+    private final Accounts accounts;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -49,7 +51,9 @@ public class AuthController {
                           JwtTokenProvider jwtTokenProvider,
                           PasswordEncoder passwordEncoder,
                           PasswordResetTokenRepository resetTokenRepository,
-                          TransactionRepository transactionRepository) {
+                          TransactionRepository transactionRepository,
+                          Accounts accounts) {
+        this.accounts = accounts;
         this.userRepository = userRepository;
         this.jwtTokenProvider = jwtTokenProvider;
         this.passwordEncoder = passwordEncoder;
@@ -213,6 +217,9 @@ public class AuthController {
         signupBonus.setDescription("Initial signup bonus");
         signupBonus.setCreatedAt(LocalDateTime.now());
         transactionRepository.save(signupBonus);
+
+        // 1.0.0: open MAIN + FX + EQUITIES + CRYPTO (each product account gets demo USD)
+        accounts.openAll(saved.getId(), true);
 
         String token = jwtTokenProvider.generateToken(saved);  // VULN #92: accountLevel in JWT
 

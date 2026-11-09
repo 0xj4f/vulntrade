@@ -17,8 +17,11 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
     password: ${SPRING_DATASOURCE_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20   # 1.0.0: sized for 50+ concurrent users (Postgres allows 100 in total)
 
   jpa:
+    open-in-view: false     # 1.0.0: don't hold a DB connection for the whole HTTP request
     hibernate:
       ddl-auto: update
     show-sql: false  # quieted — Hibernate SQL was flooding stdout (MessageBroker-1 SELECTs on symbols every tick)
@@ -46,6 +49,7 @@ spring:
   redis:
     host: ${SPRING_REDIS_HOST:localhost}
     port: ${SPRING_REDIS_PORT:6379}
+    timeout: 1s             # 1.0.0: Redis is the event bus; never let it block trading for long
     # VULN: no password configured
 
   # Jackson

@@ -22,8 +22,16 @@ public class Transaction {
     @Column(name = "user_id")
     private Long userId;
 
+    /** Which account the money moved in. NULL = the MAIN account (users.balance). */
+    @Column(name = "account_id")
+    private Long accountId;
+
+    /** Which currency/asset moved (USD, EUR, BTC ...). */
+    @Column(name = "asset", length = 10)
+    private String asset = "USD";
+
     @Column(name = "type", length = 20, nullable = false)
-    private String type;  // DEPOSIT/WITHDRAW/TRADE/ADJUSTMENT
+    private String type;  // DEPOSIT/WITHDRAW/ADJUSTMENT/TRANSFER_IN/TRANSFER_OUT/TRADE_BUY/TRADE_SELL/TRADE_LEG/HOUSE_SEED
 
     @Column(name = "amount", precision = 20, scale = 8, nullable = false)
     private BigDecimal amount;

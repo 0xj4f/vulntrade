@@ -69,6 +69,10 @@ public enum SecurityEvent {
     WITHDRAWAL_COMPLETED("withdrawal"),
     WITHDRAWAL_REJECTED("withdrawal"),
 
+    // Transfers between a user's own accounts (MAIN <-> FX / EQUITIES / CRYPTO), 1.0.0
+    TRANSFER_COMPLETED("transfer"),
+    TRANSFER_FAILED("transfer"),
+
     // --- order ---
     ORDER_CREATED("order"),
     ORDER_REJECTED("order"),

@@ -5,6 +5,7 @@ import com.vulntrade.model.Symbol;
 import com.vulntrade.model.Trade;
 import com.vulntrade.model.Transaction;
 import com.vulntrade.model.User;
+import com.vulntrade.money.UsdValue;
 import com.vulntrade.repository.PositionRepository;
 import com.vulntrade.repository.SymbolRepository;
 import com.vulntrade.repository.TradeRepository;
@@ -15,6 +16,7 @@ import com.vulntrade.security.logging.SecurityEvent;
 import io.jsonwebtoken.Claims;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -29,7 +31,8 @@ import static com.vulntrade.security.logging.SecurityEventLogger.*;
 /**
  * Leaderboard endpoint — ranks traders by ROI%.
  *
- * ROI = (cash + market value of positions − capital) / capital, where capital is the net of
+ * ROI = (cash + market value of positions − capital) / capital, where cash is the MAIN account plus
+ * every product account's money valued in USD (1.0.0), and capital is the net of
  * everything that is not a trade: deposits, withdrawals and admin adjustments. Trades are
  * read from the trades table (via each ledger row's reference id), and one chronological
  * moving-average-cost pass gives realized P&amp;L and win rate for both the list and the
@@ -52,6 +55,7 @@ public class LeaderboardController {
     private final SymbolRepository symbolRepository;
     private final TransactionRepository transactionRepository;
     private final TradeRepository tradeRepository;
+    private final JdbcTemplate jdbc;
 
     @Value("${liquidity.house-user-id:1}")
     private Long houseUserId;
@@ -60,7 +64,9 @@ public class LeaderboardController {
                                  PositionRepository positionRepository,
                                  SymbolRepository symbolRepository,
                                  TransactionRepository transactionRepository,
-                                 TradeRepository tradeRepository) {
+                                 TradeRepository tradeRepository,
+                                 JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
         this.symbolRepository = symbolRepository;
@@ -214,7 +220,11 @@ public class LeaderboardController {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         if (capital.signum() <= 0) return null;
 
+        // Cash = MAIN (users.balance) + the product accounts (USD, coins, FX currencies) in USD
         BigDecimal cash = user.getBalance() != null ? user.getBalance() : BigDecimal.ZERO;
+        for (Map.Entry<String, BigDecimal> b : snap.balancesByUser.getOrDefault(uid, Map.of()).entrySet()) {
+            cash = cash.add(UsdValue.of(b.getKey(), b.getValue(), snap.prices));
+        }
         BigDecimal positionsValue = BigDecimal.ZERO;
         for (Position pos : snap.positionsByUser.getOrDefault(uid, List.of())) {
             Symbol s = snap.symbols.get(pos.getSymbol());
@@ -400,6 +410,8 @@ public class LeaderboardController {
         Map<Long, List<Transaction>> transactionsByUser;
         Map<Long, List<Position>> positionsByUser;
         Map<String, Symbol> symbols;
+        Map<String, BigDecimal> prices;
+        Map<Long, Map<String, BigDecimal>> balancesByUser;   // userId -> asset -> amount (all product accounts)
         Map<Long, Trade> trades;
     }
 
@@ -422,6 +434,16 @@ public class LeaderboardController {
                 .collect(Collectors.groupingBy(Position::getUserId));
         s.symbols = symbolRepository.findAll().stream()
                 .collect(Collectors.toMap(Symbol::getSymbol, x -> x, (a, b) -> a));
+        s.prices = new HashMap<>();
+        s.symbols.forEach((sym, x) -> s.prices.put(sym, x.getCurrentPrice()));
+        s.balancesByUser = new HashMap<>();
+        jdbc.query("SELECT a.user_id, b.asset, SUM(b.available + b.held) FROM balances b "
+                + "JOIN accounts a ON a.id = b.account_id GROUP BY a.user_id, b.asset", rs -> {
+            Long id = rs.getLong(1);
+            if (onlyUsers == null || onlyUsers.contains(id)) {
+                s.balancesByUser.computeIfAbsent(id, k -> new HashMap<>()).put(rs.getString(2), rs.getBigDecimal(3));
+            }
+        });
         Set<Long> tradeIds = txns.stream().map(t -> tradeId(t.getReferenceId()))
                 .filter(Objects::nonNull).collect(Collectors.toSet());
         s.trades = new HashMap<>();

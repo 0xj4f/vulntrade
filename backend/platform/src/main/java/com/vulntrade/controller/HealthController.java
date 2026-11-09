@@ -1,5 +1,6 @@
 package com.vulntrade.controller;
 
+import com.vulntrade.config.SeedStatus;
 import com.vulntrade.repository.SymbolRepository;
 import com.vulntrade.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,12 +19,15 @@ public class HealthController {
 
     private final UserRepository userRepository;
     private final SymbolRepository symbolRepository;
+    private final SeedStatus seedStatus;
 
     @Value("${flags.flag1:}")
     private String flag1;
 
     public HealthController(UserRepository userRepository,
-                            SymbolRepository symbolRepository) {
+                            SymbolRepository symbolRepository,
+                            SeedStatus seedStatus) {
+        this.seedStatus = seedStatus;
         this.userRepository = userRepository;
         this.symbolRepository = symbolRepository;
     }
@@ -45,6 +49,11 @@ public class HealthController {
             status.put("database", "error: " + e.getMessage());
         }
 
+        // 1.0.0: not ready until startup seeding is done (product services wait for this)
+        if (!seedStatus.isReady()) {
+            status.put("status", "STARTING");
+            return ResponseEntity.status(503).body(status);
+        }
         return ResponseEntity.ok(status);
     }
 }

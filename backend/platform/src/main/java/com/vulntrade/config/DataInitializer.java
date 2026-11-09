@@ -5,6 +5,10 @@ import com.vulntrade.model.Position;
 import com.vulntrade.model.Trade;
 import com.vulntrade.model.Transaction;
 import com.vulntrade.model.User;
+import com.vulntrade.money.Accounts;
+import com.vulntrade.money.Balances;
+import com.vulntrade.money.Ledger;
+import com.vulntrade.service.TransferService;
 import com.vulntrade.repository.OrderRepository;
 import com.vulntrade.repository.PositionRepository;
 import com.vulntrade.repository.TradeRepository;
@@ -13,6 +17,7 @@ import com.vulntrade.repository.UserRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.math.BigDecimal;
@@ -31,8 +36,85 @@ public class DataInitializer {
                                        PositionRepository positionRepository,
                                        OrderRepository orderRepository,
                                        TransactionRepository transactionRepository,
-                                       TradeRepository tradeRepository) {
+                                       TradeRepository tradeRepository,
+                                       Accounts accounts,
+                                       Balances balances,
+                                       Ledger ledger,
+                                       JdbcTemplate jdbc,
+                                       SeedStatus seedStatus,
+                                       TransferService transferService) {
         return args -> {
+            seedOldData(userRepository, passwordEncoder, positionRepository, orderRepository,
+                    transactionRepository, tradeRepository);
+            seedAccounts(userRepository, accounts, balances, ledger, jdbc, transferService);
+            seedStatus.markReady();
+        };
+    }
+
+    // ================================================================
+    // 1.0.0: accounts per product, house money, order ownership
+    // ================================================================
+
+    /** The house (admin, user 1) trading money per product service. Seeded once (keyed on HOUSE_SEED rows). */
+    private static final Object[][] HOUSE_MONEY = {
+        {Accounts.EQUITIES, "USD", "1000000000"},
+        {Accounts.CRYPTO,   "USD", "1000000000"},
+        {Accounts.FX,       "USD", "100000000"},
+        {Accounts.FX,       "EUR", "100000000"},
+        {Accounts.FX,       "GBP", "100000000"},
+        {Accounts.FX,       "JPY", "15000000000"},
+    };
+    private static final long HOUSE_USER_ID = 1L;
+
+    /**
+     * Every seeded user gets MAIN + FX + EQUITIES + CRYPTO. Safe to run on every start.
+     *
+     * Seeded users get no demo deposit (that is for new sign-ups, see AuthController.register):
+     * instead a quarter of their own MAIN cash (max 10,000) is TRANSFERRED to each product account.
+     * A transfer is not capital, so the seeded leaderboard ROIs stay exactly as in 0.6.0.
+     * The house gets its trading money per product instead (HOUSE_MONEY).
+     */
+    private void seedAccounts(UserRepository userRepository, Accounts accounts, Balances balances,
+                              Ledger ledger, JdbcTemplate jdbc, TransferService transferService) {
+        for (User u : userRepository.findAll()) {
+            boolean fresh = accounts.openAll(u.getId(), false);
+            if (fresh && u.getId() != HOUSE_USER_ID) {
+                BigDecimal main = userRepository.findBalanceById(u.getId());
+                BigDecimal each = main == null ? BigDecimal.ZERO
+                        : main.divide(BigDecimal.valueOf(4), 0, java.math.RoundingMode.DOWN).min(Accounts.DEMO_FUNDS);
+                if (each.signum() > 0) {
+                    for (String product : Accounts.PRODUCTS) {
+                        transferService.transfer(u.getId(), Accounts.MAIN, product, each);
+                    }
+                }
+            }
+        }
+        for (Object[] m : HOUSE_MONEY) {
+            String product = (String) m[0], asset = (String) m[1];
+            Long accountId = accounts.find(HOUSE_USER_ID, product);
+            Integer already = jdbc.queryForObject("SELECT COUNT(*) FROM transactions WHERE user_id = ? "
+                    + "AND account_id = ? AND asset = ? AND type = 'HOUSE_SEED'", Integer.class, HOUSE_USER_ID, accountId, asset);
+            if (accountId != null && already != null && already == 0) {
+                BigDecimal amount = new BigDecimal((String) m[2]);
+                BigDecimal after = balances.credit(accountId, asset, amount);
+                ledger.record(HOUSE_USER_ID, accountId, asset, "HOUSE_SEED", amount, after,
+                        "House trading money for " + product, null);
+            }
+        }
+        // Every order belongs to the product service of its symbol
+        jdbc.update("UPDATE orders o SET product = CASE s.asset_class WHEN 'CRYPTO' THEN 'CRYPTO' "
+                + "WHEN 'FX' THEN 'FX' ELSE 'EQUITIES' END FROM symbols s WHERE s.symbol = o.symbol AND o.product IS NULL");
+        jdbc.update("UPDATE trades t SET product = o.product FROM orders o WHERE o.id = t.buy_order_id AND t.product IS NULL");
+        System.out.println("[INIT] Accounts ready (MAIN + FX + EQUITIES + CRYPTO per user, house money seeded).");
+    }
+
+    private void seedOldData(UserRepository userRepository,
+                             PasswordEncoder passwordEncoder,
+                             PositionRepository positionRepository,
+                             OrderRepository orderRepository,
+                             TransactionRepository transactionRepository,
+                             TradeRepository tradeRepository) {
+        {
             if (userRepository.count() == 0) {
                 System.out.println("[INIT] Seeding default users...");
 
@@ -171,7 +253,7 @@ public class DataInitializer {
             } else {
                 System.out.println("[INIT] Users already exist, skipping seed.");
             }
-        };
+        }
     }
 
     /**

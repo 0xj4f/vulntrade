@@ -20,6 +20,9 @@ INSERT INTO symbols (symbol, name, current_price, bid, ask, volume, is_tradable)
     ('PEPE-USD', 'Pepe USD', 0.00001250, 0.00001240, 0.00001260, 999999999, true),
     ('GME', 'GameStop Corp.', 28.50, 28.40, 28.60, 15678432, true);
 
+-- 1.0.0: which product service owns each symbol
+UPDATE symbols SET asset_class = CASE WHEN symbol LIKE '%-USD' THEN 'CRYPTO' ELSE 'EQUITY' END;
+
 -- NOTE: Positions, orders, transactions, and audit_log entries
 -- are seeded by Spring Boot DataInitializer after users are created.
 -- This avoids FK constraint issues with user IDs.
