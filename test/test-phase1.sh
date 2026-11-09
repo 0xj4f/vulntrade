@@ -12,6 +12,8 @@ BACKEND_PORT="${BACKEND_PORT:-8085}"
 FRONTEND_HOST="${FRONTEND_HOST:-localhost}"
 FRONTEND_PORT="${FRONTEND_PORT:-3001}"
 BASE_URL="${BASE_URL:-http://$BACKEND_HOST:$BACKEND_PORT}"
+# 1.0.0: trading lives on the product gateways, reached through the frontend (nginx)
+GW_URL="${GW_URL:-http://localhost:3001}"
 
 echo "=== PHASE 1: Foundation Infrastructure Testing ==="
 echo "Timestamp: $(date)"
@@ -75,7 +77,7 @@ echo ""
 
 # Test 3: Market Prices Endpoint
 echo "--- Test 3: Market Prices Endpoint ---"
-PRICES_RESPONSE=$(curl -s "$BASE_URL/api/market/prices")
+PRICES_RESPONSE=$(curl -s "$GW_URL/api/equities/market/prices")
 if echo "$PRICES_RESPONSE" | grep -q "BTC-USD"; then
     pass "Market prices endpoint returns symbol data"
     info "Sample: $(echo "$PRICES_RESPONSE" | head -c 200)..."

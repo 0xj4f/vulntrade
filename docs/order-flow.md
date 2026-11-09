@@ -1,5 +1,9 @@
 # Order Flow
 
+> **1.0.0:** trading moved out of the single backend. This page describes the engine that now lives in
+> **equities-internals** (XSIM, with holds and commission); crypto has its own exchange and FX is a dealer.
+> Start with [architecture.md](architecture.md).
+
 > How an order travels through VulnTrade, from the order ticket to settlement and notifications
 > (0.6.0). Source: `OrderService`, `RiskService`, `MatchingEngineService`,
 > `LiquidityProviderService`, `HouseMarketMakerService`, `MatchingCoordinator`, `TradingEvents`.

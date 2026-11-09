@@ -131,6 +131,72 @@
 | 90 | SQLi via history WS endpoint | HistoryPage.js | CWE-89 | ✅ Coded |
 | 91 | CSV injection via export | HistoryPage.js | CWE-1236 | ✅ Coded |
 
+## 1.0.0 — per-product domains (FX, Equities, Crypto)
+
+1.0.0 moved trading out of the platform into one **gateway + internals** pair per product
+([architecture.md](architecture.md)). Nothing above was fixed: every vulnerability is kept, and the
+trading ones now live on the product routes. `test/product_bugs.py` proves each one still fires.
+
+### Where the trading vulnerabilities live now
+
+The platform's old trading routes are gone (`/api/orders*`, `/api/market/*`, STOMP
+`/app/trade.placeOrder|cancelOrder|executeMarket`, `/topic/prices|trades|orderbook*`). Their
+vulnerabilities moved with them:
+
+| # | Now on | Notes |
+|---|---|---|
+| 33 | `/api/{fx,equities,crypto}/ws(-sockjs)` | same weak STOMP (no rate limit, any origin #11, anonymous connect #31, token never revalidated #29) |
+| 36 | `/topic/equities/prices`, `/topic/crypto/prices` | `costBasis`, `marketMakerId`, `spreadBps`; FX leaks more (FX-6) |
+| 37, 38 | equities-internals / crypto-internals / fx-internals simulators | `Random(42)` in every simulator; VULN keeps its sine |
+| 40, 41, 45 | `POST /api/{equities,crypto}/orders`, `/api/fx/orders` | no price band, clientOrderId replay, no slippage cap |
+| 43 | every product | the balance check runs before the lock, the hold/debit after: parallel orders spend the same money (crypto: also the same coins, so coin balances can go negative = #63 in crypto form) |
+| 44 | `POST /api/{equities,crypto}/orders/{id}/cancel`, `DELETE ...` | cancel/delete any order (an id from another product is "not found") |
+| 46 | equities | a halted stock still trades with `X-Channel: ws` (same path as EQ-1) |
+| 47-style | `GET /api/{fx,equities,crypto}/orders|balances?userId=`, `/api/equities/positions?userId=` | IDOR |
+| 58 | admin `/app/admin.setPrice` (platform) | forwarded to the owning service; FX prices can't be set |
+| 60, 72 | `GET /api/{equities,crypto}/market/orderbook/{symbol}`, `/topic/*/orderbook/{symbol}` | order ids, user ids, usernames |
+| 61 | `/topic/{equities,crypto,fx}/trades` | buyer and seller user ids |
+| 62 | equities (EQ-6), crypto (CR-1) | self-trade allowed |
+| 71 | body `userId` on every product order (REST and `/app/order.place`) | trade from someone else's account |
+| 9, 15, 16, 56 | every gateway | CORS wildcard, `?api_key=` / plaintext keys (looked up on the platform), alg:none / expired JWT |
+
+### New product vulnerabilities (#101-#120)
+
+| # | Id | Vulnerability | Where | CWE |
+|---|---|---|---|---|
+| 101 | FX-1 | Stale quote accepted: `expiresAt` (2 s) is never checked | `FxOms.place` | CWE-367 |
+| 102 | FX-2 | Client price trusted: an optional `price` beats the quote (buy EUR at 0.0001) | `FxOms.place` | CWE-602 |
+| 103 | FX-3 | Rounding in the client's favour (pay rounded down, receive rounded up) | `FxOms.place` | CWE-682 |
+| 104 | FX-4 | Wrong currency leg: `amountCurrency=QUOTE` multiplies instead of dividing (1,000 JPY buys 151,200 USD) | `FxOms.place` | CWE-682 |
+| 105 | FX-5 | House exposure check race: checked outside the lock, never re-checked | `FxOms.place`, `FxHouse` | CWE-367 |
+| 106 | FX-6 | Price stream leaks bank prices, our margin and the House position | `PriceEngine.toJson`, `/topic/fx/prices`, `GET /api/fx/quotes` | CWE-200 |
+| 107 | EQ-1 | Market-session bypass: `X-Channel: ws` (client-controlled) skips the "market open?" check | `equities/OrderService.placeOrder` | CWE-841 |
+| 108 | EQ-2 | Lot size bypass: 0.0001 shares accepted | equities `RiskService` | CWE-20 |
+| 109 | EQ-3 | Commission bypass: client `commission` used as-is (negative = paid by the house); orders under 1 share pay 0 | `Commission.total` | CWE-602 |
+| 110 | EQ-4 | Hold released twice: cancel reads the hold before the lock, a fill lands in between | `equities/OrderService.cancelOrder` | CWE-367 |
+| 111 | EQ-5 | Market order holds $0: a REST MARKET order without a price is never refused (balance goes negative) | `OrderService.holdFor`, `MatchingEngineService.settle` | CWE-840 |
+| 112 | EQ-6 | Self-trade / wash trading on XSIM (= #62) | `MatchingEngineService.settle` | CWE-841 |
+| 113 | EQ-7 | Hidden `exchange=XTEST` parameter: fills against the house at prices frozen at startup | `OrderService.route` | CWE-912 |
+| 114 | CR-1 | No self-trade prevention on our exchange | crypto `MatchingEngineService.settle` | CWE-841 |
+| 115 | CR-2 | Spoofing: the market-maker bot leans its quotes toward big client orders near the price | `MarketMakerBot.requote` | CWE-841 |
+| 116 | CR-3 | Fee abuse: client `feeRole=MAKER` pays the maker fee even when taking | `Fees.rate` | CWE-602 |
+| 117 | CR-4 | Queue jumping: client `clientTime` becomes the order's priority time | crypto `OrderService.doPlace` | CWE-602 |
+| 118 | CR-5 | Market order walks the whole book with no price band ("last price" printed anywhere) | crypto `MatchingEngineService.match` | CWE-20 |
+| 119 | CR-6 | Dust trades: 0.00000001 BTC accepted, fee rounded down to 0 | `Fees.of`, crypto `RiskService` | CWE-682 |
+| 120 | CR-7 | Cancel/fill race in our engine: the hold is released and the fill settles | crypto `OrderService.cancelOrder` | CWE-367 |
+
+### Architecture notes (not numbered)
+
+- **East-west trust.** Internals services trust `X-User-Id` / `X-Username` / `X-Role` from whoever
+  calls them; only the gateways are supposed to. Anything inside the cluster can call
+  `http://<product>-internals:8080` directly as any user (no NetworkPolicy in the chart).
+- **`/internal/**` has no authentication** (platform `/internal/apikey`, internals `/internal/admin/*`).
+  nginx never routes it, but the platform NodePort / any pod can reach it.
+- **Redis has no password (#6) and is now the event bus:** anyone who can reach it can publish fake
+  prices, trades or order updates to every browser (`PUBLISH events.equities ...`).
+- **Transfers** (`POST /api/accounts/transfer`) are the safe version for now; their bugs (IDOR,
+  negative amount, double-spend race, moving held money) are a planned lab topic.
+
 ## Reclassified & Debunked Claims
 
 From the clean-DB verification run (exploit matrix: **68 PASS / 0 FAIL / 8 SKIP** of 76; the

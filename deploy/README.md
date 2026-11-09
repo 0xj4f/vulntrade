@@ -16,18 +16,28 @@ for running the lab on a local cluster:
 deploy/
 ├── Makefile                 build · load · install · port-forward · status · reset
 └── helm/vulntrade/
-    ├── Chart.yaml           version / appVersion 0.6.0
-    ├── values.yaml          defaults: published images 0xj4f/vulntrade-*:0.6.0
+    ├── Chart.yaml           version / appVersion 1.0.0
+    ├── values.yaml          defaults: published images 0xj4f/vulntrade-*:1.0.0
     ├── values-minikube.yaml local images, pullPolicy Never, storage class "standard"
     ├── values-orbstack.yaml local images, pullPolicy Never, default storage class
+    ├── values-nodeport.yaml frontend :31080 and backend :31085 on the node IP (no port-forward)
     ├── files/               symlinks to ../../../../database, flags, log-shipper
-    └── templates/           postgres · redis · adminer · backend · frontend · ingress
+    └── templates/           postgres · redis · adminer · backend · frontend · ingress ·
+                             services.yaml (1.0.0 product services) · _logshipper.tpl
 ```
+
+**1.0.0 services.** Besides `backend` (the platform), `frontend`, `postgres`, `redis` and `adminer`,
+the chart deploys one trading gateway and one internals service per product from `values.yaml ->
+services:` (`fx-gateway`, `fx-internals`, `equities-gateway`, `equities-internals`,
+`crypto-gateway`, `crypto-internals`). They all run the backend image; `service:` picks the jar.
+Internals wait for the platform to finish seeding and run as a single replica (one in-memory lock
+per product). About 6 GiB of memory limits in total; give minikube at least 8 GiB.
+See [docs/architecture.md](../docs/architecture.md).
 
 ## Prerequisites
 
 - `kubectl`, `helm` 3, Docker (Docker Desktop or OrbStack)
-- minikube: a running profile (`minikube start -p minikube --driver=docker --memory=6g --cpus=4`)
+- minikube: a running profile (`minikube start -p minikube --driver=docker --memory=10g --cpus=6`)
 - OrbStack: Kubernetes enabled in OrbStack settings
 
 ## minikube
@@ -40,6 +50,15 @@ make port-forward           # http://localhost:3001 (frontend) · :8085 (API) ·
 
 The first boot takes a minute or two (JDK 11 + Spring Boot + database seeding); `--wait` returns
 once every pod is ready. Sign in with `trader1` / `password`.
+
+Upgrading a 0.6.x release? 1.0.0 changes the money model: run `make reset` first (fresh database).
+
+Under load, prefer NodePorts over `kubectl port-forward`:
+
+```bash
+make install EXTRA_VALUES="-f helm/vulntrade/values-nodeport.yaml"
+# frontend http://$(minikube -p minikube ip):31080   backend http://$(minikube -p minikube ip):31085
+```
 
 Already have images (e.g. from `docker compose build`)? Tag and load them instead of rebuilding:
 
@@ -84,7 +103,7 @@ docker-desktop, kind-vulntrade) so a lab deploy can't land on a shared cluster b
   volume only. After pulling a new version, `make reset` for a fresh seed.
 - **Ingress** (optional): `--set ingress.enabled=true --set ingress.className=<nginx|traefik>`
   (plus `ingress.host`). WebSockets go through the same route.
-- **Published images**: install with the default `values.yaml` to pull `0xj4f/vulntrade-*:0.6.0`
+- **Published images**: install with the default `values.yaml` to pull `0xj4f/vulntrade-*:1.0.0`
   instead of building (amd64 images; on Apple Silicon build locally).
 - **Log shipping** to S3 (Fluent Bit sidecar): `--set logShipper.enabled=true` plus the AWS values;
   see [../docs/log-shipping.md](../docs/log-shipping.md).

@@ -23,7 +23,7 @@
 
     <groupId>com.vulntrade</groupId>
     <artifactId>vulntrade-parent</artifactId>
-    <version>0.6.0</version>
+    <version>1.0.0</version>
     <packaging>pom</packaging>
     <name>VulnTrade Backend (parent)</name>
     <description>Deliberately vulnerable trading platform for red team training</description>

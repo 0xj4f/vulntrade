@@ -320,12 +320,12 @@ section "4. Orders and export (HTTP)"
 ################################################################################
 # A $1.00 bid never matches the seeded asks, so nothing trades.
 ORDER_BODY='{"symbol":"AAPL","side":"BUY","type":"LIMIT","quantity":1,"price":1.00}'
-api order-own   "$T1_TOKEN"    POST /api/orders "$ORDER_BODY"
+api order-own   "$T1_TOKEN"    POST /api/equities/orders "$ORDER_BODY"   # 1.0.0: orders live on the product gateways
 OWN_ORDER_ID="$(jget .orderId)"
-api order-other "$FRESH_TOKEN" POST /api/orders "$ORDER_BODY"
+api order-other "$FRESH_TOKEN" POST /api/equities/orders "$ORDER_BODY"
 OTHER_ORDER_ID="$(jget .orderId)"
-api cancel-own   "$T1_TOKEN" POST "/api/orders/$OWN_ORDER_ID/cancel"
-api cancel-other "$T1_TOKEN" POST "/api/orders/$OTHER_ORDER_ID/cancel"   # someone else's order (IDOR)
+api cancel-own   "$T1_TOKEN" POST "/api/equities/orders/$OWN_ORDER_ID/cancel"
+api cancel-other "$T1_TOKEN" POST "/api/equities/orders/$OTHER_ORDER_ID/cancel"   # someone else's order (IDOR)
 api export       "$T1_TOKEN" GET  /api/export/trades
 
 ################################################################################

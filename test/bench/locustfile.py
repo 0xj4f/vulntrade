@@ -18,7 +18,6 @@ weighted tasks with 0.5-1.5 s think time. Order results that are a normal busine
 so they never hide real errors.
 """
 import os
-import random
 import uuid
 
 import sys
@@ -155,15 +154,22 @@ class Trader(HttpUser):
 
     @tag("fx")
     @task(15 if (WITH_FX and TARGET == "v1") else 0)
-    def fx_trade(self):
-        quote = next(q for q in self.client.get("/api/fx/quotes", name="fx quotes").json() if q["pair"] == "EURUSD")
-        with self.client.post("/api/fx/orders", headers=self.headers, name="fx order", catch_response=True,
-                              json={"pair": "EURUSD", "side": random.choice(["BUY", "SELL"]),
-                                    "amount": "1000", "quoteId": quote["quoteId"]}) as r:
-            if r.status_code < 300 and safe_json(r).get("status") == "FILLED":
-                r.success()
-            else:
-                r.failure("%s %s" % (r.status_code, r.text[:200]))
+    def fx_round_trip(self):
+        """Buy 1,000 EURUSD on a fresh quote, then sell it back (FX fills instantly against the House)."""
+        for side in ("BUY", "SELL"):
+            quotes = self.client.get("/api/fx/quotes", name="fx quotes").json()
+            quote = next(q for q in quotes if q["pair"] == "EURUSD")
+            with self.client.post("/api/fx/orders", headers=self.headers, name="fx order", catch_response=True,
+                                  json={"pair": "EURUSD", "side": side, "amount": "1000",
+                                        "quoteId": quote["quoteId"]}) as r:
+                data = safe_json(r)
+                if r.status_code < 300 and data.get("status") == "FILLED":
+                    r.success()
+                elif is_business_no(r, data):
+                    r.request_meta["name"] = "fx order [rejected]"
+                    r.success()
+                else:
+                    r.failure("%s %s" % (r.status_code, r.text[:200]))
 
 
 class PriceWatcher(User):

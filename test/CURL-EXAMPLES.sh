@@ -97,7 +97,7 @@ echo -e "${GREEN}3. Cancel Other User's Order (as Different User - IDOR):${NC}"
 cat << 'EOF'
 # Place order as trader2 (order ID 101)
 # Then cancel as trader1:
-curl -X POST http://localhost:8085/api/orders/101/cancel \
+curl -X POST http://localhost:3001/api/equities/orders/101/cancel \
   -H "Authorization: Bearer $TRADER_JWT"
 
 # Order gets cancelled even though you don't own it!
@@ -133,7 +133,7 @@ echo -e "${YELLOW}═══ VULNERABILITY: Input Validation Issues ═══${NC
 
 echo -e "${GREEN}1. Place Order with Negative Quantity:${NC}"
 cat << 'EOF'
-curl -X POST http://localhost:8085/api/orders \
+curl -X POST http://localhost:3001/api/equities/orders \
   -H "Authorization: Bearer $TRADER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
@@ -151,7 +151,7 @@ echo ""
 
 echo -e "${GREEN}2. Place Order with Non-existent Symbol:${NC}"
 cat << 'EOF'
-curl -X POST http://localhost:8085/api/orders \
+curl -X POST http://localhost:3001/api/equities/orders \
   -H "Authorization: Bearer $TRADER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
@@ -169,7 +169,7 @@ echo ""
 
 echo -e "${GREEN}3. Place Order with Extreme Price:${NC}"
 cat << 'EOF'
-curl -X POST http://localhost:8085/api/orders \
+curl -X POST http://localhost:3001/api/equities/orders \
   -H "Authorization: Bearer $TRADER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
@@ -416,7 +416,7 @@ RESPONSE=$(curl -s -X POST http://localhost:8085/api/auth/register \
 JWT=$(echo $RESPONSE | grep -o '"jwt":"[^"]*' | cut -d'"' -f4)
 
 # 2. Place order
-curl -X POST http://localhost:8085/api/orders \
+curl -X POST http://localhost:3001/api/equities/orders \
   -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
   -d '{

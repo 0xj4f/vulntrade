@@ -92,6 +92,7 @@ Fields whose value is null are **omitted**, not written as `null`.
 | `logger` | string | yes | Fully qualified Java class that called `SecurityEventLogger`. |
 | `thread` | string | yes | Java thread name, e.g. `http-nio-8080-exec-3` or `clientInboundChannel-4`. |
 | `application` | string | yes | Always `"vulntrade"`. |
+| `service` | string | yes | 1.0.0: which microservice wrote the line: `platform`, `fx-gateway`, `fx-internals`, `equities-gateway`, `equities-internals`, `crypto-gateway`, `crypto-internals` (env `SERVICE_NAME`). |
 | `environment` | string | yes | From env var `APP_ENVIRONMENT`. Default `"production"`; `"dev"` locally. |
 | `category` | string | yes (security events) | The sheet's Category in lower snake case: `authentication`, `input_validation`, `withdrawal`, ... Comes from the `SecurityEvent` enum. |
 | `eventType` | string | yes (security events) | Canonical name, lower snake case. It is the `SecurityEvent` enum constant, lowercased. See §4. |
@@ -195,10 +196,18 @@ Grouped like the sheet's tabs. *(VT)* marks a VulnTrade-specific event. Actor an
 | funding | `deposit_failed` | failure | `AccountController.deposit`: account-level gate, invalid amount, user_not_found | `reason`, `accountLevel` |
 | withdrawal | `withdrawal_completed` | success | `AccountController.withdraw` (HTTP), `AccountService.withdraw` (STOMP) | `amount` (signed, as sent), `destination`, `balanceAfter`, `transactionId` |
 | withdrawal | `withdrawal_rejected` | denied | `AccountController.withdraw`: account level, invalid amount, insufficient funds, user_not_found. `AccountService.withdraw`: insufficient funds. | `reason`, `amount` |
-| order | `order_created` | success | `OrderService.placeOrder`, the single shared point for REST and STOMP placeOrder/executeMarket | `orderId`, `symbol`, `side`, `orderType`, `quantity`, `price`, `clientOrderId` |
-| order | `order_rejected` | denied | `OrderService.placeOrder` / `executeMarketOrder` | `reason` (`trading_halted`, `risk_check_failed`, `unknown_symbol`, `no_market_price`), `symbol`, `side`, `quantity`, `price` |
-| order | `order_cancelled` | success / failure | `OrderController.cancelOrder` (REST) and `OrderService.cancelOrder` (STOMP), with the same keys | `orderId`, `symbol`, `targetUserId` (the order's owner), `isOwner`; failure: `reason=already_closed` |
-| trade | `trade_executed` | success | `MatchingEngineService.executeTrade`, once per fill | `tradeId`, `symbol`, `quantity`, `price`, `buyerId`, `sellerId`, `buyOrderId`, `sellOrderId`, `selfTrade` |
+| transfer | `transfer_completed` | success | 1.0.0 `AccountsController.transfer` (platform) | `from`, `to`, `amount`, `transferId` |
+| transfer | `transfer_failed` | failure | 1.0.0 `AccountsController.transfer`: same account, unknown account, amount <= 0, insufficient funds | `from`, `to`, `amount`, `reason` |
+| order | `order_created` | success | 1.0.0: `OrderService.placeOrder` in equities-internals and crypto-internals (REST and `/app/order.place` through the gateway), `FxOms.execute` in fx-internals | `orderId`, `symbol`, `side`, `orderType`, `quantity`, `price`, `clientOrderId`, `product`, `channel` (equities), `exchange` (equities), `feeRole`/`clientTime` (crypto), `quoteId` (FX) |
+| order | `order_rejected` | denied | the same services | `reason` (`trading_halted`, `risk_check_failed`, `market_closed`, `invalid_side`, ... ; FX: `requote`, `insufficient_funds`, `no_liquidity`, `halted`, `unknown_pair`), `symbol`, `side`, `quantity`, `price`, `product` |
+| order | `order_cancelled` | success / failure | `OrderService.cancelOrder` in equities/crypto internals (REST and `/app/order.cancel`), plus engine auto-cancels with `initiator=system` | `orderId`, `symbol`, `targetUserId` (the order's owner), `isOwner`; failure: `reason=already_closed` |
+| trade | `trade_executed` | success | `MatchingEngineService.recordFill` (equities, crypto), `FxOms.execute` (FX), once per fill | `tradeId`, `symbol`, `quantity`, `price`, `buyerId`, `sellerId`, `buyOrderId`, `sellOrderId`, `selfTrade`, `product`, `commission` (equities) / `fees` (crypto) |
+
+1.0.0: the internals services read who is calling from the gateway's headers (`InternalRequestFilter`),
+so their events carry the same `userId`, `username`, `requestId`, `clientIp` and `userAgent` as the
+gateway line for the same request. The gateway writes the end-of-request fallback events (400, 401,
+403, 5xx); the internals don't, so a request is never logged twice. Anonymous WebSocket order
+attempts are `authorization_denied` on the gateway, as in 0.6.0.
 
 Orders and trades are user-initiated only. No in-app bot places orders. House/LP fills show up only as the `buyerId`/`sellerId` = 1 side of `trade_executed`.
 
@@ -414,7 +423,7 @@ Rule of thumb: log every action that changes something or touches another user's
 - `GET /api/leaderboard/{id}/detail`. The UI calls it on every row click.
 - Market data: `/api/market/*`, price ticks, order-book broadcasts.
 - STOMP heartbeats and normal SUBSCRIBE / UNSUBSCRIBE / SEND / DISCONNECT frames.
-- Health checks (`/api/health`).
+- Health checks (`/api/health`), including the 503 the platform answers while it is still seeding.
 - Successful authorization decisions (allows).
 - The public photo `GET /api/users/{id}/photo` (sheet `file_downloaded` is N/A).
 - Normal SQL. Hibernate SQL is set to WARN.

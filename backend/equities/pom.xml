@@ -12,7 +12,7 @@
     <parent>
         <groupId>com.vulntrade</groupId>
         <artifactId>vulntrade-parent</artifactId>
-        <version>0.6.0</version>
+        <version>1.0.0</version>
     </parent>
 
     <artifactId>equities</artifactId>
