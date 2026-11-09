@@ -116,11 +116,9 @@ flags:
   flag8: ${FLAG_8:FLAG{h34pdump_m3m0ry_s3cr3ts}}
   flag10: ${FLAG_10:FLAG{jwt_f0rg3d_4dm1n_m4st3r}}
 
-# Liquidity Provider (house market maker)
+# Liquidity Provider (house market maker) - 1.0.0: lives in the product services
 liquidity:
-  enabled: true
   house-user-id: 1
-  spread-percent: 0.01   # 0.01% spread fee on house fills
 
 # Debug key - VULN: hardcoded
 debug:

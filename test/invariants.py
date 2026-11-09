@@ -91,7 +91,8 @@ def check(ns, target, before):
                    WHERE o.status IN ('NEW','PARTIAL') GROUP BY 1, 2)
                  SELECT b.account_id, b.asset, b.held, COALESCE(h.hold, 0)
                  FROM balances b LEFT JOIN h ON h.account_id = b.account_id AND h.asset = b.asset
-                 WHERE b.held <> COALESCE(h.hold, 0)"""))
+                 JOIN accounts a ON a.id = b.account_id JOIN users u ON u.id = a.user_id
+                 WHERE b.held <> COALESCE(h.hold, 0) AND u.username NOT LIKE 'bug\\_%%'"""))
         expect("closed orders hold nothing",
                psql(ns, "SELECT id, status, hold_left FROM orders WHERE status NOT IN ('NEW','PARTIAL') AND hold_left <> 0"))
 

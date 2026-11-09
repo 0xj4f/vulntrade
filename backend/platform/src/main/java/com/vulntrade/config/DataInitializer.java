@@ -89,6 +89,17 @@ public class DataInitializer {
                 }
             }
         }
+        // Crypto is money, not shares (1.0.0): seeded coin positions become CRYPTO balances
+        for (java.util.Map<String, Object> p : jdbc.queryForList("SELECT p.id, p.user_id, p.symbol, p.quantity "
+                + "FROM positions p JOIN symbols s ON s.symbol = p.symbol WHERE s.asset_class = 'CRYPTO'")) {
+            Long userId = ((Number) p.get("user_id")).longValue();
+            String coin = ((String) p.get("symbol")).split("-")[0];
+            BigDecimal qty = (BigDecimal) p.get("quantity");
+            if (qty.signum() > 0) {
+                balances.credit(accounts.find(userId, Accounts.CRYPTO), coin, qty);
+            }
+            jdbc.update("DELETE FROM positions WHERE id = ?", p.get("id"));
+        }
         for (Object[] m : HOUSE_MONEY) {
             String product = (String) m[0], asset = (String) m[1];
             Long accountId = accounts.find(HOUSE_USER_ID, product);
@@ -259,7 +270,7 @@ public class DataInitializer {
     /**
      * Give the admin/house account inventory (positions) in every symbol.
      *
-     * The house's two-sided order book is quoted live by HouseMarketMakerService (tagged
+     * The house's two-sided order book is quoted live by the product market makers (tagged
      * HOUSE-MM-* ladders that follow the price). VULN is the exception: it keeps a static
      * ladder around ~100 that never moves while its price swings on a predictable sine —
      * part of the predictable-price lesson. Ladder levels are sized at 2% of the position so

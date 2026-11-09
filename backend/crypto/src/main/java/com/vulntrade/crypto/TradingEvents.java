@@ -1,4 +1,4 @@
-package com.vulntrade.service;
+package com.vulntrade.crypto;
 
 import com.vulntrade.model.Order;
 import com.vulntrade.model.User;
@@ -8,7 +8,7 @@ import com.vulntrade.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import com.vulntrade.events.EventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -16,12 +16,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.*;
 
 /**
- * Collects what a matching transaction changed and publishes it only after the commit:
+ * Collects what a matching transaction changed and publishes it only after the commit, through
+ * Redis to crypto-gateway, which sends it to the browsers on /api/crypto/ws:
  * <ul>
  *   <li>{@code /user/queue/order-updates} — one ORDER_UPDATE per changed order, to its owner
  *       (addressed by username: STOMP principals are usernames, not numeric ids);</li>
- *   <li>{@code /topic/trades} — one message per trade;</li>
- *   <li>{@code /topic/orderbook} and {@code /topic/orderbook/{symbol}} — once per touched symbol.</li>
+ *   <li>{@code /topic/crypto/trades} — one message per trade;</li>
+ *   <li>{@code /topic/crypto/orderbook/{symbol}} — once per touched symbol.</li>
  * </ul>
  * Nothing is sent for a rolled-back transaction. The house account never receives order
  * updates (anyone can register the username "admin" — usernames are not unique).
@@ -32,14 +33,16 @@ public class TradingEvents {
     private static final Logger logger = LoggerFactory.getLogger(TradingEvents.class);
     private static final String OUTBOX_KEY = TradingEvents.class.getName() + ".outbox";
 
-    private final SimpMessagingTemplate messaging;
+    private static final String PRODUCT = "crypto";
+
+    private final EventPublisher messaging;
     private final UserRepository userRepository;
     private final OrderBookService orderBookService;
 
     @Value("${liquidity.house-user-id:1}")
     private Long houseUserId;
 
-    public TradingEvents(SimpMessagingTemplate messaging, UserRepository userRepository,
+    public TradingEvents(EventPublisher messaging, UserRepository userRepository,
                          OrderBookService orderBookService) {
         this.messaging = messaging;
         this.userRepository = userRepository;
@@ -125,14 +128,13 @@ public class TradingEvents {
     private void publish(Outbox outbox) {
         try {
             for (Object[] m : outbox.userMessages) {
-                messaging.convertAndSendToUser((String) m[0], "/queue/order-updates", m[1]);
+                messaging.toUser(PRODUCT, (String) m[0], "/queue/order-updates", m[1]);
             }
             for (TradeNotification t : outbox.trades) {
-                messaging.convertAndSend("/topic/trades", t);
+                messaging.toAll(PRODUCT, "/topic/crypto/trades", t);
             }
             for (OrderBookService.Book book : outbox.bookSnapshots) {
-                messaging.convertAndSend("/topic/orderbook", book.entries());
-                messaging.convertAndSend("/topic/orderbook/" + book.symbol, book.toMessage());
+                messaging.toAll(PRODUCT, "/topic/crypto/orderbook/" + book.symbol, book.toMessage());
             }
         } catch (Exception e) {
             logger.warn("Failed to publish trading events: {}", e.getMessage());

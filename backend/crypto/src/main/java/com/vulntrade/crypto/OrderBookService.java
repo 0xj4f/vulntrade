@@ -1,4 +1,4 @@
-package com.vulntrade.service;
+package com.vulntrade.crypto;
 
 import com.vulntrade.model.Order;
 import com.vulntrade.model.User;

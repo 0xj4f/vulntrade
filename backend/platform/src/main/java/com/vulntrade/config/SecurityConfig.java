@@ -52,7 +52,6 @@ public class SecurityConfig {
                 // 1.0.0: service-to-service calls (gateways). Not routed by nginx, but open to anything
                 // inside the cluster - see docs/vulnerabilities.md "architecture notes".
                 .antMatchers("/internal/**").permitAll()
-                .antMatchers("/api/market/**").permitAll()
                 // VULN: Actuator fully exposed
                 .antMatchers("/actuator/**").permitAll()
                 // VULN: H2 console exposed
@@ -65,8 +64,6 @@ public class SecurityConfig {
                 // VULN: Admin endpoints - "restricted" but bypassable
                 // The method override header can change POST→GET to bypass method-based rules
                 .antMatchers("/api/admin/**").hasRole("ADMIN")
-                // Orders require auth (but IDOR exists)
-                .antMatchers("/api/orders/**").authenticated()
                 // Export requires auth (but IDOR + CSV injection exists)
                 .antMatchers("/api/export/**").authenticated()
                 // Account operations require auth

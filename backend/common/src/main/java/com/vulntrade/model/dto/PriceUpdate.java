@@ -18,6 +18,7 @@ public class PriceUpdate {
     private Long timestamp;
     private BigDecimal open;            // session open (first price since backend start)
     private BigDecimal changePct;       // % change vs session open
+    private BigDecimal lastTrade;       // 1.0.0 crypto: price of the last trade on our exchange
 
     // VULN: Internal fields that should not be exposed
     private BigDecimal costBasis;       // Internal market maker cost

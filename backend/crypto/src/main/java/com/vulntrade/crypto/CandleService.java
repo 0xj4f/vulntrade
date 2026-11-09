@@ -1,4 +1,4 @@
-package com.vulntrade.service;
+package com.vulntrade.crypto;
 
 import org.springframework.stereotype.Service;
 

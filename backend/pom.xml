@@ -34,6 +34,7 @@
         <module>gateway</module>
         <module>fx</module>
         <module>equities</module>
+        <module>crypto</module>
     </modules>
 
     <properties>

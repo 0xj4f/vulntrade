@@ -25,8 +25,8 @@ public class ProductAdmin {
 
     private static final Logger log = LoggerFactory.getLogger(ProductAdmin.class);
 
-    /** Asset classes already moved out of the platform into their own service. */
-    private static final Set<String> SPLIT = Set.of("FX", "EQUITY");
+    /** Asset classes owned by a product service (all of them since 1.0.0). */
+    private static final Set<String> SPLIT = Set.of("FX", "EQUITY", "CRYPTO");
 
     private final JdbcTemplate jdbc;
     private final RestTemplate http;
@@ -39,7 +39,7 @@ public class ProductAdmin {
         this.http = new RestTemplate(factory);
     }
 
-    /** The internals service of a symbol ("fx", "equities", "crypto"), or null if the platform still runs it. */
+    /** The internals service of a symbol ("fx", "equities", "crypto"), or null for an unknown symbol. */
     public String owner(String symbol) {
         List<String> classes = jdbc.queryForList("SELECT asset_class FROM symbols WHERE symbol = ?", String.class,
                 symbol == null ? "" : symbol.toUpperCase());
@@ -51,8 +51,7 @@ public class ProductAdmin {
     }
 
     /**
-     * Pass an admin action on to the owning service. Returns false when the platform still owns
-     * the symbol. A refusal by the service (e.g. "Price must be greater than 0") is thrown back as
+     * Pass an admin action on to the owning service. Returns false for an unknown symbol. A refusal by the service (e.g. "Price must be greater than 0") is thrown back as
      * IllegalArgumentException, so the admin gets the same error as before the split.
      */
     public boolean forward(String symbol, String action, Map<String, Object> body) {

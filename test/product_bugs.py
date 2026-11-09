@@ -321,6 +321,139 @@ def equities_section(lab):
     aws.close()
 
 
+# ---------------------------------------------------------------------------
+# Crypto
+# ---------------------------------------------------------------------------
+
+def cr_bal(lab, user, asset):
+    rows = lab.get("/api/crypto/balances", user).json()["balances"]
+    row = next((b for b in rows if b["asset"] == asset), {"available": 0, "held": 0})
+    return D(str(row["available"])), D(str(row["held"]))
+
+
+def cr_order(lab, user, body):
+    r = lab.post("/api/crypto/orders", {k: str(v) for k, v in body.items()}, user)
+    try:
+        return r.json()
+    except ValueError:
+        return {"error": r.text}
+
+
+def cr_mid(lab, symbol):
+    p = lab.get("/api/crypto/market/prices/" + symbol).json()
+    return (D(str(p["bid"])) + D(str(p["ask"]))) / 2
+
+
+def crypto_section(lab):
+    print("Crypto")
+    a = lab.user("cra")
+    cr_order(lab, a, {"symbol": "ETH-USD", "side": "BUY", "type": "MARKET", "quantity": "0.5"})
+
+    mid = cr_mid(lab, "ETH-USD").quantize(D("0.01"))
+    s1 = cr_order(lab, a, {"symbol": "ETH-USD", "side": "SELL", "type": "LIMIT", "quantity": "0.01", "price": mid})
+    b1 = cr_order(lab, a, {"symbol": "ETH-USD", "side": "BUY", "type": "LIMIT", "quantity": "0.01", "price": mid})
+    fires("CR-1 no self-trade prevention: own BUY fills own SELL", b1.get("status") == "FILLED"
+          and s1.get("status") == "NEW", [s1.get("status"), b1.get("status")])
+
+    q = D("0.01")
+    r = cr_order(lab, a, {"symbol": "BTC-USD", "side": "BUY", "type": "MARKET", "quantity": q, "feeRole": "MAKER"})
+    value = q * D(str(r.get("avgFillPrice") or 0))
+    fires("CR-3 fee role from the client: a taker pays the 0.10% maker fee",
+          r.get("status") == "FILLED" and D(str(r.get("fees"))) == (value * D("0.001")).quantize(D("0.01"), "ROUND_DOWN"), r)
+
+    r = cr_order(lab, a, {"symbol": "BTC-USD", "side": "BUY", "type": "MARKET", "quantity": "0.00000001"})
+    fires("CR-6 dust trade: 0.00000001 BTC accepted, fee rounds to 0", r.get("status") == "FILLED"
+          and D(str(r.get("fees"))) == 0, r)
+
+    # CR-4: the later order says it came first and gets filled first
+    early, late = lab.user("crearly"), lab.user("crlate")
+    price = cr_mid(lab, "SOL-USD").quantize(D("0.01"))   # the best bid (the bot quotes outside the mid)
+    o_early = cr_order(lab, early, {"symbol": "SOL-USD", "side": "BUY", "type": "LIMIT", "quantity": "1", "price": price})
+    o_late = cr_order(lab, late, {"symbol": "SOL-USD", "side": "BUY", "type": "LIMIT", "quantity": "1", "price": price,
+                                  "clientTime": "2020-01-01T00:00:00Z"})
+    seller = lab.user("crsell")
+    cr_order(lab, seller, {"symbol": "SOL-USD", "side": "BUY", "type": "MARKET", "quantity": "2"})
+    cr_order(lab, seller, {"symbol": "SOL-USD", "side": "SELL", "type": "LIMIT", "quantity": "1", "price": price})
+    late_now = lab.get("/api/crypto/orders/%s" % o_late.get("orderId"), late).json()
+    early_now = lab.get("/api/crypto/orders/%s" % o_early.get("orderId"), early).json()
+    fires("CR-4 queue jumping: a client-chosen early time is filled before the real first order",
+          late_now.get("status") == "FILLED" and early_now.get("status") == "NEW", [early_now.get("status"), late_now.get("status")])
+    for o, u in ((o_early, early), (o_late, late)):
+        lab.post("/api/crypto/orders/%s/cancel" % o.get("orderId"), {}, u)
+
+    # CR-2: a big bid near the price (never meant to fill) makes the bot lean its quotes up
+    spoofer = lab.user("crspoof")
+    lab.post("/api/accounts/transfer", {"from": "MAIN", "to": "CRYPTO", "amount": "9000"}, spoofer)
+    m = cr_mid(lab, "AVAX-USD")
+    price = (m * D("0.995")).quantize(D("0.01"))
+    bid = cr_order(lab, spoofer, {"symbol": "AVAX-USD", "side": "BUY", "type": "LIMIT",
+                                  "quantity": (D(15000) / price).quantize(D("0.01")), "price": price})
+    time.sleep(2.5)
+    book = lab.get("/api/crypto/market/orderbook/AVAX-USD").json()
+    house_bids = [D(str(x["price"])) for x in book.get("bids", []) if x.get("userId") == 1]
+    fires("CR-2 spoofing: a big bid makes the bot raise its quotes (its bid moves above the market)",
+          bid.get("status") == "NEW" and bool(house_bids) and max(house_bids) > m * D("1.005"),
+          {"mid": str(m), "bot_best_bid": str(max(house_bids or [0])), "spoof": bid.get("status")})
+    lab.post("/api/crypto/orders/%s/cancel" % bid.get("orderId"), {}, spoofer)
+
+    # CR-5: a MARKET buy walks through the bot's ladder up to an absurd ask
+    w = lab.user("crwalk")
+    cr_order(lab, w, {"symbol": "PEPE-USD", "side": "BUY", "type": "MARKET", "quantity": "2000"})
+    absurd = (cr_mid(lab, "PEPE-USD") * 80).quantize(D("0.00000001"))
+    trap = cr_order(lab, w, {"symbol": "PEPE-USD", "side": "SELL", "type": "LIMIT", "quantity": "1000", "price": absurd})
+    book = lab.get("/api/crypto/market/orderbook/PEPE-USD").json()
+    ladder = sum(D(str(x["quantity"])) for x in book.get("asks", []) if x.get("userId") == 1)
+    taker = lab.user("crtaker")
+    # 1.5 x the ladder: the bot may re-size it before our order arrives; whatever is left after the
+    # absurd ask is simply not filled (NO_LIQUIDITY)
+    cr_order(lab, taker, {"symbol": "PEPE-USD", "side": "BUY", "type": "MARKET",
+                          "quantity": (ladder * D("1.5")).quantize(D("1")) + 1000})
+    trap_now = lab.get("/api/crypto/orders/%s" % trap.get("orderId"), w).json()
+    fires("CR-5 a market order walks the whole book and fills at an absurd price (80x)", trap_now.get("status") == "FILLED",
+          {"trap": trap_now.get("status"), "ladder": str(ladder)})
+
+    # CR-7: cancel + partial fills race -> the coin hold is given back twice
+    b, c = lab.user("crb"), lab.user("crc")
+    cr_order(lab, b, {"symbol": "XRP-USD", "side": "BUY", "type": "MARKET", "quantity": "100"})
+    cr_order(lab, c, {"symbol": "XRP-USD", "side": "BUY", "type": "MARKET", "quantity": "100"})
+    hit = False
+    for delay in (0.003, 0.006, 0.0, 0.01, 0.004, 0.002, 0.008, 0.015):
+        price = cr_mid(lab, "XRP-USD").quantize(D("0.00001"))
+        o = cr_order(lab, b, {"symbol": "XRP-USD", "side": "SELL", "type": "LIMIT", "quantity": "20", "price": price})
+        if not o.get("orderId"):
+            break
+        buys = [lambda: cr_order(lab, c, {"symbol": "XRP-USD", "side": "BUY", "type": "LIMIT", "quantity": "1",
+                                          "price": price}) for _ in range(8)]
+        cancel = lambda: (time.sleep(delay), lab.post("/api/crypto/orders/%s/cancel" % o["orderId"], {}, b))
+        lab.parallel(buys + [cancel])
+        if cr_bal(lab, b, "XRP")[1] < 0:
+            hit = True
+            break
+        for x in lab.get("/api/crypto/orders", c).json():
+            if x.get("status") in ("NEW", "PARTIAL"):
+                lab.post("/api/crypto/orders/%s/cancel" % x["id"], {}, c)
+    fires("CR-7 cancel/fill race in our engine releases the hold twice (held goes negative)", hit,
+          {"held": str(cr_bal(lab, b, "XRP")[1])})
+
+    # #43 / #63 in crypto form: parallel SELLs hold the same coins
+    d = lab.user("crd")
+    cr_order(lab, d, {"symbol": "DOGE-USD", "side": "BUY", "type": "MARKET", "quantity": "1000"})
+    far = (cr_mid(lab, "DOGE-USD") * 3).quantize(D("0.00001"))
+    lab.parallel([lambda: cr_order(lab, d, {"symbol": "DOGE-USD", "side": "SELL", "type": "LIMIT", "quantity": "1000",
+                                            "price": far}) for _ in range(4)])
+    fires("#43 / #63 (crypto) parallel SELLs hold the same coins (coin balance goes negative)",
+          cr_bal(lab, d, "DOGE")[0] < 0, {"DOGE available": str(cr_bal(lab, d, "DOGE")[0])})
+
+    victim = lab.user("crv")
+    before = len(lab.get("/api/crypto/orders", victim).json())
+    cr_order(lab, a, {"symbol": "BTC-USD", "side": "BUY", "type": "LIMIT", "quantity": "0.001", "price": "100",
+                      "userId": victim["userId"]})
+    fires("#71 (crypto) a userId in the body places the order on someone else's account",
+          len(lab.get("/api/crypto/orders", victim).json()) == before + 1, "")
+    r = lab.get("/api/crypto/balances?userId=%s" % a["userId"], victim)
+    fires("IDOR (#47 style) ?userId= shows another user's coins", r.ok and r.json().get("userId") == a["userId"], r.text)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", required=True)
@@ -328,7 +461,7 @@ def main():
     args = ap.parse_args()
     lab = Lab(args.base_url)
     only = args.only.split(",")
-    sections = {"fx": fx_section, "equities": equities_section}
+    sections = {"fx": fx_section, "equities": equities_section, "crypto": crypto_section}
     for name in only:
         if name in sections and lab.get("/api/%s/%s" % (name, "pairs" if name == "fx" else "market/prices")).ok:
             sections[name](lab)

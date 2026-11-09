@@ -570,6 +570,101 @@ def s10_flag11(lab: Lab):
         x.close()
 
 
+# ---------------------------------------------------------------------------
+# Crypto: our own exchange (client to client, maker/taker fees, USD and coins as money)
+# ---------------------------------------------------------------------------
+
+MAKER, TAKER = D("0.0010"), D("0.0020")
+
+
+def fee(value: D, rate: D) -> D:
+    return (value * rate).quantize(D("0.01"), rounding="ROUND_DOWN")
+
+
+def crypto_balance(lab: Lab, uid, asset):
+    v = lab.scalar("SELECT COALESCE(SUM(b.available), 0) || ',' || COALESCE(SUM(b.held), 0) FROM balances b "
+                   f"JOIN accounts a ON a.id = b.account_id WHERE a.user_id = {int(uid)} AND a.product = 'CRYPTO' "
+                   f"AND b.asset = '{asset}'")
+    avail, held = str(v).split(",")
+    return D(avail), D(held)
+
+
+def crypto_order(lab: Lab, user: dict, **body):
+    r = lab.http.post(f"{lab.base}/api/crypto/orders", json={k: str(v) for k, v in body.items()},
+                      headers={"Authorization": f"Bearer {user['token']}"})
+    return lab._json(r) or {}
+
+
+def c1_client_to_client(lab: Lab):
+    R.section("C1. Crypto: client to client trade, maker 0.10% / taker 0.20%")
+    a, b = lab.register("c1a"), lab.register("c1b")
+    m = crypto_order(lab, a, symbol="ETH-USD", side="BUY", type="MARKET", quantity="1")
+    value = q8(D(str(m.get("filledQty", 0))) * D(str(m.get("avgFillPrice") or 0)))
+    usd, _ = crypto_balance(lab, a["userId"], "USD")
+    eth, _ = crypto_balance(lab, a["userId"], "ETH")
+    R.check("MARKET BUY 1 ETH from the bot: taker fee 0.20%, coins received",
+            m.get("status") == "FILLED" and close(eth, 1) and close(usd, D(10000) - value - fee(value, TAKER)),
+            f"status={m.get('status')} eth={eth} usd={usd} value={value}")
+
+    lab.set_price("ETH-USD", D("3450.00"), settle=2.5)   # pin it, so the bot's ladder stays put
+    px = lab.price("ETH-USD")
+    mid = ((D(str(px["bid"])) + D(str(px["ask"]))) / 2).quantize(D("0.01"))
+    s = crypto_order(lab, a, symbol="ETH-USD", side="SELL", type="LIMIT", quantity="0.5", price=mid)
+    eth_avail, eth_held = crypto_balance(lab, a["userId"], "ETH")
+    R.check("SELL 0.5 ETH rests and holds 0.5 ETH", s.get("status") == "NEW" and close(eth_held, D("0.5"))
+            and close(eth_avail, D("0.5")), f"{s.get('status')} avail={eth_avail} held={eth_held}")
+
+    usd_a0, _ = crypto_balance(lab, a["userId"], "USD")
+    house0 = D(str(lab.scalar("SELECT b.available FROM balances b JOIN accounts a ON a.id = b.account_id "
+                              "WHERE a.user_id = 1 AND a.product = 'CRYPTO' AND b.asset = 'USD'")))
+    t = crypto_order(lab, b, symbol="ETH-USD", side="BUY", type="LIMIT", quantity="0.5", price=mid)
+    v = q8(D("0.5") * mid)
+    R.check("BUY 0.5 ETH matches the resting SELL at the maker's price", t.get("status") == "FILLED"
+            and close(t.get("avgFillPrice"), mid), f"{t}")
+    usd_b, held_b = crypto_balance(lab, b["userId"], "USD")
+    eth_b, _ = crypto_balance(lab, b["userId"], "ETH")
+    R.check("buyer (taker): -value -0.20% fee, +0.5 ETH, nothing left held",
+            close(usd_b, D(10000) - v - fee(v, TAKER)) and close(eth_b, D("0.5")) and close(held_b, 0),
+            f"usd={usd_b} eth={eth_b} held={held_b}")
+    usd_a, _ = crypto_balance(lab, a["userId"], "USD")
+    eth_avail, eth_held = crypto_balance(lab, a["userId"], "ETH")
+    R.check("seller (maker): +value -0.10% fee, coins left its hold",
+            close(usd_a, usd_a0 + v - fee(v, MAKER)) and close(eth_held, 0) and close(eth_avail, D("0.5")),
+            f"usd={usd_a} eth={eth_avail}/{eth_held}")
+    house1 = D(str(lab.scalar("SELECT b.available FROM balances b JOIN accounts a ON a.id = b.account_id "
+                              "WHERE a.user_id = 1 AND a.product = 'CRYPTO' AND b.asset = 'USD'")))
+    R.check("the house earned both fees", house1 - house0 >= fee(v, TAKER) + fee(v, MAKER) - EPS,
+            f"house +{house1 - house0}, fees {fee(v, TAKER) + fee(v, MAKER)}")
+
+
+def c2_hold_and_cancel(lab: Lab):
+    R.section("C2. Crypto: a resting BUY holds USD (value + taker fee), cancel gives it back")
+    c = lab.register("c2c")
+    px = lab.price("BTC-USD")
+    price = (D(str(px["bid"])) * D("0.5")).quantize(D("0.01"))
+    o = crypto_order(lab, c, symbol="BTC-USD", side="BUY", type="LIMIT", quantity="0.01", price=price)
+    value = D("0.01") * price
+    avail, held = crypto_balance(lab, c["userId"], "USD")
+    R.check("BUY 0.01 BTC far below the market rests", o.get("status") == "NEW", f"{o}")
+    R.check("it holds value + taker fee", close(held, value + fee(value, TAKER)) and close(avail + held, D(10000)),
+            f"held={held} avail={avail}")
+    r = lab.http.post(f"{lab.base}/api/crypto/orders/{o.get('orderId')}/cancel",
+                      headers={"Authorization": f"Bearer {c['token']}"})
+    avail, held = crypto_balance(lab, c["userId"], "USD")
+    R.check("cancel gives the whole hold back", r.status_code == 200 and close(held, 0) and close(avail, D(10000)),
+            f"{r.status_code} held={held} avail={avail}")
+
+
+def c3_market_without_money(lab: Lab):
+    R.section("C3. Crypto: a MARKET BUY it can't pay for stops, never negative")
+    d = lab.register("c3d")
+    o = crypto_order(lab, d, symbol="BTC-USD", side="BUY", type="MARKET", quantity="5")
+    avail, held = crypto_balance(lab, d["userId"], "USD")
+    R.check("5 BTC with 10,000 USD: cancelled INSUFFICIENT_FUNDS, USD untouched",
+            o.get("status") == "CANCELLED" and o.get("reason") == "INSUFFICIENT_FUNDS" and close(avail, D(10000))
+            and close(held, 0), f"{o.get('status')}/{o.get('reason')} usd={avail}")
+
+
 def invariants(lab: Lab):
     R.section("Database invariants")
     ids = ",".join(str(i) for i in lab.created) or "0"
@@ -621,6 +716,11 @@ def main():
             try:
                 scenario(lab)
             except Exception as e:  # keep going; report the crash as a failure
+                R.check(f"{scenario.__name__} ran to completion", False, repr(e))
+        for scenario in (c1_client_to_client, c2_hold_and_cancel, c3_market_without_money):
+            try:
+                scenario(lab)
+            except Exception as e:
                 R.check(f"{scenario.__name__} ran to completion", False, repr(e))
         if not args.skip_flag:
             try:

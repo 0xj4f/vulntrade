@@ -1,11 +1,11 @@
-package com.vulntrade.service;
+package com.vulntrade.crypto;
 
 import com.vulntrade.model.Symbol;
 import com.vulntrade.model.dto.PriceUpdate;
 import com.vulntrade.repository.SymbolRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import com.vulntrade.events.EventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -19,8 +19,9 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Price simulation engine.
- * Generates realistic price movements (random walk) and publishes to /topic/prices.
+ * Price simulation engine for crypto (CRYPTO symbols only): the index price the market-maker bot follows.
+ * Generates price movements (random walk) and publishes them, through Redis and crypto-gateway,
+ * to /topic/crypto/prices. The platform listens to the same ticks for price alerts.
  *
  * VULN: Price generation seed is fixed (predictable).
  * VULN: BTC-USD has no decimal precision limit.
@@ -37,8 +38,7 @@ public class PriceSimulatorService {
     private static final BigDecimal STOCK_FLOOR = new BigDecimal("0.01");
 
     private final SymbolRepository symbolRepository;
-    private final SimpMessagingTemplate messagingTemplate;
-    private final AlertService alertService;
+    private final EventPublisher events;
     private final CandleService candleService;
 
     // VULN: Fixed seed makes prices predictable
@@ -50,6 +50,9 @@ public class PriceSimulatorService {
     // Track manually overridden symbols — simulator skips these
     // VULN: No expiry on override — permanent until restart
     private final ConcurrentHashMap<String, Boolean> overriddenSymbols = new ConcurrentHashMap<>();
+
+    // Last trade price per pair on our exchange (the index price above keeps its own random walk)
+    private final ConcurrentHashMap<String, BigDecimal> lastTrades = new ConcurrentHashMap<>();
 
     // Session open (first price seen since start) — for change %.
     private final ConcurrentHashMap<String, BigDecimal> openPrices = new ConcurrentHashMap<>();
@@ -64,12 +67,10 @@ public class PriceSimulatorService {
     private volatile long tickCount = 0;
 
     public PriceSimulatorService(SymbolRepository symbolRepository,
-                                 SimpMessagingTemplate messagingTemplate,
-                                 AlertService alertService,
+                                 EventPublisher events,
                                  CandleService candleService) {
         this.symbolRepository = symbolRepository;
-        this.messagingTemplate = messagingTemplate;
-        this.alertService = alertService;
+        this.events = events;
         this.candleService = candleService;
     }
 
@@ -84,7 +85,7 @@ public class PriceSimulatorService {
         for (Symbol symbol : symbols) {
             String name = symbol.getSymbol();
             if (!"CRYPTO".equals(symbol.getAssetClass())) {
-                continue;  // 1.0.0: stocks tick in equities-internals, FX in fx-internals
+                continue;  // 1.0.0: stock and FX prices belong to their own services
             }
             synchronized (lockFor(name)) {
                 if (haltedSymbols.getOrDefault(name, false)) {
@@ -186,6 +187,7 @@ public class PriceSimulatorService {
                     .multiply(BigDecimal.valueOf(100)).setScale(4, RoundingMode.HALF_UP));
         }
 
+        update.setLastTrade(lastTrades.get(symbol.getSymbol()));
         // VULN: Internal fields included - should be stripped
         BigDecimal basis = oldPrice != null ? oldPrice : price;
         update.setCostBasis(basis.multiply(new BigDecimal("0.9985")));
@@ -196,12 +198,9 @@ public class PriceSimulatorService {
                     .multiply(BigDecimal.valueOf(10000)));
         }
 
-        // Broadcast to all subscribers - VULN: no entitlement check
-        messagingTemplate.convertAndSend("/topic/prices", update);
-
-        // Fire any price alerts that this tick crosses (delivers the stored
-        // symbol to the user's /queue/alerts — the stored-XSS sink).
-        alertService.checkAlerts(symbol.getSymbol(), price);
+        // Broadcast to all subscribers - VULN: no entitlement check.
+        // (The platform also hears this tick and fires price alerts - the stored-XSS sink #54.)
+        events.toAll("crypto", "/topic/crypto/prices", update);
 
         candleService.onTick(symbol.getSymbol(), price, volumeChange, now, tickCount);
     }
@@ -238,6 +237,14 @@ public class PriceSimulatorService {
     }
 
     /** Session open price per symbol (first price seen since the backend started). */
+    /**
+     * A trade happened on our exchange. VULN CR-5: a market order that walks an empty book prints
+     * an absurd last price here, and everyone sees it on the price stream.
+     */
+    public void onTrade(String symbol, BigDecimal price) {
+        lastTrades.put(symbol, price);
+    }
+
     public Map<String, BigDecimal> getOpenPrices() {
         return openPrices;
     }

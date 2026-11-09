@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  crypto: the Crypto internals service (exchange model).
+  We ARE the exchange: our own order book and matching engine, clients trade with each
+  other and with the house market-maker bot, maker/taker fees. Only crypto-gateway calls it.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.vulntrade</groupId>
+        <artifactId>vulntrade-parent</artifactId>
+        <version>0.6.0</version>
+    </parent>
+
+    <artifactId>crypto</artifactId>
+    <name>VulnTrade Crypto internals</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.vulntrade</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>crypto</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -182,6 +182,29 @@ services:
     volumes:
       - ./logs/equities-gateway:/var/log/vulntrade
 
+  crypto-internals:
+    <<: *product-service
+    container_name: vulntrade-crypto-internals
+    environment:
+      <<: *product-env
+      SERVICE: crypto
+      SERVICE_NAME: crypto-internals
+    volumes:
+      - ./logs/crypto-internals:/var/log/vulntrade
+
+  crypto-gateway:
+    <<: *product-service
+    container_name: vulntrade-crypto-gateway
+    environment:
+      <<: *product-env
+      SERVICE: gateway
+      SERVICE_NAME: crypto-gateway
+      PRODUCT: crypto
+      UPSTREAM: http://crypto-internals:8080
+      JAVA_TOOL_OPTIONS: -Dhttp.maxConnections=64 -Dsun.net.http.retryPost=false
+    volumes:
+      - ./logs/crypto-gateway:/var/log/vulntrade
+
   # ============================================================
   frontend:
     image: 0xj4f/vulntrade-frontend:latest
@@ -193,6 +216,7 @@ services:
       - backend
       - fx-gateway
       - equities-gateway
+      - crypto-gateway
     networks:
       - vulntrade-net
 

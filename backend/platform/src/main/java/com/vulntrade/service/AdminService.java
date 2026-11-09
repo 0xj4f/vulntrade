@@ -33,7 +33,6 @@ public class AdminService {
 
     private final UserRepository userRepository;
     private final TransactionRepository transactionRepository;
-    private final PriceSimulatorService priceSimulator;
     private final ProductAdmin productAdmin;
     private final SimpMessagingTemplate messagingTemplate;
 
@@ -42,12 +41,10 @@ public class AdminService {
 
     public AdminService(UserRepository userRepository,
                         TransactionRepository transactionRepository,
-                        PriceSimulatorService priceSimulator,
                         ProductAdmin productAdmin,
                         SimpMessagingTemplate messagingTemplate) {
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
-        this.priceSimulator = priceSimulator;
         this.productAdmin = productAdmin;
         this.messagingTemplate = messagingTemplate;
     }
@@ -103,9 +100,7 @@ public class AdminService {
      */
     public void haltTrading(String symbol, String reason) {
         // 1.0.0: a symbol owned by a product service is halted there (only the symbol is sent)
-        if (!productAdmin.forward(symbol, "halt", Map.of("symbol", String.valueOf(symbol)))) {
-            priceSimulator.haltSymbol(symbol);
-        }
+        productAdmin.forward(symbol, "halt", Map.of("symbol", String.valueOf(symbol)));
 
         // VULN: Log injection via reason field
         logger.info("Trading halted: symbol={}, reason={}", symbol, reason);
@@ -134,9 +129,7 @@ public class AdminService {
      * Resume trading for a symbol.
      */
     public void resumeTrading(String symbol) {
-        if (!productAdmin.forward(symbol, "resume", Map.of("symbol", String.valueOf(symbol)))) {
-            priceSimulator.resumeSymbol(symbol);
-        }
+        productAdmin.forward(symbol, "resume", Map.of("symbol", String.valueOf(symbol)));
         logger.info("Trading resumed: symbol={}", symbol);
         log(SecurityEvent.ADMIN_ACTION, Outcome.SUCCESS,
                 details("action", "resume_trading", "symbol", symbol));
@@ -155,7 +148,7 @@ public class AdminService {
      */
     public void setPrice(String symbol, BigDecimal price) {
         if (!productAdmin.forward(symbol, "price", Map.of("symbol", String.valueOf(symbol), "price", String.valueOf(price)))) {
-            priceSimulator.setPrice(symbol, price);
+            throw new IllegalArgumentException("Unknown symbol: " + symbol);
         }
         log(SecurityEvent.ADMIN_ACTION, Outcome.SUCCESS,
                 details("action", "set_price", "symbol", symbol, "newPrice", price));

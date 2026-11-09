@@ -34,20 +34,17 @@ public class TradeStompController {
 
     private static final Logger logger = LoggerFactory.getLogger(TradeStompController.class);
 
-    private final OrderService orderService;
     private final AccountService accountService;
     private final PortfolioService portfolioService;
     private final AlertService alertService;
     private final CustomQueryRepository customQueryRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public TradeStompController(OrderService orderService,
-                                 AccountService accountService,
+    public TradeStompController(AccountService accountService,
                                  PortfolioService portfolioService,
                                  AlertService alertService,
                                  CustomQueryRepository customQueryRepository,
                                  SimpMessagingTemplate messagingTemplate) {
-        this.orderService = orderService;
         this.accountService = accountService;
         this.portfolioService = portfolioService;
         this.alertService = alertService;
@@ -55,129 +52,9 @@ public class TradeStompController {
         this.messagingTemplate = messagingTemplate;
     }
 
-    /**
-     * /app/trade.placeOrder
-     * VULN: No server-side validation of quantity (accepts negative).
-     * VULN: No price band validation (can buy at $0.01).
-     * VULN: clientOrderId not unique-enforced (replay possible).
-     * VULN: Symbol not validated.
-     * VULN: Balance check has race condition.
-     */
-    @MessageMapping("/trade.placeOrder")
-    public void placeOrder(@Payload OrderRequest request,
-                           SimpMessageHeaderAccessor headerAccessor) {
-        Long userId = extractUserId(headerAccessor);
-        if (userId == null) {
-            denyUnauthenticated(headerAccessor);
-            return;
-        }
-
-        // VULN (IDOR): if the body carries a userId, place the order as that user.
-        // The order form has a hidden userId input; tampering with it in the DOM
-        // lets a client trade on someone else's account.
-        if (request.getUserId() != null) {
-            userId = request.getUserId();
-        }
-
-        try {
-            logger.info("TRADE_ORDER: userId={}, symbol={}, side={}, type={}, qty={}, price={}", userId, request.getSymbol(), request.getSide(), request.getType(), request.getQuantity(), request.getPrice());
-            Order order = orderService.placeOrder(userId, request);
-
-            // Send confirmation to user
-            Map<String, Object> response = new HashMap<>();
-            response.put("type", "ORDER_PLACED");
-            response.put("orderId", order.getId());
-            response.put("status", order.getStatus());
-            response.put("symbol", order.getSymbol());
-            response.put("side", order.getSide());
-            response.put("quantity", order.getQuantity());
-            response.put("price", order.getPrice());
-            response.put("orderType", order.getOrderType());
-            response.put("clientOrderId", order.getClientOrderId());
-            putFillDetails(response, order);
-
-            messagingTemplate.convertAndSendToUser(
-                    extractUsername(headerAccessor), "/queue/orders", response);
-
-        } catch (Exception e) {
-            sendError(headerAccessor, e.getMessage());
-        }
-    }
-
-    /**
-     * /app/trade.cancelOrder
-     * VULN: IDOR - can cancel any user's order by ID.
-     * VULN: No ownership verification.
-     */
-    @MessageMapping("/trade.cancelOrder")
-    public void cancelOrder(@Payload Map<String, Object> request,
-                            SimpMessageHeaderAccessor headerAccessor) {
-        Long userId = extractUserId(headerAccessor);
-        if (userId == null) {
-            denyUnauthenticated(headerAccessor);
-            return;
-        }
-
-        try {
-            Long orderId = ((Number) request.get("orderId")).longValue();
-            logger.info("TRADE_CANCEL: userId={}, orderId={}", userId, orderId);
-            // VULN: userId is ignored in cancelOrder - IDOR
-            Order order = orderService.cancelOrder(userId, orderId);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("type", "ORDER_CANCELLED");
-            response.put("orderId", order.getId());
-            response.put("status", order.getStatus());
-            response.put("symbol", order.getSymbol());
-            putFillDetails(response, order);
-
-            messagingTemplate.convertAndSendToUser(
-                    extractUsername(headerAccessor), "/queue/orders", response);
-
-        } catch (Exception e) {
-            sendError(headerAccessor, e.getMessage());
-        }
-    }
-
-    /**
-     * /app/trade.executeMarket
-     * VULN: No slippage protection.
-     * VULN: Race condition - price changes between validation and execution.
-     * VULN: Can execute while trading is halted.
-     */
-    @MessageMapping("/trade.executeMarket")
-    public void executeMarketOrder(@Payload Map<String, Object> request,
-                                    SimpMessageHeaderAccessor headerAccessor) {
-        Long userId = extractUserId(headerAccessor);
-        if (userId == null) {
-            denyUnauthenticated(headerAccessor);
-            return;
-        }
-
-        try {
-            String symbol = (String) request.get("symbol");
-            String side = (String) request.get("side");
-            BigDecimal quantity = new BigDecimal(request.get("quantity").toString());
-            logger.info("TRADE_MARKET: userId={}, symbol={}, side={}, qty={}", userId, symbol, side, quantity);
-
-            Order order = orderService.executeMarketOrder(userId, symbol, side, quantity);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("type", "MARKET_ORDER_EXECUTED");
-            response.put("orderId", order.getId());
-            response.put("status", order.getStatus());
-            response.put("symbol", order.getSymbol());
-            response.put("side", order.getSide());
-            response.put("quantity", order.getQuantity());
-            putFillDetails(response, order);
-
-            messagingTemplate.convertAndSendToUser(
-                    extractUsername(headerAccessor), "/queue/orders", response);
-
-        } catch (Exception e) {
-            sendError(headerAccessor, e.getMessage());
-        }
-    }
+    // 1.0.0: orders are no longer placed here. /app/trade.placeOrder, trade.cancelOrder and
+    // trade.executeMarket moved to each product's own WebSocket (/api/{product}/ws, SEND
+    // /app/order.place | /app/order.cancel) and REST API (/api/{fx,equities,crypto}/orders).
 
     /**
      * /app/trade.getPortfolio
