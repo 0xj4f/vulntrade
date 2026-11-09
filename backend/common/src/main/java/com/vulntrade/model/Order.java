@@ -61,4 +61,26 @@ public class Order {
 
     @Column(name = "executed_at")
     private LocalDateTime executedAt;
+
+    // ---- 1.0.0 -------------------------------------------------------------
+
+    /** Which product service owns the order: FX / EQUITIES / CRYPTO. */
+    @Column(name = "product", length = 10)
+    private String product;
+
+    /** Money still held (locked) for this open order. Released when the order closes. */
+    @Column(name = "hold_left", precision = 20, scale = 8)
+    private BigDecimal holdLeft = BigDecimal.ZERO;
+
+    /** Commission / fees charged so far (USD). */
+    @Column(name = "fee", precision = 20, scale = 8)
+    private BigDecimal fee = BigDecimal.ZERO;
+
+    /** Equities: the commission the client asked for (VULN EQ-3). null = the standard commission. */
+    @Column(name = "commission", precision = 20, scale = 8)
+    private BigDecimal commission;
+
+    /** Crypto: MAKER / TAKER chosen by the client (VULN CR-3). null = decided by the engine. */
+    @Column(name = "fee_role", length = 5)
+    private String feeRole;
 }

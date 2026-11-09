@@ -38,4 +38,14 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /** MARKET orders left resting by older builds (a MARKET order must never rest). */
     @Query("SELECT o FROM Order o WHERE o.orderType = 'MARKET' AND o.status IN ('NEW','PARTIAL')")
     List<Order> findRestingMarketOrders();
+
+    // ---- 1.0.0: each product service only touches its own orders ----------------
+
+    /** One order of this product (an id from another product is "not found"). */
+    java.util.Optional<Order> findByIdAndProduct(Long id, String product);
+
+    List<Order> findByUserIdAndProductOrderByIdDesc(Long userId, String product);
+
+    @Query("SELECT o FROM Order o WHERE o.orderType = 'MARKET' AND o.status IN ('NEW','PARTIAL') AND o.product = :product")
+    List<Order> findRestingMarketOrders(@Param("product") String product);
 }

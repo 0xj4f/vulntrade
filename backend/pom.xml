@@ -33,6 +33,7 @@
         <module>platform</module>
         <module>gateway</module>
         <module>fx</module>
+        <module>equities</module>
     </modules>
 
     <properties>

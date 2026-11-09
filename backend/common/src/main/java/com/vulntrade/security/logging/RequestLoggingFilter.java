@@ -56,6 +56,9 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
     }
 
     private void logFallbackIfNothingLogged(HttpServletRequest request, int status) {
+        if ("/api/health".equals(request.getRequestURI())) {
+            return;   // health checks are not security events (it answers 503 while the platform is seeding)
+        }
         if (SecurityEventLogger.outcomeEventLogged(request)) {
             return;   // the code already said what happened
         }

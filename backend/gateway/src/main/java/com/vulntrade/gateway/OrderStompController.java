@@ -2,6 +2,8 @@ package com.vulntrade.gateway;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vulntrade.security.StompChannelInterceptor.StompPrincipal;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
 import com.vulntrade.security.logging.SecurityEventLogger;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -63,6 +65,16 @@ public class OrderStompController {
     @SuppressWarnings("unchecked")
     private void call(String path, Map<String, Object> body, String okType, Principal principal,
                       SimpMessageHeaderAccessor session) {
+        // Same as 0.6.0: an anonymous WebSocket session may connect (#31) but not trade
+        Long userId = principal instanceof StompPrincipal ? ((StompPrincipal) principal).getUserIdAsLong() : null;
+        if (userId == null) {
+            SecurityEventLogger.logStomp(session, SecurityEvent.AUTHORIZATION_DENIED, Outcome.DENIED, null);
+            if (principal != null) {
+                stomp.convertAndSendToUser(principal.getName(), "/queue/errors",
+                        Map.of("type", "ERROR", "message", "Authentication required"));
+            }
+            return;
+        }
         HttpHeaders out = new HttpHeaders();
         out.setContentType(MediaType.APPLICATION_JSON);
         out.set("X-Channel", "ws");
@@ -71,12 +83,10 @@ public class OrderStompController {
             put(out, "X-Forwarded-For", attrs.get(SecurityEventLogger.STOMP_CLIENT_IP));
             put(out, HttpHeaders.USER_AGENT, attrs.get(SecurityEventLogger.STOMP_USER_AGENT));
         }
-        if (principal instanceof StompPrincipal && ((StompPrincipal) principal).getUserIdAsLong() != null) {
-            StompPrincipal p = (StompPrincipal) principal;
-            out.set("X-User-Id", String.valueOf(p.getUserIdAsLong()));
-            out.set("X-Username", p.getName());
-            out.set("X-Role", String.valueOf(p.getRole()));
-        }
+        StompPrincipal p = (StompPrincipal) principal;
+        out.set("X-User-Id", String.valueOf(userId));
+        out.set("X-Username", p.getName());
+        out.set("X-Role", String.valueOf(p.getRole()));
         Map<String, Object> reply = new LinkedHashMap<>();
         try {
             ResponseEntity<String> answer = http.exchange(URI.create(upstream + path), HttpMethod.POST,

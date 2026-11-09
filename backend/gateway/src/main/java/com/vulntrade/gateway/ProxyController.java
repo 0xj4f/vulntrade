@@ -60,7 +60,7 @@ public class ProxyController {
         HttpHeaders out = new HttpHeaders();
         copy(request, out, HttpHeaders.CONTENT_TYPE);
         copy(request, out, HttpHeaders.ACCEPT);
-        copy(request, out, HttpHeaders.USER_AGENT);
+        out.set(HttpHeaders.USER_AGENT, SecurityEventLogger.userAgent(request));   // "" if none (not "Java/11")
         copy(request, out, "X-Channel");   // VULN (EQ-1): the client decides which "path" this is
         out.set("X-Forwarded-For", SecurityEventLogger.clientIp(request));
         out.set("X-Request-Id", SecurityEventLogger.requestIdOf(request));

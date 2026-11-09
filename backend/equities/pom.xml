@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  equities: the Equities internals service (broker model).
+  The broker OMS (holds, commission, market session) sends every order to XSIM, our one
+  simulated stock exchange (order book + matching + house market maker). Only equities-gateway calls it.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.vulntrade</groupId>
+        <artifactId>vulntrade-parent</artifactId>
+        <version>0.6.0</version>
+    </parent>
+
+    <artifactId>equities</artifactId>
+    <name>VulnTrade Equities internals</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.vulntrade</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>equities</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -58,7 +58,9 @@ CREATE TABLE IF NOT EXISTS orders (
     -- 1.0.0: which product service owns the order, and the money still locked for it
     product VARCHAR(10),              -- FX / EQUITIES / CRYPTO
     hold_left DECIMAL(20,8) DEFAULT 0, -- money still held for this open order (released when it closes)
-    fee DECIMAL(20,8) DEFAULT 0       -- commission / fees charged so far
+    fee DECIMAL(20,8) DEFAULT 0,      -- commission / fees charged so far
+    commission DECIMAL(20,8),         -- equities: commission the client asked for (VULN EQ-3), NULL = standard
+    fee_role VARCHAR(5)               -- crypto: MAKER / TAKER chosen by the client (VULN CR-3), NULL = engine decides
 );
 
 -- Trades table

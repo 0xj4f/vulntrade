@@ -113,7 +113,7 @@ public class HouseMarketMakerService {
         boolean requote = pass++ % REQUOTE_EVERY_PASSES == 0;
         for (Symbol listed : symbolRepository.findAll()) {
             String symbol = listed.getSymbol();
-            if (priceSimulator.isHalted(symbol) || "FX".equals(listed.getAssetClass())) continue;  // FX: fx-internals
+            if (priceSimulator.isHalted(symbol) || !"CRYPTO".equals(listed.getAssetClass())) continue;  // 1.0.0: crypto only
             try {
                 coordinator.run(() -> {
                     Symbol sym = symbolRepository.findById(symbol).orElse(null);

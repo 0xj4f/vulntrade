@@ -138,7 +138,7 @@ public class LeaderboardController {
         User user = userOpt.get();
 
         Snapshot snap = loadSnapshot(Set.of(targetUserId));
-        TraderBook book = analyze(snap.transactionsByUser.getOrDefault(targetUserId, List.of()), snap.trades);
+        TraderBook book = analyze(snap.transactionsByUser.getOrDefault(targetUserId, List.of()), snap.trades, snap.prices);
         Map<String, Position> posMap = snap.positionsByUser.getOrDefault(targetUserId, List.of()).stream()
                 .collect(Collectors.toMap(Position::getSymbol, p -> p, (a, b) -> a));
 
@@ -236,7 +236,7 @@ public class LeaderboardController {
         BigDecimal pnl = portfolioValue.subtract(capital);
         BigDecimal roi = pnl.divide(capital, 6, RoundingMode.HALF_UP).multiply(HUNDRED).setScale(2, RoundingMode.HALF_UP);
 
-        TraderBook book = analyze(txns, snap.trades);
+        TraderBook book = analyze(txns, snap.trades, snap.prices);
 
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("userId", uid);
@@ -306,7 +306,7 @@ public class LeaderboardController {
      * as a win when the price beats the average. A wash trade (both rows of the same trade
      * belong to this trader) counts once and is ignored for cost, P&amp;L and wins.
      */
-    private static TraderBook analyze(List<Transaction> txns, Map<Long, Trade> trades) {
+    private static TraderBook analyze(List<Transaction> txns, Map<Long, Trade> trades, Map<String, BigDecimal> prices) {
         List<Transaction> tradeRows = txns.stream()
                 .filter(t -> "TRADE_BUY".equals(t.getType()) || "TRADE_SELL".equals(t.getType()))
                 .sorted(Comparator.comparing(Transaction::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
@@ -343,7 +343,9 @@ public class LeaderboardController {
             } else {
                 BigDecimal avg = sb.avgCost();
                 BigDecimal matched = fill.qty.min(sb.qty);
-                BigDecimal pnl = fill.price.subtract(avg).multiply(matched);
+                // FX prices are in the quote currency (JPY for USDJPY): count the P&L in USD
+                String currency = tx.getAsset() == null ? "USD" : tx.getAsset();
+                BigDecimal pnl = UsdValue.of(currency, fill.price.subtract(avg).multiply(matched), prices);
                 sb.realized = sb.realized.add(pnl);
                 book.realized = book.realized.add(pnl);
                 sb.cost = sb.cost.subtract(avg.multiply(matched));

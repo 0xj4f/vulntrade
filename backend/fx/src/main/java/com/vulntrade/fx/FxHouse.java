@@ -57,9 +57,14 @@ public class FxHouse {
         return now.subtract(start);
     }
 
-    /** Would the house still be inside its limit after its position changes by {@code delta}? */
+    /**
+     * May the house take a trade that changes its position by {@code delta}? Yes if it stays
+     * inside its limit, and always if the trade makes its position smaller (less risk).
+     */
     public boolean withinLimit(String currency, BigDecimal delta) {
         BigDecimal max = MAX_NET.getOrDefault(currency, new BigDecimal("1000000"));
-        return net(currency).add(delta).abs().compareTo(max) <= 0;
+        BigDecimal now = net(currency);
+        BigDecimal after = now.add(delta);
+        return after.abs().compareTo(max) <= 0 || after.abs().compareTo(now.abs()) < 0;
     }
 }

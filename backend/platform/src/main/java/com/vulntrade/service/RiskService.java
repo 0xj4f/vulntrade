@@ -72,6 +72,10 @@ public class RiskService {
             return "Unknown symbol: " + symbol;
         }
         Symbol sym = symbolOpt.get();
+        if (!"CRYPTO".equals(sym.getAssetClass())) {
+            // 1.0.0: stocks trade on equities-internals (/api/equities), FX on fx-internals (/api/fx)
+            return "Unknown symbol: " + symbol;
+        }
         if (!Boolean.TRUE.equals(sym.getIsTradable())) {
             return "Symbol " + symbol + " is not currently tradable";
         }

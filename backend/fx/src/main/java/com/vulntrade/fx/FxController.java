@@ -112,6 +112,13 @@ public class FxController {
         return Map.of("resumed", body.get("symbol"));
     }
 
+    /** FX prices come from the banks + our margin; there is no manual price for FX. */
+    @PostMapping("/internal/admin/price")
+    public ResponseEntity<?> setPrice(@RequestBody Map<String, Object> body) {
+        return ResponseEntity.badRequest().body(Map.of("error",
+                "FX prices come from the liquidity providers and can't be set (" + body.get("symbol") + ")"));
+    }
+
     private static void readOfOtherUser(Long who, HttpServletRequest request, String resource) {
         Long me = CurrentUser.id(request);
         if (me == null || !me.equals(who)) {

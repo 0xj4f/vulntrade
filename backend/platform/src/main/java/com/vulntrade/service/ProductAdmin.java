@@ -26,7 +26,7 @@ public class ProductAdmin {
     private static final Logger log = LoggerFactory.getLogger(ProductAdmin.class);
 
     /** Asset classes already moved out of the platform into their own service. */
-    private static final Set<String> SPLIT = Set.of("FX");
+    private static final Set<String> SPLIT = Set.of("FX", "EQUITY");
 
     private final JdbcTemplate jdbc;
     private final RestTemplate http;
@@ -50,7 +50,11 @@ public class ProductAdmin {
         return "EQUITY".equals(assetClass) ? "equities" : assetClass.toLowerCase();
     }
 
-    /** Pass an admin action on to the owning service. Returns false when the platform still owns the symbol. */
+    /**
+     * Pass an admin action on to the owning service. Returns false when the platform still owns
+     * the symbol. A refusal by the service (e.g. "Price must be greater than 0") is thrown back as
+     * IllegalArgumentException, so the admin gets the same error as before the split.
+     */
     public boolean forward(String symbol, String action, Map<String, Object> body) {
         String owner = owner(symbol);
         if (owner == null) {
@@ -58,9 +62,20 @@ public class ProductAdmin {
         }
         try {
             http.postForObject("http://" + owner + "-internals:8080/internal/admin/" + action, body, Map.class);
+        } catch (org.springframework.web.client.HttpClientErrorException refused) {
+            throw new IllegalArgumentException(refusalMessage(refused.getResponseBodyAsString()));
         } catch (Exception e) {
             log.warn("Admin {} for {} not delivered to {}-internals: {}", action, symbol, owner, e.getMessage());
+            throw new IllegalStateException(owner + "-internals is not reachable, " + action + " not applied");
         }
         return true;
+    }
+
+    private static String refusalMessage(String body) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(body).path("error").asText(body);
+        } catch (Exception e) {
+            return body;
+        }
     }
 }

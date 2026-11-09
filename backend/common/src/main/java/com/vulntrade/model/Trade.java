@@ -34,6 +34,17 @@ public class Trade {
     @Column(name = "price", precision = 20, scale = 8, nullable = false)
     private BigDecimal price;
 
+    /** 1.0.0: FX / EQUITIES / CRYPTO */
+    @Column(name = "product", length = 10)
+    private String product;
+
+    /** Fee paid by the buyer / the seller (USD). */
+    @Column(name = "buy_fee", precision = 20, scale = 8)
+    private BigDecimal buyFee = BigDecimal.ZERO;
+
+    @Column(name = "sell_fee", precision = 20, scale = 8)
+    private BigDecimal sellFee = BigDecimal.ZERO;
+
     @Column(name = "executed_at")
     private LocalDateTime executedAt = LocalDateTime.now();
 }
