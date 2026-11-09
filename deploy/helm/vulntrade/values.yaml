@@ -19,8 +19,11 @@ backend:
   jwtExpiration: "86400000"
   service:
     type: ClusterIP
+    nodePort: null         # set with type NodePort (e.g. values-nodeport.yaml)
     # The JDWP debug (5005) and unauthenticated JMX (9090) ports are lab features.
     exposeDebugPorts: true
+  # JDK 11.0.11 ignores cgroup v2 memory limits, so the heap is sized explicitly (never MaxRAMPercentage).
+  javaToolOptions: "-Xms256m -Xmx768m -XX:ActiveProcessorCount=4"
   uploads:
     size: 1Gi
   resources: {}            # no limits by default (lab); set requests/limits if your cluster needs them

@@ -12,6 +12,9 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
+      {{- if and (eq .Values.backend.service.type "NodePort") .Values.backend.service.nodePort }}
+      nodePort: {{ .Values.backend.service.nodePort }}
+      {{- end }}
     {{- if .Values.backend.service.exposeDebugPorts }}
     - name: jdwp
       port: 5005
@@ -67,6 +70,10 @@ spec:
           image: {{ include "vulntrade.image" (dict "ctx" . "image" .Values.backend.image) }}
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           env:
+            - name: SERVICE              # which jar of the backend image runs
+              value: platform
+            - name: JAVA_TOOL_OPTIONS    # JDK 11.0.11 can't read cgroup v2 limits: size the heap explicitly
+              value: {{ .Values.backend.javaToolOptions | quote }}
             - name: SPRING_PROFILES_ACTIVE
               value: {{ .Values.backend.springProfile | quote }}
             - name: SPRING_DATASOURCE_URL
@@ -120,33 +127,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-        {{- if .Values.logShipper.enabled }}
-        - name: log-shipper
-          image: {{ .Values.logShipper.image }}
-          env:
-            - name: S3_BUCKET
-              value: {{ .Values.logShipper.s3Bucket | quote }}
-            - name: AWS_REGION
-              value: {{ .Values.logShipper.awsRegion | quote }}
-            - name: AWS_DEFAULT_REGION
-              value: {{ .Values.logShipper.awsRegion | quote }}
-            {{- range $key := list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SESSION_TOKEN" }}
-            - name: {{ $key }}
-              valueFrom: { secretKeyRef: { name: {{ include "vulntrade.secretName" $ }}, key: {{ $key }} } }
-            {{- end }}
-          volumeMounts:
-            - name: logs
-              mountPath: /var/log/vulntrade
-              readOnly: true
-            - name: log-shipper-config
-              mountPath: /fluent-bit/etc/fluent-bit.conf
-              subPath: fluent-bit.conf
-            - name: log-shipper-config
-              mountPath: /fluent-bit/etc/parsers.conf
-              subPath: parsers.conf
-            - name: fluent-bit-buffer
-              mountPath: /var/log/fluent-bit
-        {{- end }}
+        {{- include "vulntrade.logshipper.container" . | nindent 8 }}
       volumes:
         - name: flags
           configMap:
@@ -156,10 +137,4 @@ spec:
             claimName: {{ .Release.Name }}-uploads
         - name: logs
           emptyDir: {}
-        {{- if .Values.logShipper.enabled }}
-        - name: log-shipper-config
-          configMap:
-            name: {{ .Release.Name }}-log-shipper
-        - name: fluent-bit-buffer
-          emptyDir: {}
-        {{- end }}
+        {{- include "vulntrade.logshipper.volumes" . | nindent 8 }}
