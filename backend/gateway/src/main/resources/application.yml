@@ -1,0 +1,42 @@
+# Trading gateway: one product's front door. PRODUCT and UPSTREAM come from the deployment.
+server:
+  port: 8080
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: ${PRODUCT:fx}-gateway
+  redis:                       # events from the internals service arrive here (pub/sub)
+    host: ${SPRING_REDIS_HOST:localhost}
+    port: ${SPRING_REDIS_PORT:6379}
+    timeout: 1s
+  jackson:
+    default-property-inclusion: non_null
+
+gateway:
+  product: ${PRODUCT:fx}                           # fx | equities | crypto
+  upstream: ${UPSTREAM:http://localhost:8081}      # e.g. http://fx-internals:8080
+  platform-url: ${PLATFORM_URL:http://backend:8080}
+
+# Same weak secret as the platform, so the same tokens work (VULN #56 lives in JwtTokenProvider)
+jwt:
+  secret: ${JWT_SECRET:vulntrade-secret}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true          # /actuator/health/liveness and /readiness for Kubernetes
+  health:
+    redis:
+      enabled: false           # a Redis blip must not take the front door out of service
+
+logging:
+  level:
+    com.vulntrade: INFO

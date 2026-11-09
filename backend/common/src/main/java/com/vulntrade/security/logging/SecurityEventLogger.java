@@ -56,6 +56,9 @@ public final class SecurityEventLogger {
     private static final DateTimeFormatter TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
     private static final String ENVIRONMENT = System.getenv().getOrDefault("APP_ENVIRONMENT", "production");
+    /** Which microservice wrote the line (1.0.0): platform, fx-gateway, equities-internals ... */
+    private static final String SERVICE_NAME = System.getenv().getOrDefault("SERVICE_NAME",
+            System.getenv().getOrDefault("SERVICE", "platform"));
     private static final int MAX_TEXT_LENGTH = 1000;
 
     // HTTP request attributes, set by RequestLoggingFilter and rememberUser().
@@ -140,6 +143,12 @@ public final class SecurityEventLogger {
             }
         }
         return map;
+    }
+
+    /** The id RequestLoggingFilter (or InternalRequestFilter) gave this HTTP request. */
+    public static String requestIdOf(HttpServletRequest request) {
+        Object id = request == null ? null : request.getAttribute(REQUEST_ID);
+        return id == null ? null : id.toString();
     }
 
     /** The logged-in user's id (HTTP or STOMP), or null when nobody is logged in. */
@@ -289,6 +298,7 @@ public final class SecurityEventLogger {
             put(json, "logger", callerClass());
             put(json, "thread", Thread.currentThread().getName());
             put(json, "application", "vulntrade");
+            put(json, "service", SERVICE_NAME);
             put(json, "environment", ENVIRONMENT);
             put(json, "category", event.category());
             put(json, "eventType", event.eventType());

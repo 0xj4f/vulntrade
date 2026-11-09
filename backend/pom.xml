@@ -31,6 +31,8 @@
     <modules>
         <module>common</module>
         <module>platform</module>
+        <module>gateway</module>
+        <module>fx</module>
     </modules>
 
     <properties>

@@ -49,6 +49,9 @@ public class SecurityConfig {
                 // Public endpoints
                 .antMatchers("/api/auth/**").permitAll()
                 .antMatchers("/api/health").permitAll()
+                // 1.0.0: service-to-service calls (gateways). Not routed by nginx, but open to anything
+                // inside the cluster - see docs/vulnerabilities.md "architecture notes".
+                .antMatchers("/internal/**").permitAll()
                 .antMatchers("/api/market/**").permitAll()
                 // VULN: Actuator fully exposed
                 .antMatchers("/actuator/**").permitAll()

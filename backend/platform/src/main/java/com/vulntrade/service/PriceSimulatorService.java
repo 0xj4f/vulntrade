@@ -83,6 +83,9 @@ public class PriceSimulatorService {
 
         for (Symbol symbol : symbols) {
             String name = symbol.getSymbol();
+            if ("FX".equals(symbol.getAssetClass())) {
+                continue;  // 1.0.0: FX prices come from fx-internals (fake banks + price engine)
+            }
             synchronized (lockFor(name)) {
                 if (haltedSymbols.getOrDefault(name, false)) {
                     continue;  // Skip halted symbols

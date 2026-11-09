@@ -23,6 +23,13 @@ INSERT INTO symbols (symbol, name, current_price, bid, ask, volume, is_tradable)
 -- 1.0.0: which product service owns each symbol
 UPDATE symbols SET asset_class = CASE WHEN symbol LIKE '%-USD' THEN 'CRYPTO' ELSE 'EQUITY' END;
 
+-- 1.0.0: FX pairs (prices come from fx-internals: fake banks + our margin; the row holds the mid)
+INSERT INTO symbols (symbol, name, current_price, bid, ask, volume, is_tradable, asset_class) VALUES
+    ('EURUSD', 'Euro / US Dollar', 1.08500, 1.08490, 1.08510, 0, true, 'FX'),
+    ('GBPUSD', 'British Pound / US Dollar', 1.26500, 1.26490, 1.26510, 0, true, 'FX'),
+    ('USDJPY', 'US Dollar / Japanese Yen', 151.200, 151.190, 151.210, 0, true, 'FX'),
+    ('EURGBP', 'Euro / British Pound', 0.85800, 0.85790, 0.85810, 0, true, 'FX');
+
 -- NOTE: Positions, orders, transactions, and audit_log entries
 -- are seeded by Spring Boot DataInitializer after users are created.
 -- This avoids FK constraint issues with user IDs.
