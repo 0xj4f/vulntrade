@@ -91,7 +91,13 @@ class Trader(HttpUser):
         if price is not None:
             body["price"] = str(price)
         name = "%s %s order" % (product, otype.lower())
-        with self.client.post(ROUTES["orders"][product], json=body, headers=self.headers,
+        headers = self.headers
+        if TARGET == "v1" and product == "equities":
+            # The trading screen sends orders over the product WebSocket; the gateway then adds
+            # X-Channel: ws and equities-internals prices a MARKET order at the live bid/ask.
+            # Without it, a priceless REST MARKET order takes the EQ-5 bug path (holds $0, house fill).
+            headers = dict(self.headers, **{"X-Channel": "ws"})
+        with self.client.post(ROUTES["orders"][product], json=body, headers=headers,
                               name=name, catch_response=True) as r:
             data = safe_json(r)
             if r.status_code < 300 and data.get("status") == want:

@@ -42,7 +42,9 @@ See [docs/architecture.md](docs/architecture.md).
 ### Tests
 - `test/trading_integrity.py` rewritten for 1.0.0 (commission, holds, fees, per-account ledger).
 - New: `test/smoke.py`, `test/product_bugs.py` (every product vulnerability fires),
-  `test/invariants.py` (money conservation), `test/bench/` (Locust load test, 50 users).
+  `test/invariants.py` (money conservation), `test/bench/` (Locust load test, 50 users;
+  `summarize.py` turns a result folder into one JSON file).
+- `user-simulator` lists and cancels a returning user's orders on the product routes.
 
 ## [0.6.0] — stable baseline
 
