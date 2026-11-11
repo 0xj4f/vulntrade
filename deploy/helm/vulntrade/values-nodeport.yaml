@@ -1,0 +1,10 @@
+# Reach the lab on the minikube node IP without port-forward or tunnel:
+#   frontend http://$(minikube -p <profile> ip):31080   backend http://$(minikube -p <profile> ip):31085
+frontend:
+  service:
+    type: NodePort
+    nodePort: 31080
+backend:
+  service:
+    type: NodePort
+    nodePort: 31085

@@ -19,8 +19,11 @@ backend:
   jwtExpiration: "86400000"
   service:
     type: ClusterIP
+    nodePort: null         # set with type NodePort (e.g. values-nodeport.yaml)
     # The JDWP debug (5005) and unauthenticated JMX (9090) ports are lab features.
     exposeDebugPorts: true
+  # JDK 11.0.11 ignores cgroup v2 memory limits, so the heap is sized explicitly (never MaxRAMPercentage).
+  javaToolOptions: "-Xms256m -Xmx768m -XX:ActiveProcessorCount=4"
   uploads:
     size: 1Gi
   resources: {}            # no limits by default (lab); set requests/limits if your cluster needs them
@@ -28,6 +31,44 @@ backend:
     failureThreshold: 60   # JDK 11 + Spring Boot + seeding can take a couple of minutes on a laptop
     periodSeconds: 5
   extraEnv: []
+
+# 1.0.0: the per-product services (templates/services.yaml). They all run the backend image;
+# "service" picks the jar. Gateways are the front doors, internals hold the business logic.
+services:
+  fx-gateway:
+    service: gateway
+    env: { PRODUCT: fx, UPSTREAM: "http://fx-internals:8080" }
+    javaToolOptions: "-Xms64m -Xmx192m -XX:ActiveProcessorCount=2 -Dhttp.maxConnections=64 -Dsun.net.http.retryPost=false"
+    resources: { requests: { cpu: 100m, memory: 384Mi }, limits: { memory: 640Mi } }
+  fx-internals:
+    service: fx
+    db: true
+    javaToolOptions: "-Xms128m -Xmx384m -XX:ActiveProcessorCount=2"
+    resources: { requests: { cpu: 250m, memory: 640Mi }, limits: { memory: 1Gi } }
+  equities-gateway:
+    service: gateway
+    env: { PRODUCT: equities, UPSTREAM: "http://equities-internals:8080" }
+    javaToolOptions: "-Xms64m -Xmx192m -XX:ActiveProcessorCount=2 -Dhttp.maxConnections=64 -Dsun.net.http.retryPost=false"
+    resources: { requests: { cpu: 100m, memory: 384Mi }, limits: { memory: 640Mi } }
+  equities-internals:
+    service: equities
+    db: true
+    env: { MARKET_SESSION: OPEN }
+    javaToolOptions: "-Xms128m -Xmx384m -XX:ActiveProcessorCount=2"
+    resources: { requests: { cpu: 250m, memory: 640Mi }, limits: { memory: 1Gi } }
+  crypto-gateway:
+    service: gateway
+    env: { PRODUCT: crypto, UPSTREAM: "http://crypto-internals:8080" }
+    javaToolOptions: "-Xms64m -Xmx192m -XX:ActiveProcessorCount=2 -Dhttp.maxConnections=64 -Dsun.net.http.retryPost=false"
+    resources: { requests: { cpu: 100m, memory: 384Mi }, limits: { memory: 640Mi } }
+  crypto-internals:
+    service: crypto
+    db: true
+    javaToolOptions: "-Xms128m -Xmx384m -XX:ActiveProcessorCount=2"
+    resources: { requests: { cpu: 250m, memory: 640Mi }, limits: { memory: 1Gi } }
+
+# Small image used by the "wait for the platform" init containers
+waitImage: busybox:1.36
 
 frontend:
   image:

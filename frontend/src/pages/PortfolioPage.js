@@ -6,6 +6,8 @@ import { useAuth } from '../context/AuthContext';
 import { useDebug } from '../context/DebugContext';
 import { useMarketData } from '../context/MarketDataContext';
 import api from '../services/apiService';
+import { productOf } from '../services/websocketService';
+import { fetchAccounts } from '../services/accounts';
 import PageLayout from '../components/PageLayout';
 import Card from '../components/Card';
 import StatCard from '../components/StatCard';
@@ -20,10 +22,16 @@ const PALETTE = ['#3b82f6', '#16c784', '#f5a524', '#8b5cf6', '#06b6d4', '#ec4899
 
 const TX_TONE = { DEPOSIT: 'up', WITHDRAW: 'down', TRADE_BUY: 'accent', TRADE_SELL: 'violet', ADJUSTMENT: 'warn' };
 
+const ACCOUNT_LABEL = { MAIN: 'Main', FX: 'FX', EQUITIES: 'Equities', CRYPTO: 'Crypto' };
+const ACCOUNT_TONE = { MAIN: 'neutral', FX: 'violet', EQUITIES: 'accent', CRYPTO: 'warn' };
+const fmtAmount = (asset, value) => (asset === 'USD' ? fmtUSD(value) : fmtQty(value));
+
 /**
- * Portfolio: equity, allocation, holdings and the cash ledger.
+ * Portfolio: equity, allocation, holdings (stock positions), every account balance
+ * (MAIN, FX, EQUITIES, CRYPTO) and the cash ledger.
  *
  * VULN (kept, #74/#76): portfolio and transactions are fetched by userId (IDOR lookup in debug).
+ * VULN (kept, IDOR): another user's product balances are read with ?userId= on each gateway.
  * VULN (kept, FE-08/BIZ-11): P&L is computed here, in the browser.
  * VULN (kept): the portfolio response's notes field is shown in debug mode.
  */
@@ -34,6 +42,8 @@ function PortfolioPage() {
   const [portfolio, setPortfolio] = useState(null);
   const [positions, setPositions] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [accounts, setAccounts] = useState([]);   // FX, EQUITIES, CRYPTO: [{ product, balances }]
+  const [fxRates, setFxRates] = useState({});     // 'EURUSD' -> mid price
   const [lookupUserId, setLookupUserId] = useState('');
   const [viewing, setViewing] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -41,8 +51,9 @@ function PortfolioPage() {
   const targetId = viewing || ownId;
 
   // VULN: userId passed directly in URL - IDOR
+  // Positions here are stocks only; crypto coins are balances of the CRYPTO account.
   const fetchPortfolio = useCallback((userId) => api.get(`/api/users/${userId}/portfolio`)
-    .then(res => { setPortfolio(res.data); setPositions(res.data.positions || []); })
+    .then(res => { setPortfolio(res.data); setPositions((res.data.positions || []).filter(p => productOf(p.symbol) === 'equities')); })
     .catch(err => { console.error('Failed to fetch portfolio:', err); toast.error('Failed to load portfolio'); }), []);
 
   // VULN: userId passed in query param - IDOR
@@ -50,10 +61,34 @@ function PortfolioPage() {
     .then(res => setTransactions(Array.isArray(res.data) ? res.data : []))
     .catch(err => console.error('Failed to fetch transactions:', err)), []);
 
+  // Product accounts. Mine come from /api/accounts; for another user each gateway is asked
+  // with ?userId= (VULN: the gateways honour it).
+  const fetchProductAccounts = useCallback((userId) => {
+    if (String(userId) === String(ownId)) {
+      return fetchAccounts()
+        .then(list => setAccounts(list.filter(a => a.product !== 'MAIN')))
+        .catch(err => console.error('Failed to fetch accounts:', err));
+    }
+    return Promise.all(['fx', 'equities', 'crypto'].map(p => api.get(`/api/${p}/balances?userId=${userId}`)
+      .then(res => ({ product: p.toUpperCase(), balances: res.data?.balances || [] }))
+      .catch(() => ({ product: p.toUpperCase(), balances: [] }))))
+      .then(setAccounts);
+  }, [ownId]);
+
+  // FX rates (mid of bid/ask) to value EUR, GBP and JPY in USD.
+  const fetchFxRates = useCallback(() => api.get('/api/fx/quotes')
+    .then(res => {
+      const rates = {};
+      (Array.isArray(res.data) ? res.data : []).forEach(q => { rates[q.pair] = (Number(q.bid) + Number(q.ask)) / 2; });
+      setFxRates(rates);
+    })
+    .catch(err => console.error('Failed to fetch FX quotes:', err)), []);
+
   const refresh = useCallback(() => {
     if (!targetId) return;
-    Promise.all([fetchPortfolio(targetId), fetchTransactions(targetId)]).finally(() => setLoading(false));
-  }, [targetId, fetchPortfolio, fetchTransactions]);
+    Promise.all([fetchPortfolio(targetId), fetchTransactions(targetId), fetchProductAccounts(targetId), fetchFxRates()])
+      .finally(() => setLoading(false));
+  }, [targetId, fetchPortfolio, fetchTransactions, fetchProductAccounts, fetchFxRates]);
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => {
@@ -84,14 +119,47 @@ function PortfolioPage() {
 
   const totals = useMemo(() => rows.reduce((t, r) => ({ value: t.value + r.value, cost: t.cost + r.cost, pnl: t.pnl + r.pnl }), { value: 0, cost: 0, pnl: 0 }), [rows]);
   const realized = useMemo(() => positions.reduce((s, p) => s + Number(p.realizedPnl || 0), 0), [positions]);
-  const cash = Number(portfolio?.balance ?? (viewing ? 0 : user?.balance) ?? 0);
-  const equity = cash + totals.value;
+  const cash = Number(portfolio?.balance ?? (viewing ? 0 : user?.balance) ?? 0);   // MAIN account
+
+  /** USD price of one asset: USD = 1, coins from the live feed, EUR/GBP/JPY from FX quotes; null if unknown. */
+  const usdPrice = useCallback((asset) => {
+    if (asset === 'USD') return 1;
+    const coin = quotes[`${asset}-USD`];
+    if (coin && Number(coin.currentPrice) > 0) return Number(coin.currentPrice);
+    if (fxRates[`${asset}USD`]) return fxRates[`${asset}USD`];        // EURUSD, GBPUSD
+    if (fxRates[`USD${asset}`]) return 1 / fxRates[`USD${asset}`];    // USDJPY
+    return null;
+  }, [quotes, fxRates]);
+
+  // One row per account balance (MAIN first), valued in USD where we have a price.
+  const accountRows = useMemo(() => {
+    const list = [{ product: 'MAIN', asset: 'USD', available: cash, held: 0 }];
+    accounts.forEach(a => (a.balances || []).forEach(b => list.push({
+      product: a.product, asset: b.asset, available: Number(b.available || 0), held: Number(b.held || 0),
+    })));
+    return list.map(r => {
+      const price = usdPrice(r.asset);
+      return { ...r, price, value: price != null ? (r.available + r.held) * price : null };
+    });
+  }, [accounts, cash, usdPrice]);
+  const valueByProduct = useMemo(() => {
+    const out = { MAIN: 0, FX: 0, EQUITIES: 0, CRYPTO: 0 };
+    accountRows.forEach(r => { out[r.product] = (out[r.product] || 0) + (r.value || 0); });
+    return out;
+  }, [accountRows]);
+  const productCash = valueByProduct.FX + valueByProduct.EQUITIES + valueByProduct.CRYPTO;
+  const equity = cash + productCash + totals.value;
+
   const allocation = useMemo(() => {
     const parts = rows.map((r, i) => ({ label: r.symbol, value: r.value, color: PALETTE[i % PALETTE.length] }));
     if (cash > 0) parts.push({ label: 'Cash', value: cash, color: 'var(--vt-border-strong)' });
+    ['FX', 'EQUITIES', 'CRYPTO'].forEach((product, i) => {
+      const value = valueByProduct[product];
+      if (value > 0) parts.push({ label: `${ACCOUNT_LABEL[product]} account`, value, color: PALETTE[(rows.length + i) % PALETTE.length] });
+    });
     const total = parts.reduce((s, p) => s + p.value, 0) || 1;
     return parts.map(p => ({ ...p, pct: (p.value / total) * 100 }));
-  }, [rows, cash]);
+  }, [rows, cash, valueByProduct]);
 
   return (
     <PageLayout
@@ -115,7 +183,8 @@ function PortfolioPage() {
             </div>
           </div>
           <div className="vt-stats" style={{ flex: '1 1 560px', maxWidth: '760px', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
-            <StatCard label="Cash" value={fmtUSD(cash)} valueSize="18px" />
+            <StatCard label="Cash" value={fmtUSD(cash)} valueSize="18px" sub="Main account" />
+            <StatCard label="Product accounts" value={fmtUSD(productCash)} valueSize="18px" sub="FX · equities · crypto" />
             <StatCard label="Invested" value={fmtUSD(totals.value)} valueSize="18px" sub={`cost ${fmtUSD(totals.cost)}`} />
             <StatCard label="Realized P&L" value={fmtPnL(realized)} valueColor={pnlColor(realized)} valueSize="18px" />
             <StatCard label="Positions" value={rows.length} valueSize="18px" />
@@ -163,6 +232,23 @@ function PortfolioPage() {
             { key: 'pnl', label: 'Unrealized', align: 'right', render: r => <span style={{ color: pnlColor(r.pnl), fontWeight: 600 }}>{fmtPnL(r.pnl)}</span> },
             { key: 'pnlPct', label: 'Return', align: 'right', render: r => <span style={{ color: pnlColor(r.pnlPct), fontWeight: 600 }}>{fmtPct(r.pnlPct)}</span> },
             { key: 'realized', label: 'Realized', align: 'right', render: r => <span style={{ color: pnlColor(r.realizedPnl) }}>{fmtPnL(r.realizedPnl || 0)}</span> },
+          ]}
+        />
+      </Card>
+
+      <Card title="Accounts" flush subtitle="Every account balance, valued in USD with the latest prices">
+        <DataTable
+          small
+          rowKey={r => `${r.product}-${r.asset}`}
+          data={accountRows}
+          emptyText="No balances"
+          columns={[
+            { key: 'product', label: 'Account', render: r => <Chip tone={ACCOUNT_TONE[r.product]}>{ACCOUNT_LABEL[r.product] || r.product}</Chip> },
+            { key: 'asset', label: 'Asset', render: r => <span style={{ fontWeight: 600 }}>{r.asset}</span> },
+            { key: 'available', label: 'Available', align: 'right', render: r => fmtAmount(r.asset, r.available) },
+            { key: 'held', label: 'Held', align: 'right', render: r => <span style={{ color: colors.textMuted }}>{fmtAmount(r.asset, r.held)}</span> },
+            { key: 'price', label: 'USD price', align: 'right', render: r => (r.price != null ? fmtPrice(r.price) : '—') },
+            { key: 'value', label: 'Value', align: 'right', render: r => <span style={{ fontWeight: 600 }}>{r.value != null ? fmtUSD(r.value) : '—'}</span> },
           ]}
         />
       </Card>

@@ -1,0 +1,354 @@
+package com.vulntrade.websocket.controller;
+
+import com.vulntrade.model.Order;
+import com.vulntrade.model.dto.*;
+import com.vulntrade.repository.CustomQueryRepository;
+import com.vulntrade.security.StompChannelInterceptor.StompPrincipal;
+import com.vulntrade.security.logging.Outcome;
+import com.vulntrade.security.logging.SecurityEvent;
+import com.vulntrade.service.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.stereotype.Controller;
+
+import java.math.BigDecimal;
+import java.security.Principal;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static com.vulntrade.security.logging.SecurityEventLogger.*;
+
+/**
+ * STOMP controller for trading operations.
+ * Handles /app/trade.* destinations.
+ * 
+ * VULN: Multiple IDOR, injection, and business logic vulnerabilities.
+ */
+@Controller
+public class TradeStompController {
+
+    private static final Logger logger = LoggerFactory.getLogger(TradeStompController.class);
+
+    private final AccountService accountService;
+    private final PortfolioService portfolioService;
+    private final AlertService alertService;
+    private final CustomQueryRepository customQueryRepository;
+    private final SimpMessagingTemplate messagingTemplate;
+
+    public TradeStompController(AccountService accountService,
+                                 PortfolioService portfolioService,
+                                 AlertService alertService,
+                                 CustomQueryRepository customQueryRepository,
+                                 SimpMessagingTemplate messagingTemplate) {
+        this.accountService = accountService;
+        this.portfolioService = portfolioService;
+        this.alertService = alertService;
+        this.customQueryRepository = customQueryRepository;
+        this.messagingTemplate = messagingTemplate;
+    }
+
+    // 1.0.0: orders are no longer placed here. /app/trade.placeOrder, trade.cancelOrder and
+    // trade.executeMarket moved to each product's own WebSocket (/api/{product}/ws, SEND
+    // /app/order.place | /app/order.cancel) and REST API (/api/{fx,equities,crypto}/orders).
+
+    /**
+     * /app/trade.getPortfolio
+     * VULN: Accepts optional userId parameter - returns ANY user's portfolio.
+     */
+    @MessageMapping("/trade.getPortfolio")
+    public void getPortfolio(@Payload(required = false) Map<String, Object> request,
+                             SimpMessageHeaderAccessor headerAccessor) {
+        Long userId = extractUserId(headerAccessor);
+        if (userId == null) {
+            denyUnauthenticated(headerAccessor);
+            return;
+        }
+
+        try {
+            logger.info("TRADE_PORTFOLIO: userId={}", userId);
+            // VULN: If request contains userId, use that instead (IDOR)
+            Long targetUserId = userId;
+            if (request != null && request.containsKey("userId")) {
+                targetUserId = ((Number) request.get("userId")).longValue();
+                // VULN: No check that requesting user == target user
+            }
+
+            List<Map<String, Object>> portfolio = portfolioService.getPortfolio(targetUserId);
+            if (!isOwner(targetUserId)) {
+                logStomp(headerAccessor, SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                        details("resource", "portfolio", "targetUserId", targetUserId));
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "PORTFOLIO");
+            response.put("userId", targetUserId);  // VULN: reveals which user
+            response.put("positions", portfolio);
+
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/portfolio", response);
+
+        } catch (Exception e) {
+            sendError(headerAccessor, e.getMessage());
+        }
+    }
+
+    /**
+     * /app/trade.getBalance
+     * VULN: Response includes internal account flags.
+     */
+    @MessageMapping("/trade.getBalance")
+    public void getBalance(SimpMessageHeaderAccessor headerAccessor) {
+        Long userId = extractUserId(headerAccessor);
+        if (userId == null) {
+            denyUnauthenticated(headerAccessor);
+            return;
+        }
+
+        try {
+            logger.info("TRADE_BALANCE: userId={}", userId);
+            var user = accountService.getUserWithBalance(userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "BALANCE");
+            response.put("userId", user.getId());
+            response.put("balance", user.getBalance());
+            response.put("username", user.getUsername());
+            // VULN: Internal account flags exposed
+            response.put("role", user.getRole());
+            response.put("isActive", user.getIsActive());
+            response.put("apiKey", user.getApiKey());  // VULN: API key in balance response
+            response.put("notes", user.getNotes());     // VULN: notes with flags
+
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/balance", response);
+
+        } catch (Exception e) {
+            sendError(headerAccessor, e.getMessage());
+        }
+    }
+
+    /**
+     * /app/trade.withdraw
+     * VULN: 2FA check only on frontend.
+     * VULN: No withdrawal rate limit.
+     * VULN: Negative amount = deposit (sign flip).
+     * VULN: Race condition on concurrent withdrawals.
+     */
+    @MessageMapping("/trade.withdraw")
+    public void withdraw(@Payload WithdrawRequest request,
+                         SimpMessageHeaderAccessor headerAccessor) {
+        Long userId = extractUserId(headerAccessor);
+        if (userId == null) {
+            denyUnauthenticated(headerAccessor);
+            return;
+        }
+
+        try {
+            logger.info("TRADE_WITHDRAW_WS: userId={}, amount={}", userId, request.getAmount());
+            // VULN: No 2FA verification
+            // VULN: No rate limiting
+            // VULN: Negative amount not checked
+            BigDecimal newBalance = accountService.withdraw(
+                    userId, request.getAmount(), request.getDestinationAccount());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "WITHDRAW_SUCCESS");
+            response.put("newBalance", newBalance);
+            response.put("amount", request.getAmount());
+
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/balance", response);
+
+        } catch (Exception e) {
+            sendError(headerAccessor, e.getMessage());
+        }
+    }
+
+    /**
+     * /app/trade.deposit
+     * VULN: No verification of source - free money.
+     */
+    @MessageMapping("/trade.deposit")
+    public void deposit(@Payload DepositRequest request,
+                        SimpMessageHeaderAccessor headerAccessor) {
+        Long userId = extractUserId(headerAccessor);
+        if (userId == null) {
+            denyUnauthenticated(headerAccessor);
+            return;
+        }
+
+        try {
+            logger.info("TRADE_DEPOSIT_WS: userId={}, amount={}", userId, request.getAmount());
+            // VULN: No source verification - anyone can deposit any amount
+            BigDecimal newBalance = accountService.deposit(
+                    userId, request.getAmount(), request.getSourceAccount());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "DEPOSIT_SUCCESS");
+            response.put("newBalance", newBalance);
+            response.put("amount", request.getAmount());
+
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/balance", response);
+
+        } catch (Exception e) {
+            sendError(headerAccessor, e.getMessage());
+        }
+    }
+
+    /**
+     * /app/trade.getHistory
+     * VULN: SQL injection in date parameters (raw SQL query).
+     * VULN: No pagination limit (DoS via huge date range).
+     */
+    @MessageMapping("/trade.getHistory")
+    public void getTradeHistory(@Payload TradeHistoryRequest request,
+                                 SimpMessageHeaderAccessor headerAccessor) {
+        Long userId = extractUserId(headerAccessor);
+        if (userId == null) {
+            denyUnauthenticated(headerAccessor);
+            return;
+        }
+
+        try {
+            logger.info("TRADE_HISTORY: userId={}, startDate={}, endDate={}, symbol={}", userId, request.getStartDate(), request.getEndDate(), request.getSymbol());
+            // VULN: SQL injection via date parameters
+            // VULN: No pagination - DoS possible
+            List<Object[]> history = customQueryRepository.getTradeHistory(
+                    String.valueOf(userId),
+                    request.getStartDate(),   // VULN: SQL injection
+                    request.getEndDate(),     // VULN: SQL injection
+                    request.getSymbol());     // VULN: SQL injection
+            // Raw dates and symbol on purpose: Wazuh scans them for SQL injection
+            logStomp(headerAccessor, SecurityEvent.SENSITIVE_DATA_READ, Outcome.SUCCESS,
+                    details("resource", "trade_history",
+                            "startDate", request.getStartDate(),
+                            "endDate", request.getEndDate(),
+                            "symbol", request.getSymbol()));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "TRADE_HISTORY");
+            response.put("trades", history);
+            response.put("count", history.size());
+
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/history", response);
+
+        } catch (Exception e) {
+            logStomp(headerAccessor, SecurityEvent.SENSITIVE_DATA_READ, Outcome.FAILURE,
+                    details("resource", "trade_history",
+                            "startDate", request.getStartDate(),
+                            "endDate", request.getEndDate(),
+                            "symbol", request.getSymbol(),
+                            "errorType", e.getClass().getSimpleName()));
+            // VULN: Error message reveals database structure
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("type", "ERROR");
+            errorResponse.put("message", e.getMessage());
+            errorResponse.put("detail", e.getCause() != null ? e.getCause().getMessage() : null);
+
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/errors", errorResponse);
+        }
+    }
+
+    /**
+     * /app/trade.setAlert
+     * VULN: Stored XSS via symbol field.
+     * VULN: No limit on number of alerts (resource exhaustion).
+     */
+    @MessageMapping("/trade.setAlert")
+    public void setAlert(@Payload AlertRequest request,
+                         SimpMessageHeaderAccessor headerAccessor) {
+        Long userId = extractUserId(headerAccessor);
+        if (userId == null) {
+            denyUnauthenticated(headerAccessor);
+            return;
+        }
+
+        try {
+            logger.info("TRADE_ALERT: userId={}, symbol={}, target={}", userId, request.getSymbol(), request.getTargetPrice());
+            // VULN: No sanitization of symbol - stored XSS
+            // VULN: No limit on alerts per user
+            var alert = alertService.createAlert(
+                    userId, request.getSymbol(),
+                    request.getTargetPrice(), request.getDirection());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "ALERT_CREATED");
+            response.put("alertId", alert.getId());
+            response.put("symbol", alert.getSymbol());  // VULN: XSS payload reflected
+            response.put("targetPrice", alert.getTargetPrice());
+            response.put("direction", alert.getDirection());
+
+            messagingTemplate.convertAndSendToUser(
+                    extractUsername(headerAccessor), "/queue/alerts", response);
+
+        } catch (Exception e) {
+            sendError(headerAccessor, e.getMessage());
+        }
+    }
+
+    // --- Helper methods ---
+
+    private Long extractUserId(SimpMessageHeaderAccessor headerAccessor) {
+        Principal principal = headerAccessor.getUser();
+        if (principal instanceof StompPrincipal) {
+            return ((StompPrincipal) principal).getUserIdAsLong();
+        }
+
+        // Fallback: try session attributes
+        Map<String, Object> sessionAttrs = headerAccessor.getSessionAttributes();
+        if (sessionAttrs != null) {
+            Object userId = sessionAttrs.get("userId");
+            if (userId instanceof Integer) return ((Integer) userId).longValue();
+            if (userId instanceof Long) return (Long) userId;
+        }
+
+        return null;
+    }
+
+    /** filledQty, avgFillPrice (volume-weighted; also as filledPrice), remainingQty, reason. */
+    private static void putFillDetails(Map<String, Object> response, Order order) {
+        BigDecimal filled = order.getFilledQty() != null ? order.getFilledQty() : BigDecimal.ZERO;
+        response.put("filledQty", filled);
+        response.put("filledPrice", order.getFilledPrice());
+        response.put("avgFillPrice", order.getFilledPrice());
+        response.put("remainingQty", order.getQuantity() != null ? order.getQuantity().subtract(filled) : null);
+        response.put("reason", order.getStatusReason());
+    }
+
+    /**
+     * Extract the principal name (username) for convertAndSendToUser.
+     * Spring resolves user destinations by Principal.getName(), not by userId.
+     */
+    private String extractUsername(SimpMessageHeaderAccessor headerAccessor) {
+        Principal principal = headerAccessor.getUser();
+        if (principal != null) {
+            return principal.getName();
+        }
+        return "anonymous";
+    }
+
+    private void sendError(SimpMessageHeaderAccessor headerAccessor, String message) {
+        String target = extractUsername(headerAccessor);
+
+        Map<String, Object> error = new HashMap<>();
+        error.put("type", "ERROR");
+        error.put("message", message);
+        error.put("timestamp", System.currentTimeMillis());
+
+        messagingTemplate.convertAndSendToUser(target, "/queue/errors", error);
+    }
+
+    /** Logs authorization_denied and sends the same "Authentication required" error as before. */
+    private void denyUnauthenticated(SimpMessageHeaderAccessor headerAccessor) {
+        logStomp(headerAccessor, SecurityEvent.AUTHORIZATION_DENIED, Outcome.DENIED, null);
+        sendError(headerAccessor, "Authentication required");
+    }
+}

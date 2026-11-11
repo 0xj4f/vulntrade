@@ -1,0 +1,133 @@
+# VulnTrade Application Configuration
+# VULN: Secrets in plaintext, debug enabled, everything exposed
+
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-stacktrace: always  # VULN: stack traces exposed
+
+spring:
+  application:
+    name: vulntrade
+
+  # PostgreSQL
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/vulntrade}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20   # 1.0.0: sized for 50+ concurrent users (Postgres allows 100 in total)
+
+  jpa:
+    open-in-view: false     # 1.0.0: don't hold a DB connection for the whole HTTP request
+    hibernate:
+      ddl-auto: update
+    show-sql: false  # quieted — Hibernate SQL was flooding stdout (MessageBroker-1 SELECTs on symbols every tick)
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+
+  # H2 Console - VULN: enabled and accessible
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true  # VULN: accessible from any host
+
+  # File upload - VULN #95: oversized limits, no type restrictions
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB    # VULN: excessive file size allowed
+      max-request-size: 50MB
+
+  # Redis
+  redis:
+    host: ${SPRING_REDIS_HOST:localhost}
+    port: ${SPRING_REDIS_PORT:6379}
+    timeout: 1s             # 1.0.0: Redis is the event bus; never let it block trading for long
+    # VULN: no password configured
+
+  # Jackson
+  jackson:
+    serialization:
+      fail-on-empty-beans: false
+    default-property-inclusion: non_null
+    # VULN: polymorphic type handling enabled
+    mapper:
+      default-view-inclusion: true
+
+# Spring Security - intentionally weak
+security:
+  ignored: /actuator/**,/h2-console/**
+
+# Actuator - VULN: everything exposed
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"  # VULN: ALL endpoints exposed
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+    # VULN: turn OFF the default secret masking so /actuator/env and
+    # /actuator/configprops print JWT_SECRET, the DB password, the debug key,
+    # etc. in clear text. On Spring Boot 2.7 masking is controlled by
+    # keys-to-sanitize (a regex list); an empty list masks nothing. (The
+    # Boot 3 `show-values: ALWAYS` property is silently ignored on 2.7.)
+    env:
+      keys-to-sanitize:
+    configprops:
+      keys-to-sanitize:
+    shutdown:
+      enabled: true  # VULN: shutdown endpoint enabled
+
+# JWT Configuration - VULN: weak secret
+jwt:
+  secret: ${JWT_SECRET:vulntrade-secret}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# SpringDoc OpenAPI (Swagger 3.0)
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    display-operation-id: true
+    deep-linking: true
+    use-root-path: false
+  show-actuator: true
+  packages-to-scan: com.vulntrade.controller
+
+# Admin - VULN: hardcoded credentials
+admin:
+  api-key: ${ADMIN_API_KEY:vt-api-key-12345-not-so-secret}
+
+# Flags
+flags:
+  flag1: ${FLAG_1:FLAG{4ctu4t0r_3xp0s3d_s3cr3ts}}
+  flag7: ${FLAG_7:FLAG{st0mp_4dm1n_ch4nn3l_l34k}}
+  flag8: ${FLAG_8:FLAG{h34pdump_m3m0ry_s3cr3ts}}
+  flag10: ${FLAG_10:FLAG{jwt_f0rg3d_4dm1n_m4st3r}}
+
+# Liquidity Provider (house market maker) - 1.0.0: lives in the product services
+liquidity:
+  house-user-id: 1
+
+# Debug key - VULN: hardcoded
+debug:
+  key: vulntrade-debug-key-2024
+  enabled: true
+
+# Logging
+logging:
+  level:
+    com.vulntrade: INFO                  # was DEBUG; quieted for normal ops
+    org.springframework.security: INFO   # was DEBUG; quieted for normal ops
+    org.hibernate.SQL: WARN              # was DEBUG; quieted to stop per-tick SELECT flood

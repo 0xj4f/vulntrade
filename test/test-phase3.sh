@@ -7,6 +7,8 @@
 ################################################################################
 
 BASE_URL="http://localhost:8085"
+# 1.0.0: trading lives on the product gateways, reached through the frontend (nginx)
+GW_URL="${GW_URL:-http://localhost:3001}"
 WS_URL="ws://localhost:8085/ws"
 WS_SOCKJS_URL="ws://localhost:8085/ws-sockjs/123/456/websocket"
 
@@ -83,7 +85,7 @@ echo ""
 
 # Test 2: Price Feed Check (HTTP GET for market prices)
 echo "--- Test 2: Market Data - REST Endpoint ---"
-PRICES=$(curl -s "$BASE_URL/api/market/prices")
+PRICES=$(curl -s "$GW_URL/api/equities/market/prices")
 if echo "$PRICES" | grep -q "BTC-USD"; then
     pass "Price feed available"
     # Extract a few prices
@@ -110,7 +112,7 @@ echo ""
 
 # Test 4: Order Placement via REST (simulating STOMP placeOrder)
 echo "--- Test 4: Order Placement - REST Endpoint ---"
-ORDER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/orders" \
+ORDER_RESPONSE=$(curl -s -X POST "$GW_URL/api/equities/orders" \
   -H "Authorization: Bearer $TRADER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
@@ -137,7 +139,7 @@ echo ""
 # Test 5: IDOR - Cancel Other User's Order
 echo "--- Test 5: IDOR Vulnerability - Cancel Order ---"
 if [ ! -z "$ORDER_ID" ]; then
-    CANCEL_RESPONSE=$(curl -s -X POST "$BASE_URL/api/orders/$ORDER_ID/cancel" \
+    CANCEL_RESPONSE=$(curl -s -X POST "$GW_URL/api/equities/orders/$ORDER_ID/cancel" \
       -H "Authorization: Bearer $ADMIN_JWT" \
       -H "Content-Type: application/json")
     
@@ -168,7 +170,7 @@ echo ""
 
 # Test 7: Negative Quantity Vulnerability
 echo "--- Test 7: Negative Quantity Input Validation ---"
-NEG_ORDER=$(curl -s -X POST "$BASE_URL/api/orders" \
+NEG_ORDER=$(curl -s -X POST "$GW_URL/api/equities/orders" \
   -H "Authorization: Bearer $TRADER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
@@ -190,7 +192,7 @@ echo ""
 
 # Test 8: Non-existent Symbol
 echo "--- Test 8: Non-existent Symbol Validation ---"
-FAKE_SYMBOL=$(curl -s -X POST "$BASE_URL/api/orders" \
+FAKE_SYMBOL=$(curl -s -X POST "$GW_URL/api/equities/orders" \
   -H "Authorization: Bearer $TRADER_JWT" \
   -H "Content-Type: application/json" \
   -d '{

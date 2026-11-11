@@ -1,0 +1,51 @@
+# Crypto internals. Only crypto-gateway calls it (never exposed through nginx).
+server:
+  port: 8080
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: crypto-internals
+  datasource:                  # the shared VulnTrade database
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/vulntrade}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none           # only the platform owns the schema
+  redis:
+    host: ${SPRING_REDIS_HOST:localhost}
+    port: ${SPRING_REDIS_PORT:6379}
+    timeout: 1s
+  task:
+    scheduling:
+      pool:
+        size: 2
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    redis:
+      enabled: false
+
+logging:
+  level:
+    com.vulntrade: INFO
+
+
+# The house (user 1) runs the market-maker bot
+liquidity:
+  house-user-id: 1

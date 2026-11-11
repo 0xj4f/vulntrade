@@ -6,7 +6,8 @@ import { useAuth } from '../context/AuthContext';
 import { useDebug } from '../context/DebugContext';
 import { useMarketData } from '../context/MarketDataContext';
 import api from '../services/apiService';
-import { sendMessage } from '../services/websocketService';
+import { productOf, sendMessage } from '../services/websocketService';
+import { balanceOf, fetchAccounts } from '../services/accounts';
 import { newClientOrderId, settleClientOrder, trackClientOrder } from '../services/orderTracker';
 import { useStomp } from '../hooks/useStomp';
 import StatCard from '../components/StatCard';
@@ -22,9 +23,12 @@ import OrderBook from '../components/trade/OrderBook';
 import AlertsPanel from '../components/trade/AlertsPanel';
 import { REASON_TEXT } from '../components/trade/OrderUpdateToaster';
 import { colors, inputStyle, labelStyle, num, type } from '../styles/shared';
-import { fmtPct, fmtPnL, fmtPrice, fmtQty, fmtTime, fmtUSD, fmtCompact, fmtDate, pnlColor, sideColor } from '../utils/format';
+import { fmtPct, fmtPnL, fmtPrice, fmtQty, fmtTime, fmtUSD, fmtCompact, fmtDate, parseDate, pnlColor, sideColor } from '../utils/format';
 
 const HOUSE_SPREAD = 0.0001;
+const isStock = (symbol) => productOf(symbol) === 'equities';
+const createdTime = (o) => parseDate(o.createdAt)?.getTime() || 0;
+const hasCost = (p) => p.avgPrice != null;      // coins have no cost basis
 
 function DashboardPage() {
   const { user, refreshUser } = useAuth();
@@ -38,6 +42,7 @@ function DashboardPage() {
   const [tab, setTab] = useState('positions');
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [trades, setTrades] = useState([]);
   const [adminAlerts, setAdminAlerts] = useState([]);
   const [health, setHealth] = useState(null);
@@ -54,37 +59,49 @@ function DashboardPage() {
   const refreshTimer = useRef(null);
 
   // ── Data ──────────────────────────────────────────────
+  // Stock positions (crypto coins are balances of the CRYPTO account, see `coins` below).
   const fetchPositions = useCallback(() => {
     if (!userId) return;
     api.get(`/api/users/${userId}/portfolio`)
-      .then(res => setPositions(res.data?.positions || []))
+      .then(res => setPositions((res.data?.positions || []).filter(p => isStock(p.symbol))))
       .catch(err => console.error('Failed to fetch positions:', err));
   }, [userId]);
 
+  // Orders live in two gateways: fetch both and merge, newest first.
   const fetchOrders = useCallback(() => {
     if (!userId) return;
-    api.get('/api/orders')
-      .then(res => setOrders(Array.isArray(res.data) ? res.data : []))
-      .catch(err => console.error('Failed to fetch orders:', err));
+    const get = (product) => api.get(`/api/${product}/orders`)
+      .then(res => (Array.isArray(res.data) ? res.data : []))
+      .catch(err => { console.error(`Failed to fetch ${product} orders:`, err); return []; });
+    Promise.all([get('equities'), get('crypto')])
+      .then(([stocks, crypto]) => setOrders([...stocks, ...crypto].sort((a, b) => createdTime(b) - createdTime(a) || b.id - a.id)));
   }, [userId]);
 
-  /** One debounced refresh of positions, orders and balance after anything that changes them. */
+  // MAIN / FX / EQUITIES / CRYPTO balances (trading cash and coins).
+  const fetchBalances = useCallback(() => {
+    if (!userId) return;
+    fetchAccounts().then(setAccounts).catch(err => console.error('Failed to fetch accounts:', err));
+  }, [userId]);
+
+  /** One debounced refresh of positions, orders and balances after anything that changes them. */
   const refreshAccount = useCallback(() => {
     clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => {
       fetchPositions();
       fetchOrders();
+      fetchBalances();
       refreshUser && refreshUser();
     }, 250);
-  }, [fetchPositions, fetchOrders, refreshUser]);
+  }, [fetchPositions, fetchOrders, fetchBalances, refreshUser]);
 
   useEffect(() => {
     fetchPositions();
     fetchOrders();
+    fetchBalances();
     refreshUser && refreshUser();
     api.get('/api/health').then(res => setHealth(res.data)).catch(() => setHealth({ status: 'DOWN' }));
     return () => clearTimeout(refreshTimer.current);
-  }, [fetchPositions, fetchOrders, refreshUser]);
+  }, [fetchPositions, fetchOrders, fetchBalances, refreshUser]);
 
   useEffect(() => {
     const onUpdate = () => refreshAccount();
@@ -93,28 +110,9 @@ function DashboardPage() {
   }, [refreshAccount]);
 
   // ── Realtime ──────────────────────────────────────────
-  useStomp('/user/queue/orders', (msg) => {
-    if (!msg || !msg.type) return;
-    if (msg.type === 'ORDER_PLACED' || msg.type === 'MARKET_ORDER_EXECUTED') {
-      const mine = pendingRef.current && (!msg.clientOrderId || msg.clientOrderId === pendingRef.current.clientOrderId);
-      if (mine) {
-        clearTimeout(pendingRef.current.timer);
-        settleClientOrder(pendingRef.current.clientOrderId);
-        pendingRef.current = null;
-        setBusy(false);
-      }
-      setLastOrder(msg);
-      setTicketError(null);
-      announce(msg);
-      refreshAccount();
-    } else if (msg.type === 'ORDER_CANCELLED') {
-      toast.info(`Order #${msg.orderId} cancelled`);
-      refreshAccount();
-    }
-  });
-
-  useStomp('/user/queue/errors', (err) => {
-    const message = err?.message || 'Unknown error';
+  // Errors: platform socket (price alerts) and the product sockets (orders).
+  const onError = (err) => {
+    const message = err?.error || err?.message || 'Unknown error';
     const action = lastActionRef.current;
     if (pendingRef.current) {
       clearTimeout(pendingRef.current.timer);
@@ -132,12 +130,42 @@ function DashboardPage() {
     } else {
       toast.error(message);
     }
-  });
+  };
+  useStomp('/user/queue/errors', onError);
+  useStomp('/user/queue/errors', onError, 'equities');
+  useStomp('/user/queue/errors', onError, 'crypto');
 
-  useStomp('/topic/trades', (t) => {
+  // Replies to /app/order.place and /app/order.cancel come back on the product socket.
+  const onOrderReply = (msg) => {
+    if (!msg || !msg.type) return;
+    if (msg.type === 'ERROR') {
+      onError(msg);
+    } else if (msg.type === 'ORDER_PLACED' || msg.type === 'MARKET_ORDER_EXECUTED') {
+      const mine = pendingRef.current && (!msg.clientOrderId || msg.clientOrderId === pendingRef.current.clientOrderId);
+      if (mine) {
+        clearTimeout(pendingRef.current.timer);
+        settleClientOrder(pendingRef.current.clientOrderId);
+        pendingRef.current = null;
+        setBusy(false);
+      }
+      setLastOrder(msg);
+      setTicketError(null);
+      announce(msg);
+      refreshAccount();
+    } else if (msg.type === 'ORDER_CANCELLED') {
+      toast.info(`Order #${msg.orderId ?? msg.id} cancelled`);
+      refreshAccount();
+    }
+  };
+  useStomp('/user/queue/orders', onOrderReply, 'equities');
+  useStomp('/user/queue/orders', onOrderReply, 'crypto');
+
+  const onTrade = (t) => {
     if (!t || !t.tradeId) return;
     setTrades(prev => [t, ...prev.filter(x => x.tradeId !== t.tradeId)].slice(0, 40));
-  });
+  };
+  useStomp('/topic/equities/trades', onTrade, 'equities');
+  useStomp('/topic/crypto/trades', onTrade, 'crypto');
 
   // VULN (kept, #73): the admin channel is readable by any user; shown in debug mode.
   useStomp('/topic/admin/alerts', (alert) => {
@@ -156,7 +184,7 @@ function DashboardPage() {
     lastActionRef.current = 'order';
     setTicketError(null);
     trackClientOrder(clientOrderId);
-    if (!sendMessage('/app/trade.placeOrder', { ...payload, clientOrderId })) {
+    if (!sendMessage('/app/order.place', { ...payload, clientOrderId }, productOf(payload.symbol))) {
       settleClientOrder(clientOrderId);
       toast.error('Not connected to the market feed — try again in a moment');
       return;
@@ -173,9 +201,9 @@ function DashboardPage() {
     pendingRef.current = { clientOrderId, timer };
   };
 
-  const cancelOrder = (orderId) => {
+  const cancelOrder = (orderId, orderSymbol) => {
     lastActionRef.current = 'cancel';
-    if (!sendMessage('/app/trade.cancelOrder', { orderId })) toast.error('Not connected — cancel not sent');
+    if (!sendMessage('/app/order.cancel', { orderId }, productOf(orderSymbol))) toast.error('Not connected — cancel not sent');
   };
 
   const openSell = (pos) => {
@@ -198,34 +226,47 @@ function DashboardPage() {
     lastActionRef.current = 'sell';
     const clientOrderId = newClientOrderId('sell');
     trackClientOrder(clientOrderId);
-    const ok = sendMessage('/app/trade.placeOrder', {
+    const ok = sendMessage('/app/order.place', {
       symbol: sellModal.symbol, side: 'SELL', type: 'MARKET', quantity: qty, price: bid, clientOrderId,
-    });
+    }, productOf(sellModal.symbol));
     if (!ok) { toast.error('Not connected — sell not sent'); return; }
     setSellModal(null);
   };
 
   // ── Derived ───────────────────────────────────────────
   const q = quotes[symbol];
-  const openPositions = useMemo(() => positions.filter(p => Number(p.quantity) > 0), [positions]);
+  // Coins held in the CRYPTO account, shown as positions without a cost basis.
+  const coins = useMemo(() => {
+    const crypto = accounts.find(a => a.product === 'CRYPTO');
+    return (crypto?.balances || [])
+      .filter(b => b.asset !== 'USD')
+      .map(b => ({ symbol: `${b.asset}-USD`, quantity: Number(b.available || 0) + Number(b.held || 0), avgPrice: null }))
+      .filter(c => c.quantity > 0);
+  }, [accounts]);
+  const openPositions = useMemo(() => [...positions.filter(p => Number(p.quantity) > 0), ...coins], [positions, coins]);
   const priceOf = useCallback((sym, fallback) => {
     const v = quotes[sym] ? Number(quotes[sym].currentPrice) : NaN;
     return Number.isFinite(v) && v > 0 ? v : Number(fallback || 0);
   }, [quotes]);
   // VULN (kept, BIZ-11): P&L is computed here in the browser.
   const totals = useMemo(() => {
-    let value = 0, cost = 0;
+    let value = 0, cost = 0, pnl = 0;
     openPositions.forEach(p => {
       const qty = Number(p.quantity), avg = Number(p.avgPrice || 0);
-      value += priceOf(p.symbol, avg) * qty;
-      cost += avg * qty;
+      const v = priceOf(p.symbol, avg) * qty;
+      value += v;
+      if (hasCost(p)) { cost += avg * qty; pnl += v - avg * qty; }
     });
-    return { value, cost, pnl: value - cost };
+    return { value, cost, pnl };
   }, [openPositions, priceOf]);
-  const cash = Number(user?.balance || 0);
-  const equity = cash + totals.value;
-  const openOrders = useMemo(() => orders.filter(o => o.status === 'NEW' || o.status === 'PARTIAL').sort((a, b) => b.id - a.id), [orders]);
-  const orderHistory = useMemo(() => orders.slice().sort((a, b) => b.id - a.id).slice(0, 50), [orders]);
+  const cash = Number(user?.balance || 0);                              // MAIN account
+  const stockCash = balanceOf(accounts, 'EQUITIES');                    // buys stocks
+  const cryptoCash = balanceOf(accounts, 'CRYPTO');                     // buys coins
+  const tradingCash = stockCash.available + stockCash.held + cryptoCash.available + cryptoCash.held;
+  const equity = cash + tradingCash + totals.value;
+  const ticketCash = productOf(symbol) === 'crypto' ? cryptoCash.available : stockCash.available;
+  const openOrders = useMemo(() => orders.filter(o => o.status === 'NEW' || o.status === 'PARTIAL'), [orders]);
+  const orderHistory = useMemo(() => orders.slice(0, 50), [orders]);
 
   const selectSymbol = (s) => { setSymbol(s); setPickPrice(null); };
   const spread = q && q.ask != null && q.bid != null ? Number(q.ask) - Number(q.bid) : null;
@@ -234,7 +275,8 @@ function DashboardPage() {
     <main className="vt-page fade-in" style={{ '--vt-page-max': '1680px', paddingTop: '16px' }}>
       {/* ── Account strip ── */}
       <div className="vt-stats" style={{ marginBottom: '12px' }}>
-        <StatCard label="Cash balance" icon={<Wallet size={13} aria-hidden="true" />} value={fmtUSD(cash)} valueSize="20px" />
+        <StatCard label="Cash balance" icon={<Wallet size={13} aria-hidden="true" />} value={fmtUSD(cash)} valueSize="20px"
+          sub={`Main account · stocks ${fmtUSD(stockCash.available)} · crypto ${fmtUSD(cryptoCash.available)}`} />
         <StatCard label="Equity" icon={<Landmark size={13} aria-hidden="true" />} value={fmtUSD(equity)} valueSize="20px"
           sub={`${openPositions.length} position${openPositions.length === 1 ? '' : 's'} · ${fmtUSD(totals.value)} invested`} />
         <StatCard label="Unrealized P&L" icon={<Activity size={13} aria-hidden="true" />} value={fmtPnL(totals.pnl)} valueSize="20px"
@@ -323,14 +365,16 @@ function DashboardPage() {
                 columns={[
                   { key: 'symbol', label: 'Symbol', render: p => <span style={{ fontWeight: 600 }}>{p.symbol}</span> },
                   { key: 'quantity', label: 'Qty', align: 'right', render: p => fmtQty(p.quantity) },
-                  { key: 'avg', label: 'Avg cost', align: 'right', render: p => fmtPrice(p.avgPrice) },
+                  { key: 'avg', label: 'Avg cost', align: 'right', render: p => (hasCost(p) ? fmtPrice(p.avgPrice) : '—') },
                   { key: 'last', label: 'Last', align: 'right', render: p => fmtPrice(priceOf(p.symbol, p.avgPrice)) },
                   { key: 'value', label: 'Value', align: 'right', render: p => fmtUSD(priceOf(p.symbol, p.avgPrice) * Number(p.quantity)) },
                   { key: 'pnl', label: 'P&L', align: 'right', render: p => {
+                    if (!hasCost(p)) return '—';
                     const pnl = (priceOf(p.symbol, p.avgPrice) - Number(p.avgPrice)) * Number(p.quantity);
                     return <span style={{ color: pnlColor(pnl), fontWeight: 600 }}>{fmtPnL(pnl)}</span>;
                   } },
                   { key: 'pct', label: 'P&L %', align: 'right', render: p => {
+                    if (!hasCost(p)) return '—';
                     const avg = Number(p.avgPrice);
                     const pct = avg > 0 ? (priceOf(p.symbol, avg) - avg) / avg * 100 : 0;
                     return <ChangeChip value={pct} size="sm" />;
@@ -341,7 +385,7 @@ function DashboardPage() {
                 ]} />
             )}
             {tab === 'open' && (
-              <DataTable small maxHeight="320px" rowKey={o => o.id} data={openOrders} emptyText="No working orders"
+              <DataTable small maxHeight="320px" rowKey={o => `${o.product}-${o.id}`} data={openOrders} emptyText="No working orders"
                 columns={[
                   { key: 'id', label: 'ID', render: o => <span style={{ ...num, color: colors.textMuted }}>#{o.id}</span> },
                   { key: 'symbol', label: 'Symbol', render: o => <span style={{ fontWeight: 600 }}>{o.symbol}</span> },
@@ -350,11 +394,11 @@ function DashboardPage() {
                   { key: 'filled', label: 'Filled', align: 'right', render: o => `${fmtQty(o.filledQty || 0)} / ${fmtQty(o.quantity)}` },
                   { key: 'status', label: 'Status', render: o => <StatusBadge status={o.status} reason={o.statusReason} /> },
                   { key: 'time', label: 'Placed', render: o => <span style={{ color: colors.textMuted }}>{fmtTime(o.createdAt)}</span> },
-                  { key: 'act', label: '', align: 'right', render: o => <Button variant="gray" size="small" onClick={() => cancelOrder(o.id)}>Cancel</Button> },
+                  { key: 'act', label: '', align: 'right', render: o => <Button variant="gray" size="small" onClick={() => cancelOrder(o.id, o.symbol)}>Cancel</Button> },
                 ]} />
             )}
             {tab === 'history' && (
-              <DataTable small maxHeight="320px" rowKey={o => o.id} data={orderHistory} emptyText="No orders yet"
+              <DataTable small maxHeight="320px" rowKey={o => `${o.product}-${o.id}`} data={orderHistory} emptyText="No orders yet"
                 columns={[
                   { key: 'id', label: 'ID', render: o => <span style={{ ...num, color: colors.textMuted }}>#{o.id}</span> },
                   { key: 'symbol', label: 'Symbol', render: o => <span style={{ fontWeight: 600 }}>{o.symbol}</span> },
@@ -390,7 +434,7 @@ function DashboardPage() {
             onSymbolChange={selectSymbol}
             side={side}
             onSideChange={setSide}
-            balance={user?.balance}
+            balance={ticketCash}
             positions={openPositions}
             busy={busy}
             error={ticketError}

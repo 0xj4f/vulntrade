@@ -7,6 +7,45 @@ published as the Docker images `0xj4f/vulntrade-backend:<version>` / `0xj4f/vuln
 > **Intentional vulnerabilities are not "bugs" in this changelog.** Unless an entry says otherwise, every
 > documented vulnerability and flag keeps working ([docs/vulnerabilities.md](docs/vulnerabilities.md)).
 
+## [1.0.0] — system architecture: one domain per financial product
+
+**Breaking: needs a fresh database** (`make reset` / remove the `pgdata` volume) and moves trading to
+new routes. Every documented vulnerability is kept; 20 new product vulnerabilities (#101-#120).
+See [docs/architecture.md](docs/architecture.md).
+
+### Architecture
+- The backend is split into microservices, all built into the one `vulntrade-backend` image
+  (`SERVICE` picks the jar): **platform** (Kubernetes name `backend`), one **trading gateway** per
+  product (`fx-gateway`, `equities-gateway`, `crypto-gateway`, one codebase) and one **internals**
+  service per product (`fx-internals`, `equities-internals`, `crypto-internals`).
+- **FX (new):** dealer model. Fake banks -> price engine (best price + margin, 2 s quotes) -> the
+  House fills every order. Per-currency balances (USD/EUR/GBP/JPY).
+- **Equities:** broker model. Holds, $0.005/share commission (min $1), market session, and XSIM,
+  the simulated exchange (the existing engine + house market maker).
+- **Crypto:** exchange model. Our own order book and matching engine, the house market-maker bot,
+  maker 0.10% / taker 0.20% fees, coins are money (balances), no house backstop.
+- **Money:** accounts per user (MAIN + FX + EQUITIES + CRYPTO), `balances` per account and asset
+  (available / held), hold -> settle -> release, `POST /api/accounts/transfer`, `GET /api/accounts`.
+  New sign-ups get 10,000 demo USD per product account.
+- **One lock per product** instead of one global matching lock; Redis is the event bus
+  (`events.<product>` -> gateway WebSocket; the platform hears price ticks for alerts).
+- nginx routes `/api/{fx,equities,crypto}/` to the gateways with upstream keep-alive (0.6.0 ran out
+  of source ports at ~1,300 requests/s). Helm `templates/services.yaml`; docker-compose runs all services.
+- Security log lines carry a `service` field; new `transfer_completed` / `transfer_failed` events.
+
+### Moved / removed
+- Removed from the platform: `/api/orders*`, `/api/market/*`, STOMP `/app/trade.placeOrder`,
+  `/app/trade.cancelOrder`, `/app/trade.executeMarket`, `/app/market.*`, `/topic/prices`,
+  `/topic/trades`, `/topic/orderbook*`. Use `/api/{product}/orders`, `/api/{product}/market/*` and
+  the product WebSocket `/api/{product}/ws-sockjs` (`/app/order.place`, `/app/order.cancel`).
+
+### Tests
+- `test/trading_integrity.py` rewritten for 1.0.0 (commission, holds, fees, per-account ledger).
+- New: `test/smoke.py`, `test/product_bugs.py` (every product vulnerability fires),
+  `test/invariants.py` (money conservation), `test/bench/` (Locust load test, 50 users;
+  `summarize.py` turns a result folder into one JSON file).
+- `user-simulator` lists and cancels a returning user's orders on the product routes.
+
 ## [0.6.0] — stable baseline
 
 The release to pin before the next big refactor: trading logic fixed end to end (browser → STOMP/REST →

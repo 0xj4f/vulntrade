@@ -1,0 +1,112 @@
+{{/*
+1.0.0 product services: one entry in .Values.services = one Service + one Deployment.
+All of them run the backend image; the SERVICE env picks the jar (gateway, fx, equities, crypto).
+
+  services:
+    fx-gateway:   { service: gateway, env: { PRODUCT: fx, UPSTREAM: http://fx-internals:8080 } }
+    fx-internals: { service: fx, db: true }
+
+db: true  -> gets the database settings, waits for the platform (backend) to finish seeding,
+             and uses the Recreate strategy (in-memory lock / order book: never two at once).
+*/}}
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "vulntrade.labels" $ | nindent 4 }}
+spec:
+  selector:
+    {{- include "vulntrade.selector" (dict "ctx" $ "component" $name) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "vulntrade.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: 1
+  strategy:
+    type: {{ if $svc.db }}Recreate{{ else }}RollingUpdate{{ end }}
+  selector:
+    matchLabels:
+      {{- include "vulntrade.selector" (dict "ctx" $ "component" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vulntrade.selector" (dict "ctx" $ "component" $name) | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") $ | sha256sum }}
+    spec:
+      {{- if $svc.db }}
+      initContainers:
+        - name: wait-for-platform     # the platform owns the schema and seeds the accounts
+          image: {{ $.Values.waitImage }}
+          command: ["sh", "-c", "until wget -q -O /dev/null http://backend:8080/api/health; do echo waiting for platform; sleep 3; done"]
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "vulntrade.image" (dict "ctx" $ "image" $.Values.backend.image) }}
+          imagePullPolicy: {{ $.Values.backend.image.pullPolicy }}
+          env:
+            - name: SERVICE
+              value: {{ $svc.service | quote }}
+            - name: SERVICE_NAME          # shown in every security log line
+              value: {{ $name | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ $svc.javaToolOptions | quote }}
+            - name: SPRING_REDIS_HOST
+              value: redis
+            - name: SPRING_REDIS_PORT
+              value: "6379"
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "vulntrade.secretName" $ }}, key: JWT_SECRET } }
+            {{- if $svc.db }}
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/{{ $.Values.postgres.database }}"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ $.Values.postgres.username | quote }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "vulntrade.secretName" $ }}, key: POSTGRES_PASSWORD } }
+            {{- end }}
+            {{- range $key, $value := $svc.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: logs
+              mountPath: /var/log/vulntrade
+          {{- with $svc.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- include "vulntrade.logshipper.container" $ | nindent 8 }}
+      volumes:
+        - name: logs
+          emptyDir: {}
+        {{- include "vulntrade.logshipper.volumes" $ | nindent 8 }}
+{{- end }}

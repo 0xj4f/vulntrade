@@ -9,6 +9,27 @@
 #
 # To pin a specific release, replace `:latest` with a version tag (e.g. `:0.5.3`).
 
+# Settings shared by the 1.0.0 product services (see the services below)
+x-product-env: &product-env
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-vulntrade}
+  SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+  SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  SPRING_REDIS_HOST: ${REDIS_HOST:-redis}
+  SPRING_REDIS_PORT: 6379
+  JWT_SECRET: ${JWT_SECRET:-vulntrade-secret}
+  JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+  PLATFORM_URL: http://backend:8080
+
+x-product-service: &product-service
+  image: 0xj4f/vulntrade-backend:latest
+  pull_policy: always
+  depends_on:
+    - backend
+    - redis
+  restart: on-failure
+  networks:
+    - vulntrade-net
+
 services:
   # ============================================================
   # PostgreSQL - VULN: default creds, exposed port
@@ -110,6 +131,81 @@ services:
   # ============================================================
   # Frontend - prebuilt image from Docker Hub
   # ============================================================
+  # 1.0.0 product services: trading gateway + internals per product.
+  # Same backend image; SERVICE picks the jar. No host ports (reach them
+  # through the frontend: /api/fx, /api/equities, /api/crypto).
+  # ============================================================
+  fx-internals:
+    <<: *product-service
+    container_name: vulntrade-fx-internals
+    environment:
+      <<: *product-env
+      SERVICE: fx
+      SERVICE_NAME: fx-internals
+    volumes:
+      - ./logs/fx-internals:/var/log/vulntrade
+
+  fx-gateway:
+    <<: *product-service
+    container_name: vulntrade-fx-gateway
+    environment:
+      <<: *product-env
+      SERVICE: gateway
+      SERVICE_NAME: fx-gateway
+      PRODUCT: fx
+      UPSTREAM: http://fx-internals:8080
+      JAVA_TOOL_OPTIONS: -Dhttp.maxConnections=64 -Dsun.net.http.retryPost=false
+    volumes:
+      - ./logs/fx-gateway:/var/log/vulntrade
+
+  equities-internals:
+    <<: *product-service
+    container_name: vulntrade-equities-internals
+    environment:
+      <<: *product-env
+      SERVICE: equities
+      SERVICE_NAME: equities-internals
+      MARKET_SESSION: OPEN
+    volumes:
+      - ./logs/equities-internals:/var/log/vulntrade
+
+  equities-gateway:
+    <<: *product-service
+    container_name: vulntrade-equities-gateway
+    environment:
+      <<: *product-env
+      SERVICE: gateway
+      SERVICE_NAME: equities-gateway
+      PRODUCT: equities
+      UPSTREAM: http://equities-internals:8080
+      JAVA_TOOL_OPTIONS: -Dhttp.maxConnections=64 -Dsun.net.http.retryPost=false
+    volumes:
+      - ./logs/equities-gateway:/var/log/vulntrade
+
+  crypto-internals:
+    <<: *product-service
+    container_name: vulntrade-crypto-internals
+    environment:
+      <<: *product-env
+      SERVICE: crypto
+      SERVICE_NAME: crypto-internals
+    volumes:
+      - ./logs/crypto-internals:/var/log/vulntrade
+
+  crypto-gateway:
+    <<: *product-service
+    container_name: vulntrade-crypto-gateway
+    environment:
+      <<: *product-env
+      SERVICE: gateway
+      SERVICE_NAME: crypto-gateway
+      PRODUCT: crypto
+      UPSTREAM: http://crypto-internals:8080
+      JAVA_TOOL_OPTIONS: -Dhttp.maxConnections=64 -Dsun.net.http.retryPost=false
+    volumes:
+      - ./logs/crypto-gateway:/var/log/vulntrade
+
+  # ============================================================
   frontend:
     image: 0xj4f/vulntrade-frontend:latest
     container_name: vulntrade-frontend
@@ -118,6 +214,9 @@ services:
       - "${FRONTEND_PORT:-3001}:80"
     depends_on:
       - backend
+      - fx-gateway
+      - equities-gateway
+      - crypto-gateway
     networks:
       - vulntrade-net
 

@@ -11,13 +11,14 @@ export const REASON_TEXT = {
 };
 
 /**
- * Listens to /user/queue/order-updates for the whole session: toasts fills of resting
- * orders and engine cancels, refreshes the balance, and re-broadcasts each update as a
- * `vt:order-update` window event so pages can refresh what they show.
+ * Listens to /user/queue/order-updates on the equities and crypto sockets for the whole
+ * session: toasts fills of resting orders and engine cancels, refreshes the balance, and
+ * re-broadcasts each update as a `vt:order-update` window event so pages can refresh what
+ * they show.
  */
 export default function OrderUpdateToaster() {
   const { refreshUser } = useAuth();
-  useStomp('/user/queue/order-updates', (u) => {
+  const onUpdate = (u) => {
     if (!u || u.type !== 'ORDER_UPDATE') return;
     window.dispatchEvent(new CustomEvent('vt:order-update', { detail: u }));
     refreshUser && refreshUser();
@@ -31,6 +32,8 @@ export default function OrderUpdateToaster() {
       const why = REASON_TEXT[u.reason];
       (why ? toast.warn : toast.info)(`${what} cancelled${why ? ` — ${why}` : ''}`);
     }
-  });
+  };
+  useStomp('/user/queue/order-updates', onUpdate, 'equities');
+  useStomp('/user/queue/order-updates', onUpdate, 'crypto');
   return null;
 }

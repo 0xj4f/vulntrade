@@ -6,12 +6,13 @@ import { ChangeChip, ThemeToggle } from './ui';
 import { colors, errorBanner, num, successBanner, type } from '../styles/shared';
 import { fmtPrice } from '../utils/format';
 
-/** Live mini-ticker for the signed-out brand panel (public prices, polled). */
+/** Live mini-ticker for the signed-out brand panel (public prices, polled): 3 stocks + 3 coins. */
 function MiniTicker() {
   const [rows, setRows] = useState([]);
   useEffect(() => {
     let alive = true;
-    const load = () => api.get('/api/market/prices').then(res => { if (alive) setRows((res.data || []).slice(0, 6)); }).catch(() => {});
+    const first3 = (product) => api.get(`/api/${product}/market/prices`).then(res => (res.data || []).slice(0, 3)).catch(() => []);
+    const load = () => Promise.all([first3('equities'), first3('crypto')]).then(([stocks, coins]) => { if (alive) setRows([...stocks, ...coins]); });
     load();
     const iv = setInterval(load, 5000);
     return () => { alive = false; clearInterval(iv); };

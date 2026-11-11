@@ -54,7 +54,13 @@ CREATE TABLE IF NOT EXISTS orders (
     client_order_id VARCHAR(100),     -- VULN: not UNIQUE
     status_reason VARCHAR(32),        -- why the engine closed it (INSUFFICIENT_FUNDS, NO_LIQUIDITY, ...)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    executed_at TIMESTAMP
+    executed_at TIMESTAMP,
+    -- 1.0.0: which product service owns the order, and the money still locked for it
+    product VARCHAR(10),              -- FX / EQUITIES / CRYPTO
+    hold_left DECIMAL(20,8) DEFAULT 0, -- money still held for this open order (released when it closes)
+    fee DECIMAL(20,8) DEFAULT 0,      -- commission / fees charged so far
+    commission DECIMAL(20,8),         -- equities: commission the client asked for (VULN EQ-3), NULL = standard
+    fee_role VARCHAR(5)               -- crypto: MAKER / TAKER chosen by the client (VULN CR-3), NULL = engine decides
 );
 
 -- Trades table
@@ -65,7 +71,10 @@ CREATE TABLE IF NOT EXISTS trades (
     symbol VARCHAR(20) NOT NULL,
     quantity DECIMAL(20,8) NOT NULL,
     price DECIMAL(20,8) NOT NULL,
-    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    product VARCHAR(10),              -- 1.0.0: FX / EQUITIES / CRYPTO
+    buy_fee DECIMAL(20,8) DEFAULT 0,  -- fee paid by the buyer (USD)
+    sell_fee DECIMAL(20,8) DEFAULT 0  -- fee paid by the seller (USD)
 );
 
 -- Positions table
@@ -85,7 +94,9 @@ CREATE TABLE IF NOT EXISTS positions (
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
-    type VARCHAR(20) NOT NULL,        -- DEPOSIT/WITHDRAW/TRADE/ADJUSTMENT
+    account_id INTEGER,               -- 1.0.0: NULL = MAIN account (users.balance), else accounts.id
+    asset VARCHAR(10) DEFAULT 'USD',  -- 1.0.0: USD / EUR / BTC ...
+    type VARCHAR(20) NOT NULL,        -- DEPOSIT/WITHDRAW/ADJUSTMENT/TRANSFER_IN/TRANSFER_OUT/TRADE_BUY/TRADE_SELL/TRADE_LEG/HOUSE_SEED
     amount DECIMAL(20,8) NOT NULL,
     balance_after DECIMAL(20,8),
     description TEXT,
@@ -124,7 +135,8 @@ CREATE TABLE IF NOT EXISTS symbols (
     ask DECIMAL(20,8),
     volume BIGINT DEFAULT 0,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_tradable BOOLEAN DEFAULT true
+    is_tradable BOOLEAN DEFAULT true,
+    asset_class VARCHAR(10)           -- 1.0.0: EQUITY / CRYPTO / FX (which product service owns it)
 );
 
 -- Password reset tokens
@@ -136,9 +148,44 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- ============================================================
+-- 1.0.0: one account per product, money per account + asset
+-- ============================================================
+
+-- Every user has MAIN + FX + EQUITIES + CRYPTO. MAIN's cash stays in users.balance.
+CREATE TABLE IF NOT EXISTS accounts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    product VARCHAR(10) NOT NULL,     -- MAIN / FX / EQUITIES / CRYPTO
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, product)
+);
+
+-- Money in a product account, per asset. Shares are NOT here: they stay in positions.
+CREATE TABLE IF NOT EXISTS balances (
+    account_id INTEGER REFERENCES accounts(id),
+    asset VARCHAR(10) NOT NULL,       -- USD / EUR / GBP / JPY / BTC / ETH ...
+    available DECIMAL(24,8) NOT NULL DEFAULT 0,   -- usable now
+    held DECIMAL(24,8) NOT NULL DEFAULT 0,        -- locked for open orders
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (account_id, asset)
+);
+
+-- Moving money between your own accounts (MAIN <-> FX / EQUITIES / CRYPTO)
+CREATE TABLE IF NOT EXISTS transfers (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    from_product VARCHAR(10) NOT NULL,
+    to_product VARCHAR(10) NOT NULL,
+    asset VARCHAR(10) NOT NULL,
+    amount DECIMAL(24,8) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes (minimal - intentionally missing some for performance vuln)
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_symbol ON orders(symbol);
 CREATE INDEX idx_trades_symbol ON trades(symbol);
 CREATE INDEX idx_positions_user_id ON positions(user_id);
 CREATE INDEX idx_transactions_user_id ON transactions(user_id);
+CREATE INDEX idx_orders_product_status ON orders(product, status);   -- each product service scans its open orders

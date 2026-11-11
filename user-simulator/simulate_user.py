@@ -265,30 +265,39 @@ def maybe_upload_photo(page, identity):
 # ---------------------------------------------------------------------------
 # Returning user - close some open orders.
 # ---------------------------------------------------------------------------
-def my_open_order_ids(page):
-    """The user's OWN open orders, read the same way the app does (GET /api/orders)."""
-    orders = page.evaluate("""async () => {
+PRODUCTS = ("equities", "crypto")   # products with an order book (FX fills at once, nothing stays open)
+
+
+def my_open_orders(page):
+    """The user's OWN open orders as (product, id), read the same way the app does
+    (GET /api/equities/orders and GET /api/crypto/orders, one per product gateway)."""
+    orders = page.evaluate("""async (products) => {
         const t = localStorage.getItem('token');
-        const r = await fetch('/api/orders', { headers: { Authorization: 'Bearer ' + t } });
-        return await r.json();
-    }""")
-    open_states = ("NEW", "OPEN", "PARTIALLY_FILLED")
-    return [str(o["id"]) for o in orders if o.get("status") in open_states]
+        const out = [];
+        for (const p of products) {
+            const r = await fetch('/api/' + p + '/orders', { headers: { Authorization: 'Bearer ' + t } });
+            const list = await r.json();
+            if (Array.isArray(list)) list.forEach(o => out.push([p, o]));
+        }
+        return out;
+    }""", list(PRODUCTS))
+    open_states = ("NEW", "PARTIAL")
+    return [(p, str(o["id"])) for p, o in orders if o.get("status") in open_states]
 
 
-def cancel_order(page, order_id):
-    """Cancel one of my orders via the app's own endpoint, from the browser session.
+def cancel_order(page, product, order_id):
+    """Cancel one of my orders via the product's REST cancel, from the browser session.
     (The dashboard's "My Orders" table has no cancel button; the only per-row Cancel is
     in the Order Book, which lists every user's orders and doesn't show all of mine, so
     we call the same REST cancel the app exposes - scoped to my own order ids.)"""
     return page.evaluate(
-        """async (id) => {
+        """async ([product, id]) => {
             const t = localStorage.getItem('token');
-            const r = await fetch('/api/orders/' + id + '/cancel',
+            const r = await fetch('/api/' + product + '/orders/' + id + '/cancel',
                                   { method: 'POST', headers: { Authorization: 'Bearer ' + t } });
             return r.status;
         }""",
-        order_id,
+        [product, order_id],
     )
 
 
@@ -297,16 +306,16 @@ def close_some_orders(page):
     page.wait_for_selector("select", timeout=15000)
     page.wait_for_timeout(2500)
 
-    open_ids = my_open_order_ids(page)
-    if not open_ids:
+    open_orders = my_open_orders(page)
+    if not open_orders:
         log("no open orders to close")
         return
-    k = max(1, round(len(open_ids) * random.uniform(CLOSE_MIN, CLOSE_MAX)))
-    chosen = random.sample(open_ids, k)
-    log(f"closing {k} of {len(open_ids)} of my open orders")
-    for oid in chosen:
-        status = cancel_order(page, oid)
-        log(f"  cancelled order #{oid} (HTTP {status})")
+    k = max(1, round(len(open_orders) * random.uniform(CLOSE_MIN, CLOSE_MAX)))
+    chosen = random.sample(open_orders, k)
+    log(f"closing {k} of {len(open_orders)} of my open orders")
+    for product, oid in chosen:
+        status = cancel_order(page, product, oid)
+        log(f"  cancelled {product} order #{oid} (HTTP {status})")
         human_pause(0.6, 1.5)
 
 

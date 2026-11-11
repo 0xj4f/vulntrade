@@ -9,13 +9,15 @@ IMAGE_TAG        ?= local
 BUILD_CONTEXT    ?= ..
 CHART            := helm/vulntrade
 VALUES           ?= $(CHART)/values-minikube.yaml
+# Extra values file(s), e.g. EXTRA_VALUES="-f $(CHART)/values-nodeport.yaml"
+EXTRA_VALUES     ?=
 FRONTEND_PORT    ?= 3001
 BACKEND_PORT     ?= 8085
 ADMINER_PORT     ?= 8081
 ORBSTACK_DOCKER_HOST ?= unix://$(HOME)/.orbstack/run/docker.sock
 # Contexts this Makefile will touch. VulnTrade is intentionally vulnerable — never let a typo
 # deploy it to a shared or cloud cluster. Override with ALLOWED_CONTEXTS="..." if you must.
-ALLOWED_CONTEXTS ?= minikube orbstack docker-desktop kind-vulntrade
+ALLOWED_CONTEXTS ?= minikube vulntrade-arch orbstack docker-desktop kind-vulntrade
 
 KUBECTL := kubectl --context $(KUBE_CONTEXT) -n $(NAMESPACE)
 HELM    := helm --kube-context $(KUBE_CONTEXT) -n $(NAMESPACE)
@@ -52,12 +54,12 @@ orbstack-build:
 
 ## Deploy ------------------------------------------------------------------
 install: check-context
-	$(HELM) upgrade --install $(RELEASE) $(CHART) --create-namespace -f $(VALUES) \
+	$(HELM) upgrade --install $(RELEASE) $(CHART) --create-namespace -f $(VALUES) $(EXTRA_VALUES) \
 	  --set backend.image.tag=$(IMAGE_TAG) --set frontend.image.tag=$(IMAGE_TAG) \
 	  --wait --timeout 12m
 
 minikube-up: build minikube-load
-	$(MAKE) install KUBE_CONTEXT=minikube VALUES=$(CHART)/values-minikube.yaml
+	$(MAKE) install KUBE_CONTEXT=$(MINIKUBE_PROFILE) VALUES=$(CHART)/values-minikube.yaml
 
 orbstack-up: orbstack-build
 	$(MAKE) install KUBE_CONTEXT=orbstack VALUES=$(CHART)/values-orbstack.yaml

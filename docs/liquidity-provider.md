@@ -1,5 +1,9 @@
 ## Liquidity Provider & House Market Maker
 
+> **1.0.0:** trading moved out of the single backend. This page describes the engine that now lives in
+> **equities-internals** (XSIM, with holds and commission); crypto has its own exchange and FX is a dealer.
+> Start with [architecture.md](architecture.md).
+
 **Files:** `backend/src/main/java/com/vulntrade/service/LiquidityProviderService.java`,
 `HouseMarketMakerService.java`, `MatchingEngineService.java`
 

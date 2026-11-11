@@ -1,0 +1,80 @@
+package com.vulntrade.service;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Admin actions (halt / resume / set price) are still started on the platform (/app/admin.*,
+ * where they are logged and announced), then passed to the product service that owns the symbol:
+ *
+ *   symbols.asset_class   FX -> fx-internals    EQUITY -> equities-internals    CRYPTO -> crypto-internals
+ *
+ * Only the symbol (and price) is passed on, never the free-text "reason": that is logged once,
+ * here, so the Log4Shell lab chain stays in one JVM.
+ */
+@Component
+public class ProductAdmin {
+
+    private static final Logger log = LoggerFactory.getLogger(ProductAdmin.class);
+
+    /** Asset classes owned by a product service (all of them since 1.0.0). */
+    private static final Set<String> SPLIT = Set.of("FX", "EQUITY", "CRYPTO");
+
+    private final JdbcTemplate jdbc;
+    private final RestTemplate http;
+
+    public ProductAdmin(JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(2_000);
+        factory.setReadTimeout(10_000);
+        this.http = new RestTemplate(factory);
+    }
+
+    /** The internals service of a symbol ("fx", "equities", "crypto"), or null for an unknown symbol. */
+    public String owner(String symbol) {
+        List<String> classes = jdbc.queryForList("SELECT asset_class FROM symbols WHERE symbol = ?", String.class,
+                symbol == null ? "" : symbol.toUpperCase());
+        String assetClass = classes.isEmpty() ? null : classes.get(0);
+        if (assetClass == null || !SPLIT.contains(assetClass)) {
+            return null;
+        }
+        return "EQUITY".equals(assetClass) ? "equities" : assetClass.toLowerCase();
+    }
+
+    /**
+     * Pass an admin action on to the owning service. Returns false for an unknown symbol. A refusal by the service (e.g. "Price must be greater than 0") is thrown back as
+     * IllegalArgumentException, so the admin gets the same error as before the split.
+     */
+    public boolean forward(String symbol, String action, Map<String, Object> body) {
+        String owner = owner(symbol);
+        if (owner == null) {
+            return false;
+        }
+        try {
+            http.postForObject("http://" + owner + "-internals:8080/internal/admin/" + action, body, Map.class);
+        } catch (org.springframework.web.client.HttpClientErrorException refused) {
+            throw new IllegalArgumentException(refusalMessage(refused.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.warn("Admin {} for {} not delivered to {}-internals: {}", action, symbol, owner, e.getMessage());
+            throw new IllegalStateException(owner + "-internals is not reachable, " + action + " not applied");
+        }
+        return true;
+    }
+
+    private static String refusalMessage(String body) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(body).path("error").asText(body);
+        } catch (Exception e) {
+            return body;
+        }
+    }
+}

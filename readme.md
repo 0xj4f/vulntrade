@@ -69,9 +69,10 @@ docker compose -f docker-compose.prod.yml up -d
 
 The `prod` compose file pulls `0xj4f/vulntrade-backend:latest` and `0xj4f/vulntrade-frontend:latest` instead of building from source. Everything else — ports, DB seed, flags, vulnerabilities — is identical. To pin to a specific release, replace `:latest` with a version tag.
 
-> **Stable release: `0.6.0`.** Pin `:0.6.0` for the baseline before the upcoming refactor — fixed trading
-> logic, the redesigned UI and the Kubernetes manifests. See [CHANGELOG.md](CHANGELOG.md) (upgrading from an
-> older volume? reseed with `docker compose down -v`).
+> **Release `1.0.0`: one domain per financial product.** FX, Equities and Crypto each have their own
+> trading gateway and internals service; the platform keeps users, money and admin. See
+> [docs/architecture.md](docs/architecture.md) and [CHANGELOG.md](CHANGELOG.md). 1.0.0 needs a **fresh
+> database** (`docker compose down -v`). `:0.6.0` is the last single-backend release.
 
 A port already taken on your machine? Every host port can be moved, e.g.
 `FRONTEND_PORT=3011 JMX_PORT=19090 docker compose up` (`BACKEND_PORT`, `ADMINER_PORT`, `DEBUG_PORT`,

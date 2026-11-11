@@ -1,5 +1,9 @@
 # VulnTrade - Vulnerable Trading Platform
 
+> **1.0.0:** trading moved out of the single backend. This page describes the engine that now lives in
+> **equities-internals** (XSIM, with holds and commission); crypto has its own exchange and FX is a dealer.
+> Start with [architecture.md](architecture.md).
+
 ## Project Overview
 A deliberately vulnerable trading application for red team training.
 Covers: WebSocket/STOMP exploitation, Java backend attacks, React frontend
